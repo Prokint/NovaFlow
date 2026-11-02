@@ -81,7 +81,7 @@ export interface DesktopElectronBuilderConfig {
   readonly publish: readonly [{
     readonly provider: 'github'
     readonly owner: 'Prokint'
-    readonly repo: 'NavaFlow'
+    readonly repo: 'NovaFlow'
     readonly releaseType: 'release'
   }] | null
 }

@@ -48,7 +48,7 @@ describe('desktop update feed', () => {
     expect(load(await readFile(join(directory, 'app-update.yml'), 'utf8'))).toEqual({ ...DESKTOP_UPDATE_PUBLISH, updaterCacheDirName: 'novaflow-updater' })
     await expect(verifyDesktopAppUpdateConfig(directory)).resolves.toMatchObject({ provider: 'github', owner: 'Prokint' })
     await writeFile(join(directory, 'app-update.yml'), dump({ ...DESKTOP_UPDATE_PUBLISH, repo: 'other', updaterCacheDirName: 'x' }))
-    await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/must set repo to NavaFlow/u)
+    await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/must set repo to NovaFlow/u)
     await writeFile(join(directory, 'app-update.yml'), dump({ ...DESKTOP_UPDATE_PUBLISH }))
     await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/updaterCacheDirName/u)
     await rm(join(directory, 'app-update.yml'))

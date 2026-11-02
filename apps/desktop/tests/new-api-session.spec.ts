@@ -43,6 +43,7 @@ describe('New API session boundary', () => {
     const calls: string[] = []
     const fetcher: typeof fetch = async (input) => {
       calls.push(String(input))
+      if (String(input).endsWith('/groups')) return Response.json({ success: true, data: { default: { desc: 'Default', ratio: 1 } } })
       return new Response(JSON.stringify(String(input).endsWith('/refresh') ? response() : { success: true }), {
         headers: { 'content-type': 'application/json', 'set-cookie': `new_api_refresh=${refresh}; HttpOnly; Path=/api/user/auth` },
       })
@@ -51,7 +52,7 @@ describe('New API session boundary', () => {
     await transport.exchangeBrowserSession(refresh, new AbortController().signal)
     origin = 'https://unrelated.example'
     await transport.revoke(refresh)
-    expect(calls).toEqual(['https://issuer.example/api/user/auth/refresh', 'https://issuer.example/api/user/auth/logout'])
+    expect(calls).toEqual(['https://issuer.example/api/user/auth/refresh', 'https://issuer.example/api/user/self/groups', 'https://issuer.example/api/user/auth/logout'])
   })
 })
 
@@ -74,8 +75,8 @@ async function fixture() {
       res.end(JSON.stringify({ success: true, data: { token_type: 'Bearer', access_token: `dashboard-memory-${rotation}`,
         access_expires_at: Math.floor(Date.now() / 1000) + 900, session: { sid, expires_at: expires }, user: self } }))
     } else if (record.path === '/api/user/self') res.end(JSON.stringify({ success: true, data: self }))
-    else if (record.path === '/api/user/self/groups') res.end(JSON.stringify({ success: true, data: { default: { desc: 'Default', ratio: 1 } } }))
-    else if (record.path === '/api/user/models?group=default') res.end(JSON.stringify({ success: true, data: ['chat-model', 'embedding-model'] }))
+    else if (record.path === '/api/user/self/groups') res.end(JSON.stringify({ success: true, data: { default: { desc: 'Default', ratio: 1 }, vip: { desc: 'VIP', ratio: 2 } } }))
+    else if (record.path === '/api/user/models?group=default' || record.path === '/api/user/models?group=vip') res.end(JSON.stringify({ success: true, data: ['chat-model', 'embedding-model'] }))
     else if (record.path === '/api/pricing') res.end(JSON.stringify({ success: true, data: [
       { model_name: 'chat-model', supported_endpoint_types: ['openai'] },
       { model_name: 'embedding-model', supported_endpoint_types: ['openai-embedding'] },
@@ -141,6 +142,7 @@ it('signs in, discovers account models, streams chat and restores on restart wit
   const snapshot = runtime.getSnapshot()
   expect(snapshot.accountMode).toBe('site-session')
   expect(snapshot.account.status).toBe('signed-in')
+  expect(snapshot.account).toMatchObject({ canSelectGroup: true, allowedGroups: ['default', 'vip'] })
   expect(snapshot.catalog?.models.map(model => model.id)).toEqual(['chat-model'])
   expect(snapshot.wallet).toMatchObject({ remaining: '100000', accountUsage: '75' })
   expect(JSON.stringify(snapshot)).not.toContain('dashboard-memory')
@@ -160,4 +162,27 @@ it('signs in, discovers account models, streams chat and restores on restart wit
   expect(f.saved()).toBeNull()
   expect(f.requests.at(-1)?.path).toBe('/api/user/auth/logout')
   expect(f.requests.some(row => row.path.startsWith('/api/token') || row.path.startsWith('/api/desktop'))).toBe(false)
+})
+
+it('switches the native routing group, binds inference to it and preserves it across refresh and restart', async () => {
+  const f = await fixture()
+  const runtime = f.createRuntime()
+  await runtime.startSignIn()
+  await vi.waitFor(() => { expect(runtime.getSnapshot().catalogStatus).toBe('ready') })
+  expect(await runtime.selectGroup({ group: 'forbidden', autoGroups: null, crossGroupRetry: false })).toBe('group_unavailable')
+  expect(runtime.getSnapshot().account.status).toBe('signed-in')
+  expect(await runtime.selectGroup({ group: 'vip', autoGroups: null, crossGroupRetry: false })).toBe('selected')
+  await vi.waitFor(() => { expect(runtime.getSnapshot().catalog).toMatchObject({ group: 'vip' }) })
+  const result = await runtime.invoke('/v1/chat/completions', { model: 'chat-model', messages: [], stream: true })
+  await result.response.text()
+  expect(JSON.parse(f.requests.findLast(row => row.path === '/pg/chat/completions')!.body)).toMatchObject({ group: 'vip' })
+  await expect(runtime.invoke('/v1/chat/completions', { model: 'chat-model', group: 'default' })).rejects.toThrow('routing overrides')
+  expect(f.saved()?.group).toBe('vip')
+  await runtime.refreshAccount()
+  expect(runtime.getSnapshot().account).toMatchObject({ group: 'vip' })
+  await runtime.dispose()
+  const restarted = f.createRuntime()
+  await restarted.restore()
+  await vi.waitFor(() => { expect(restarted.getSnapshot().catalog).toMatchObject({ group: 'vip' }) })
+  expect(f.requests.some(row => row.path === '/api/user/models?group=vip')).toBe(true)
 })

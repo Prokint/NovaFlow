@@ -28,6 +28,8 @@ export interface RelayBrokerOptions {
   readonly maxRequestBytes: number
   /** Native-owned protocol path mapping; renderers and model requests cannot choose a target. */
   readonly endpointPath?: (endpoint: DesktopEndpoint) => string
+  /** Site-session gateways take the native-selected routing group in JSON; desktop grants bind it server-side. */
+  readonly bindRequestGroup?: boolean
 }
 
 /** One relay result and the exact group snapshot admitted before the request began. */
@@ -91,7 +93,7 @@ export class NovaFlowRelayBroker {
     if (typeof encoded !== 'string' || Buffer.byteLength(encoded, 'utf8') > this.options.maxRequestBytes) {
       throw new Error('novaflow: model request is too large')
     }
-    const body = encoded
+    let body = encoded
     const request: unknown = JSON.parse(body)
     payload = request
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)
@@ -117,6 +119,10 @@ export class NovaFlowRelayBroker {
     if (access.deviceSessionId !== selection.deviceSessionId || access.group !== selection.group
       || access.accessToken.length === 0 || (/[\u0000-\u001f\u007f]/u.test(access.accessToken) || /\s/u.test(access.accessToken))) {
       throw new Error('novaflow: access grant does not match selection')
+    }
+    if (this.options.bindRequestGroup) {
+      body = JSON.stringify({ ...payload, group: selection.group })
+      if (Buffer.byteLength(body, 'utf8') > this.options.maxRequestBytes) throw new Error('novaflow: model request is too large')
     }
     signal?.throwIfAborted()
     const headers: Record<string, string> = {

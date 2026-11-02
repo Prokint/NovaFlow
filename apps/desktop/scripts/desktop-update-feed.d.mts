@@ -2,7 +2,7 @@
 export const DESKTOP_UPDATE_PUBLISH: {
   readonly provider: 'github'
   readonly owner: 'Prokint'
-  readonly repo: 'NavaFlow'
+  readonly repo: 'NovaFlow'
   readonly releaseType: 'release'
 }
 

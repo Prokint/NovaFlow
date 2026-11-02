@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-fs'
-import { resolveImageAttachmentAccess, type AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
+import { resolveImageAttachmentAccess, type AdapterRegistrationHandle, type LlmModelInfo } from '@deepseek-ai/dsh-llm'
 import { LEGACY_DESKTOP_BRAND } from './brand-compat.ts'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 export { LEGACY_DESKTOP_BRAND } from './brand-compat.ts'
@@ -71,6 +71,14 @@ const routes = [
   { id: 'novaflow-responses', name: 'NovaFlow Responses', endpoint: '/v1/responses', api: 'openai-responses' },
   { id: 'novaflow-anthropic', name: 'NovaFlow Messages', endpoint: '/v1/messages', api: 'anthropic-messages' },
 ] as const
+
+/** Legacy IDs resolve existing calls but do not advertise duplicate choices in model menus. */
+class NovaFlowAdapter extends PiAiAdapter {
+  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    if (routes.some(route => provider === route.id.replace('novaflow', LEGACY_DESKTOP_BRAND))) return Promise.resolve([])
+    return super.listModels(provider)
+  }
+}
 
 const isCapacityField = (value: unknown): value is NovaFlowCapacityField => value === 'contextWindow' || value === 'maxOutputTokens'
 
@@ -457,16 +465,17 @@ export function installNovaFlowProvider(
     for (const route of routes) {
       const profile = resolvedProfiles.get(route.id)
       const piProvider = profile?.piProvider
-      if (profile !== undefined && piProvider !== undefined) {
+      if (profile !== undefined) {
         const id = route.id.replace('novaflow', LEGACY_DESKTOP_BRAND)
-        resolvedProfiles.set(id, { ...profile, piProvider: { ...piProvider, id,
-          getModels: () => piProvider.getModels().map(model => ({ ...model, provider: id })) } })
+        resolvedProfiles.set(id, { ...profile, provider: id,
+          ...piProvider === undefined ? {} : { piProvider: { ...piProvider, id,
+            getModels: () => piProvider.getModels().map(model => ({ ...model, provider: id })) } } })
       }
     }
     return resolvedProfiles
   }
   let resolved = profiles(current)
-  const adapter = new PiAiAdapter({
+  const adapter = new NovaFlowAdapter({
     profiles: () => resolved,
     resolveApiKey: () => Promise.resolve(current.localCapability),
     auth: {

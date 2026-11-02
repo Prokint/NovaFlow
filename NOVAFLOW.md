@@ -1,12 +1,12 @@
 # NovaFlow 开发与维护
 
-本仓库名为 **NavaFlow**，产品名称为 **NovaFlow**，基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 及继承的桌面分支开发。原 Git 历史、MIT 许可证和第三方声明均保留；Logo 使用已选定的黑灰交扣图形。
+本仓库名为 **NovaFlow**，产品名称为 **NovaFlow**，基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 及继承的桌面分支开发。原 Git 历史、MIT 许可证和第三方声明均保留；Logo 使用已选定的黑灰交扣图形。
 
 ## 当前定制
 
 应用名称、原生菜单、账号页、首页、提示文案、内部模块与打包程序统一为 NovaFlow。桌面、侧栏、首页、浏览器与安装器图标从 `design/brand/novaflow-symbol-transparent.png` 生成；可运行 `node customizations/novaflow/prepare-logo.mjs` 后重新执行桌面文档中的 Linux 和托盘渲染命令。新安装默认使用 `~/.novaflow` 与 Electron 的 `novaflow` 用户数据目录；已有安装继续读取原目录与设置文件，不搬移、改写或清除账号和会话。旧会话的模型路由通过兼容层调用，新选择保存为 NovaFlow 路由。原 DeepSeek Harness 的 `~/.dsh` 和系统中的 `dsh` 命令不需要修改。与旧版共用数据时，切换前先退出另一份应用。
 
-源码的更新检查和打包更新配置指向 `Prokint/NavaFlow`。发布工作流、更新解析器与安装器统一使用 `v*` 标签和 `novaflow-*` 文件名，应用标识为 `com.novaflow.desktop`。私有仓库没有匿名可读的 Release 时不会提供更新。
+源码的更新检查和打包更新配置指向 `Prokint/NovaFlow`。发布工作流、更新解析器与安装器统一使用 `v*` 标签和 `novaflow-*` 文件名，应用标识为 `com.novaflow.desktop`。私有仓库没有匿名可读的 Release 时不会提供更新。
 
 ## 开发
 
@@ -39,6 +39,8 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk pnpm run build
 | `customizations/novaflow/rebrand-installed.py` | 最初本地安装包品牌修改的可复现工具 |
 
 ## 自有中转站
+
+账号页面支持切换 `/api/user/self/groups` 返回的具体可用分组，显示各组倍率与说明；切换后重读模型目录。选择保存在账号的加密会话记录中，刷新和重启后恢复，不修改服务器上的账号所属组。主进程在 `/pg/chat/completions` 请求中加入选中的 `group`，仍拒绝调用方传入路由覆盖。站点登录模式不提供自定义 Auto 顺序或跨组重试。
 
 默认服务为 `https://api.lanjiaotrade.com`。点击“登录 NovaFlow → 登录并使用模型”，在隔离的登录窗口完成站点原有的账号验证后，应用自动加载该账号当前分组可用的模型；尚未选过模型时自动选择第一个可用模型。账号模式复用站点的登录会话和 `/pg/chat/completions`，无需创建、复制或填写 API Key。当前账号模式支持 Chat Completions 的流式对话和工具调用。
 

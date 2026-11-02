@@ -5,7 +5,7 @@ import type { NovaFlowWalletQuota } from './account-info.ts'
 import type { DesktopCatalogView } from './catalog-controller.ts'
 import type { DesktopEndpoint, DesktopModel } from './catalog.ts'
 import type { RelayAccess } from './relay-broker.ts'
-import type { GroupSelection } from './group-policy.ts'
+import { allowedGroup, type DesktopGroup, type GroupSelection } from './group-policy.ts'
 
 /** HttpOnly cookie issued only after the site's complete login verification succeeds. */
 export const NEW_API_REFRESH_COOKIE = 'new_api_refresh'
@@ -101,6 +101,7 @@ export function parseNewApiGrant(value: unknown, refreshToken: string, now: numb
 /** Native-only transport for the site's existing login session; it creates no model or management API key. */
 export class NewApiSessionTransport implements NovaFlowAuthTransport {
   private readonly sessionOrigins = new Map<string, string>()
+  private readonly sessionGroups = new Map<string, readonly string[]>()
   /**
    * @param origin - Selected, normalized site origin.
    * @param fetcher - Main-process HTTP transport.
@@ -117,6 +118,12 @@ export class NewApiSessionTransport implements NovaFlowAuthTransport {
    * @returns A validated account grant held only by the native broker.
    */
   async exchangeBrowserSession(refreshToken: string, signal: AbortSignal, loginOrigin?: string): Promise<AccessGrant> {
+    return this.exchangeSession(refreshToken, signal, loginOrigin)
+  }
+
+  private async exchangeSession(
+    refreshToken: string, signal: AbortSignal, loginOrigin?: string, selectedGroup?: string,
+  ): Promise<AccessGrant> {
     const sid = newApiSessionId(refreshToken)
     const issuer = this.sessionOrigins.get(refreshToken)
     if (issuer !== undefined && loginOrigin !== undefined && issuer !== loginOrigin) throw new NovaFlowAuthError('invalid_response')
@@ -136,7 +143,17 @@ export class NewApiSessionTransport implements NovaFlowAuthTransport {
       }, 262144)
       const grant = parseNewApiGrant(value, successor, this.now())
       this.sessionOrigins.set(grant.refreshToken, origin)
-      return grant
+      try {
+        const groups = await readNewApiGroups(this.fetcher, origin, grant, signal)
+        const group = allowedGroup(selectedGroup ?? grant.group, groups.map(item => item.name))
+        this.sessionGroups.set(grant.refreshToken, groups.map(item => item.name))
+        return { ...grant, group, allowedGroups: groups.map(item => item.name), canSelectGroup: true }
+      } catch (_discoveryError) {
+        // Rotation consumed the predecessor: revoke the uninstalled successor and require a fresh login.
+        try { await this.revoke(grant.refreshToken) }
+        catch (_revokeError) { /* Local admission still fails closed when remote cleanup is unavailable. */ }
+        throw new NovaFlowAuthError('invalid_grant')
+      }
     } catch (error) {
       if (error instanceof NovaFlowUnauthorizedError) throw new NovaFlowAuthError('invalid_grant')
       if (error instanceof NovaFlowAuthError) throw error
@@ -144,13 +161,21 @@ export class NewApiSessionTransport implements NovaFlowAuthTransport {
     }
   }
 
-  refresh(grant: RefreshGrant, signal: AbortSignal): Promise<AccessGrant> { return this.exchangeBrowserSession(grant.refreshToken, signal) }
+  refresh(grant: RefreshGrant, signal: AbortSignal): Promise<AccessGrant> {
+    return this.exchangeSession(grant.refreshToken, signal, undefined, grant.group)
+  }
   authorize(_request: AuthorizationRequest, _signal: AbortSignal): Promise<{ authorizationUrl: string; requestId: string }> {
     return Promise.reject(new NovaFlowAuthError('invalid_response'))
   }
   exchange(_request: CodeExchange, _signal: AbortSignal): Promise<AccessGrant> { return Promise.reject(new NovaFlowAuthError('invalid_response')) }
-  selectGroup(_grant: RefreshGrant, _selection: GroupSelection, _signal: AbortSignal): Promise<AccessGrant> {
-    return Promise.reject(new NovaFlowAuthError('group_unavailable'))
+  selectGroup(grant: RefreshGrant, selection: GroupSelection, signal: AbortSignal): Promise<AccessGrant> {
+    if (selection.group === 'auto' || selection.autoGroups !== null || selection.crossGroupRetry) {
+      return Promise.reject(new NovaFlowAuthError('group_unavailable'))
+    }
+    if (!this.sessionGroups.get(grant.refreshToken)?.includes(selection.group)) {
+      return Promise.reject(new NovaFlowAuthError('group_unavailable'))
+    }
+    return this.exchangeSession(grant.refreshToken, signal, undefined, concreteGroup(selection.group))
   }
   cancel(_requestId: string, _codeVerifier: string): Promise<void> { return Promise.resolve() }
 
@@ -163,7 +188,10 @@ export class NewApiSessionTransport implements NovaFlowAuthTransport {
     }, 8192)
     if (record(value).success !== true) throw new NovaFlowAuthError('invalid_response')
     for (const [token, issuer] of this.sessionOrigins) {
-      if (issuer === origin && newApiSessionId(token) === sid) this.sessionOrigins.delete(token)
+      if (issuer === origin && newApiSessionId(token) === sid) {
+        this.sessionOrigins.delete(token)
+        this.sessionGroups.delete(token)
+      }
     }
   }
 }
@@ -183,6 +211,21 @@ function data(value: unknown): unknown {
 function request(access: RelayAccess, signal: AbortSignal): RequestInit {
   return { headers: { authorization: `Bearer ${access.accessToken}`, accept: 'application/json' },
     redirect: 'error', credentials: 'omit', cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }
+}
+
+/** Decode the concrete routing groups the authenticated site permits for this account. */
+function parseNewApiGroups(value: unknown): readonly DesktopGroup[] {
+  return Object.entries(record(data(value))).filter(([name]) => name !== 'auto').map(([name, value]) => {
+    const group = record(value)
+    if (typeof group.ratio !== 'number' || !Number.isFinite(group.ratio) || group.ratio < 0) throw new NovaFlowAuthError('invalid_response')
+    return { name: concreteGroup(name), description: text(group.desc, 1024, true), ratio: group.ratio }
+  })
+}
+
+async function readNewApiGroups(
+  fetcher: typeof fetch, origin: string, access: RelayAccess, signal: AbortSignal,
+): Promise<readonly DesktopGroup[]> {
+  return parseNewApiGroups(await readAccountJson(fetcher, `${origin}/api/user/self/groups`, request(access, signal), 262144))
 }
 
 /**
@@ -207,9 +250,9 @@ export async function readNewApiCatalog(fetcher: typeof fetch, origin: string, a
   const [selfJson, groupsJson, modelsJson, pricingJson] = await Promise.all(reads).catch(async (error: unknown) => {
     controller.abort(); await Promise.allSettled(reads); throw error
   })
-  if (record(data(selfJson)).group !== access.group) throw new NovaFlowAuthError('group_unavailable')
-  const group = record(record(data(groupsJson))[access.group])
-  if (typeof group.ratio !== 'number' || !Number.isFinite(group.ratio) || group.ratio < 0) throw new NovaFlowAuthError('invalid_response')
+  concreteGroup(record(data(selfJson)).group)
+  const groups = parseNewApiGroups(groupsJson)
+  allowedGroup(access.group, groups.map(item => item.name))
   const names = data(modelsJson)
   const pricing = record(pricingJson)
   if (!Array.isArray(names) || names.length > 10000 || pricing.success !== true || !Array.isArray(pricing.data)) {
@@ -224,7 +267,7 @@ export async function readNewApiCatalog(fetcher: typeof fetch, origin: string, a
     id, endpoints: ['/v1/chat/completions'], contextWindow: defaults.contextWindow, maxOutputTokens: defaults.maxOutputTokens,
     capacityDefaults: ['contextWindow', 'maxOutputTokens'],
   }))
-  return { group: access.group, groups: [{ name: access.group, description: text(group.desc, 1024, true), ratio: group.ratio }],
+  return { group: access.group, groups,
     auto: null, routeGroups: [access.group], models }
 }
 

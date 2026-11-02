@@ -1,6 +1,6 @@
 # NovaFlow
 
-NovaFlow 是面向电商智能体二次开发维护的桌面项目。本仓库名为 NavaFlow，基于 DeepSeek Harness 及继承的桌面分支开发，保留原 Git 历史、许可证与已有用户数据，使用选定的 NovaFlow Logo。
+NovaFlow 是面向电商智能体二次开发维护的桌面项目。本仓库名为 NovaFlow，基于 DeepSeek Harness 及继承的桌面分支开发，保留原 Git 历史、许可证与已有用户数据，使用选定的 NovaFlow Logo。
 
 开发与维护请先阅读 [NovaFlow 维护说明](NOVAFLOW.md)。当前模型服务仍沿用原配置，自有中转站尚未接入。下方 npm 命令运行上游 CLI；运行本仓库的 NovaFlow 请使用源码方式。
 
@@ -39,8 +39,8 @@ npx @deepseek-ai/dsh web
 如需从仓库源码运行：
 
 ```sh
-git clone https://github.com/Prokint/NavaFlow.git
-cd NavaFlow
+git clone https://github.com/Prokint/NovaFlow.git
+cd NovaFlow
 pnpm install
 pnpm run build
 pnpm dsh web

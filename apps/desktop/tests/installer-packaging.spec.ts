@@ -23,7 +23,7 @@ describe('installer preparation preserves application dependencies', () => {
     expect(config).toMatchObject({ productName: 'NovaFlow', protocols: [], extraMetadata: { name: 'novaflow' } })
     // Development AppImages stay out of the feed; installers read this repository's GitHub Releases.
     expect(config.publish).toEqual(platform === 'linux' ? null
-      : [{ provider: 'github', owner: 'Prokint', repo: 'NavaFlow', releaseType: 'release' }])
+      : [{ provider: 'github', owner: 'Prokint', repo: 'NovaFlow', releaseType: 'release' }])
     expect(config.artifactName.startsWith('novaflow-')).toBe(true)
     expect(() => createElectronBuilderConfig({ DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: platform }, platform, 'x64'))
       .toThrow('separate application identifier')

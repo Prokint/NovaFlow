@@ -4,6 +4,7 @@ import { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
 import LlmRuntime, { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { buildModelCatalog } from '@deepseek-ai/dsh-api-session-controller/src/catalog.ts'
 import {
   NOVAFLOW_IDENTITY, novaFlowDefaultSelection, installNovaFlowIdentity, installNovaFlowProvider,
   parseNovaFlowHostConfiguration, LEGACY_DESKTOP_BRAND, type NovaFlowCapacitySaver,
@@ -29,6 +30,44 @@ function configuration(baseURL = 'http://127.0.0.1:43210') {
 }
 
 describe('native Host configuration', () => {
+  it('publishes only NovaFlow model groups while retaining legacy call routing', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    disposers.push(() => ctx.fiber.dispose())
+    const initial = configuration()
+    initial.models.push({ ...initial.models[0]!, id: 'fixture-model-2' })
+    let update: ((configuration: unknown) => void) | undefined
+    await ctx.plugin((scope) => { update = installNovaFlowProvider(scope, initial, refuseSave) })
+    const selection = { provider: 'novaflow-chat', model: 'fixture-model' }
+    const catalog = await buildModelCatalog(ctx, selection)
+    expect(catalog.failures).toEqual([])
+    expect(catalog.groups.map(group => ({ id: group.id, models: group.models.map(model => model.id) })))
+      .toEqual([{ id: 'novaflow-chat', models: ['fixture-model', 'fixture-model-2'] }])
+    expect((await ctx.llm.prepareCall({ provider: `${LEGACY_DESKTOP_BRAND}-chat`, model: 'fixture-model' })).config.model)
+      .toBe('fixture-model')
+    update?.({ ...initial, revision: 3, models: [] })
+    expect(await buildModelCatalog(ctx, selection)).toMatchObject({ groups: [], failures: [] })
+    update?.({ ...initial, revision: 4 })
+    expect((await buildModelCatalog(ctx, selection)).groups.map(group => group.id)).toEqual(['novaflow-chat'])
+  })
+  it('lists empty legacy protocol routes across catalog refreshes without losing their adapter profiles', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    disposers.push(() => ctx.fiber.dispose())
+    let update: ((configuration: unknown) => void) | undefined
+    await ctx.plugin((scope) => { update = installNovaFlowProvider(scope, configuration(), refuseSave) })
+    for (const protocol of ['responses', 'anthropic']) {
+      expect(await ctx.llm.listModels(`${LEGACY_DESKTOP_BRAND}-${protocol}`)).toEqual([])
+    }
+    update?.({ ...configuration(), revision: 3, models: [] })
+    for (const protocol of ['chat', 'responses', 'anthropic']) {
+      expect(await ctx.llm.listModels(`${LEGACY_DESKTOP_BRAND}-${protocol}`)).toEqual([])
+    }
+    update?.({ ...configuration(), revision: 4 })
+    expect(await ctx.llm.listModels(`${LEGACY_DESKTOP_BRAND}-chat`)).toEqual([])
+    expect(await ctx.llm.listModels(`${LEGACY_DESKTOP_BRAND}-responses`)).toEqual([])
+    expect(await ctx.llm.listModels(`${LEGACY_DESKTOP_BRAND}-anthropic`)).toEqual([])
+  })
   it('lets a saved model override the shipped deployment defaults', () => {
     const deployment = loadOverlayPatches('test', fileURLToPath(new URL('../src/novaflow.patch.yml', import.meta.url)))
     const next = novaFlowDefaultSelection({ ...configuration(), autoSelectModel: true },
@@ -81,7 +120,7 @@ describe('native Host configuration', () => {
     const call = await ctx.llm.prepareCall({ provider: 'novaflow-chat', model: 'fixture-model' })
     expect(call.retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 0 })
     const previousProvider = `${LEGACY_DESKTOP_BRAND}-chat`
-    expect(await ctx.llm.listModels(previousProvider)).toMatchObject([{ provider: previousProvider, id: 'fixture-model' }])
+    expect(await ctx.llm.listModels(previousProvider)).toEqual([])
     const previousCall = await ctx.llm.prepareCall({ provider: previousProvider, model: 'fixture-model' })
     expect(previousCall.config).toMatchObject({ provider: previousProvider, model: 'fixture-model' })
     expect(novaFlowDefaultSelection(configuration(), { provider: previousProvider, model: 'fixture-model' }))

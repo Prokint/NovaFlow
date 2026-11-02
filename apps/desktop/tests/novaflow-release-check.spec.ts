@@ -10,6 +10,12 @@ import {
 const release = (tag: string, body = '') => ({ tag_name: tag, html_url: `${NOVAFLOW_RELEASES_URL}/tag/${tag}`, body })
 
 describe('NovaFlow release check', () => {
+  it('uses the renamed repository for release checks and release-page validation', () => {
+    expect(NOVAFLOW_RELEASES_URL).toBe('https://github.com/Prokint/NovaFlow/releases')
+    expect(NOVAFLOW_LATEST_RELEASE_API).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/latest')
+    expect(parseRelease({ tag_name: 'v0.0.2', html_url: 'https://github.com/Prokint/NovaFlow/releases/tag/v0.0.2', body: '' }))
+      .toMatchObject({ version: '0.0.2' })
+  })
   it('orders versions by SemVer precedence', () => {
     expect(compareVersions('0.2.0', '0.1.9')).toBe(1)
     expect(compareVersions('0.1.0', '0.1.0-beta.2')).toBe(1)
@@ -57,7 +63,7 @@ describe('NovaFlow release check', () => {
       .mockResolvedValueOnce(Response.json(release('novaflow-v0.3.0', '- 其他')))
     const signal = new AbortController().signal
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).resolves.toBe('• 修复')
-    expect(fetcher.mock.calls[0]?.[0]).toBe('https://api.github.com/repos/Prokint/NavaFlow/releases/tags/v0.2.0')
+    expect(fetcher.mock.calls[0]?.[0]).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/tags/v0.2.0')
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).rejects.toThrow('another release')
     await expect(fetchNovaFlowReleaseNotes('../x', fetcher, signal)).rejects.toThrow('invalid version')
   })
@@ -69,7 +75,7 @@ describe('NovaFlow release check', () => {
       .mockResolvedValueOnce(new Response(null, { status: 403 }))
     const signal = new AbortController().signal
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).resolves.toBe('• legacy')
-    expect(fetcher.mock.calls[1]?.[0]).toBe('https://api.github.com/repos/Prokint/NavaFlow/releases/tags/novaflow-v0.2.0')
+    expect(fetcher.mock.calls[1]?.[0]).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/tags/novaflow-v0.2.0')
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).rejects.toThrow('GitHub answered 403')
     expect(fetcher).toHaveBeenCalledTimes(3)
   })

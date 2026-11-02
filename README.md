@@ -1,6 +1,6 @@
 # NovaFlow
 
-NovaFlow is a desktop agent project maintained for ecommerce customization. This repository is named NavaFlow and builds on DeepSeek Harness and the inherited desktop fork. Original Git history, licenses, and existing user data are retained; the product uses the selected NovaFlow logo.
+NovaFlow is a desktop agent project maintained for ecommerce customization. This repository is named NovaFlow and builds on DeepSeek Harness and the inherited desktop fork. Original Git history, licenses, and existing user data are retained; the product uses the selected NovaFlow logo.
 
 Start with the [NovaFlow maintenance guide](NOVAFLOW.md). Model access still uses the existing service configuration; a custom relay is not connected yet. The npm command below runs the upstream CLI; use the source instructions for this repository.
 
@@ -35,8 +35,8 @@ The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it
 To run from a repository checkout:
 
 ```sh
-git clone https://github.com/Prokint/NavaFlow.git
-cd NavaFlow
+git clone https://github.com/Prokint/NovaFlow.git
+cd NovaFlow
 pnpm install
 pnpm run build
 pnpm dsh web

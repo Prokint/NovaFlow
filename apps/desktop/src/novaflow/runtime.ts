@@ -82,6 +82,7 @@ export class NovaFlowDesktopRuntime {
     this.account = new NovaFlowAuthBroker({ ...options, origin, onChange: (snapshot) => { this.accountChanged(snapshot) } })
     const access = () => this.account.getRequestCredentials()
     this.relay = new NovaFlowRelayBroker({ access, origin, fetch: options.fetch, maxRequestBytes: options.maxRequestBytes,
+      bindRequestGroup: options.accountMode === 'site-session',
       ...options.endpointPath === undefined ? {} : { endpointPath: options.endpointPath } })
     this.catalog = new NovaFlowCatalogController({ access, origin, fetch: options.fetch, relay: this.relay,
       ...options.readCatalog === undefined ? {} : { readCatalog: options.readCatalog } })

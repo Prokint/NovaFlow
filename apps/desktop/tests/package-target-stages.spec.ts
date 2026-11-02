@@ -93,7 +93,7 @@ it.each([
   expect(writeFileSync).toHaveBeenCalledOnce()
   expect(JSON.parse(vi.mocked(writeFileSync).mock.calls[0]![1] as string)).toEqual({
     schemaVersion: 1, target: name, version: productVersion,
-    updates: { provider: 'github', owner: 'Prokint', repo: 'NavaFlow', releaseType: 'release', files: [metadata, 'installer'] } })
+    updates: { provider: 'github', owner: 'Prokint', repo: 'NovaFlow', releaseType: 'release', files: [metadata, 'installer'] } })
 })
 
 it('records no release when the update files do not match the installers', async () => {

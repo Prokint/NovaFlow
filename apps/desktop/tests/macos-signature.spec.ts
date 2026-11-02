@@ -28,7 +28,7 @@ const RELEASE_ENVIRONMENT = {
   APPLE_API_KEY_ID: 'TEST123456',
   APPLE_API_ISSUER: '11111111-2222-3333-4444-555555555555',
 }
-const GITHUB_RELEASES = [{ provider: 'github', owner: 'Prokint', repo: 'NavaFlow', releaseType: 'release' }]
+const GITHUB_RELEASES = [{ provider: 'github', owner: 'Prokint', repo: 'NovaFlow', releaseType: 'release' }]
 
 function portablePath(value: string): string {
   return value.replaceAll('\\', '/')

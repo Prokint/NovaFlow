@@ -26,7 +26,7 @@ describe('Linux development package configuration', () => {
     expect(config.linux).toMatchObject({ executableName: 'novaflow', target: ['AppImage', 'deb'], executableArgs: [] })
     expect(config.appImage.executableArgs).toEqual([])
     expect(config.deb).toEqual({ packageName: 'novaflow', executableArgs: [] })
-    expect(config.publish).toEqual([{ provider: 'github', owner: 'Prokint', repo: 'NavaFlow', releaseType: 'release' }])
+    expect(config.publish).toEqual([{ provider: 'github', owner: 'Prokint', repo: 'NovaFlow', releaseType: 'release' }])
     expect(config.detectUpdateChannel).toBe(false)
     expect(config.extraMetadata).not.toHaveProperty('novaflowUpdateMode')
     expect(config.protocols).toEqual([])

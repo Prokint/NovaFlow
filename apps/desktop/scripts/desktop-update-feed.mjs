@@ -13,7 +13,7 @@ import { dump, load } from 'js-yaml'
 export const DESKTOP_UPDATE_PUBLISH = Object.freeze({
   provider: 'github',
   owner: 'Prokint',
-  repo: 'NavaFlow',
+  repo: 'NovaFlow',
   releaseType: 'release',
 })
 

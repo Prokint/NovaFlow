@@ -261,7 +261,7 @@ Windows 安装器在启动时和选定目标目录后检查应用是否正在运
 3. 每个目标由一个任务在 GitHub 托管运行器上以标签版本打包未签名安装包：`windows-2025`（NSIS）、`macos-15`（Apple Silicon 的 DMG 与 ZIP）、`macos-15-intel`（Intel 的 DMG 与 ZIP）。每个任务在上传前用安装包校验自己的更新元数据。
 4. 发布任务合并两个架构的 `latest-mac.yml`，再次校验每个元数据文件，写入 `SHA256SUMS`，并以全部安装包、`latest.yml`、`latest-mac.yml`、blockmap、带标签版本的源码 ZIP 与 `SHA256SUMS` 运行 `gh release create`。所有附件上传成功前保持草稿，公开发布前必须具备源码、Windows EXE 与两个架构的 DMG。发布标题与标签一致。版本号含 `-` 时发布为预发布版本。
 
-Release 正文依次为对应的 CHANGELOG 小节、一行 `<!-- novaflow:install-notes -->`，以及未签名构建的安装说明。应用把该标记之前的文字作为更新日志显示，因此小节内容不得包含该标记。打包从不发布：electron-builder 始终以 `--publish never` 运行，只有发布任务拥有 `contents: write`。安装包通过 electron-builder 为 `github` provider（`Prokint/NavaFlow`，发布类型 `release`）嵌入的 `app-update.yml` 读取更新，使用固定的 `latest` 通道文件；GitHub 不会把预发布版本报告为最新发布。
+Release 正文依次为对应的 CHANGELOG 小节、一行 `<!-- novaflow:install-notes -->`，以及未签名构建的安装说明。应用把该标记之前的文字作为更新日志显示，因此小节内容不得包含该标记。打包从不发布：electron-builder 始终以 `--publish never` 运行，只有发布任务拥有 `contents: write`。安装包通过 electron-builder 为 `github` provider（`Prokint/NovaFlow`，发布类型 `release`）嵌入的 `app-update.yml` 读取更新，使用固定的 `latest` 通道文件；GitHub 不会把预发布版本报告为最新发布。
 
 ### 未签名安装包
 

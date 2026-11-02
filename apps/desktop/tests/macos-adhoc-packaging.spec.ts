@@ -58,7 +58,7 @@ describe('macOS afterPack', () => {
   })
 
   it('keeps the configuration electron-builder already wrote for DMG and ZIP targets', async () => {
-    const written = 'owner: Prokint\nrepo: NavaFlow\nprovider: github\nreleaseType: release\nupdaterCacheDirName: novaflow-updater\n'
+    const written = 'owner: Prokint\nrepo: NovaFlow\nprovider: github\nreleaseType: release\nupdaterCacheDirName: novaflow-updater\n'
     await writeFile(join(resources, 'app-update.yml'), written)
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     await createElectronBuilderConfig(UNSIGNED, 'darwin', 'arm64').afterPack(context() as never)

@@ -3,10 +3,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 
 /** Public release page users download installers from. */
-export const NOVAFLOW_RELEASES_URL = 'https://github.com/Prokint/NavaFlow/releases'
+export const NOVAFLOW_RELEASES_URL = 'https://github.com/Prokint/NovaFlow/releases'
 
 /** GitHub API endpoint for the latest stable (non-prerelease, non-draft) release. */
-export const NOVAFLOW_LATEST_RELEASE_API = 'https://api.github.com/repos/Prokint/NavaFlow/releases/latest'
+export const NOVAFLOW_LATEST_RELEASE_API = 'https://api.github.com/repos/Prokint/NovaFlow/releases/latest'
 
 /** Release-body marker before the installation instructions the release workflow appends for the download page. */
 export const RELEASE_INSTALL_NOTES_MARKER = '<!-- novaflow:install-notes -->'
@@ -149,10 +149,10 @@ export async function fetchNovaFlowReleaseNotes(
   signal: AbortSignal,
 ): Promise<string> {
   if (parseVersion(version) === undefined) throw new Error(`novaflow release: invalid version ${JSON.stringify(version)}`)
-  const url = `https://api.github.com/repos/Prokint/NavaFlow/releases/tags/${TAG_PREFIX}${version}`
+  const url = `https://api.github.com/repos/Prokint/NovaFlow/releases/tags/${TAG_PREFIX}${version}`
   let response = await fetcher(url, { headers: GITHUB_HEADERS, redirect: 'error', signal })
   if (response.status === 404) {
-    response = await fetcher(`https://api.github.com/repos/Prokint/NavaFlow/releases/tags/${LEGACY_TAG_PREFIX}${version}`,
+    response = await fetcher(`https://api.github.com/repos/Prokint/NovaFlow/releases/tags/${LEGACY_TAG_PREFIX}${version}`,
       { headers: GITHUB_HEADERS, redirect: 'error', signal })
   }
   if (!response.ok) throw new Error(`novaflow release: GitHub answered ${String(response.status)}`)

@@ -953,7 +953,7 @@ describe('DeepSeek e2e workflow', () => {
     const workflow = loadWorkflow('.github/workflows/ci-master.yml')
     for (const name of ['serial-linux-selfhosted', 'serial-windows']) {
       const job = workflowJob(workflow, name)
-      for (const repository of ['Prokint/NavaFlow', 'deepseek-harness/deepseek-harness']) {
+      for (const repository of ['Prokint/NovaFlow', 'deepseek-harness/deepseek-harness']) {
         const enabled: unknown = runInNewContext(String(job.if), {
           github: { repository, event_name: 'push', ref: 'refs/heads/master' },
         }, { timeout: 1000 })
@@ -1220,7 +1220,7 @@ describe('NovaFlow desktop release workflow', () => {
       VERSION: '${{ needs.prepare.outputs.version }}',
       DSH_DESKTOP_PACKAGE_SETTINGS: 'environment',
       DSH_DESKTOP_APP_ID: 'com.novaflow.desktop',
-      DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/Prokint/NavaFlow',
+      DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/Prokint/NovaFlow',
     })
     expect(runs('package')).toContain('pnpm --dir apps/desktop run "${{ matrix.command }}" --build-version "$VERSION"')
     expect(runs('package')).toContain('pnpm install --frozen-lockfile')

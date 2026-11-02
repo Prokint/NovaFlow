@@ -117,7 +117,7 @@ jobs:
       DSH_DESKTOP_PACKAGE_SETTINGS: environment
       DSH_DESKTOP_APP_ID: com.novaflow.desktop
       DSH_DESKTOP_LINUX_MAINTAINER: Prokint <Prokint@users.noreply.github.com>
-      DSH_DESKTOP_LINUX_HOMEPAGE: https://github.com/Prokint/NavaFlow
+      DSH_DESKTOP_LINUX_HOMEPAGE: https://github.com/Prokint/NovaFlow
       # Signing later (no secret is required today):
       # - macOS: add DSH_DESKTOP_MACOS_SIGNING_IDENTITY and DSH_DESKTOP_MACOS_TEAM_ID,
       #   CSC_LINK (a p12 file decoded from a base64 secret into $RUNNER_TEMP) with
