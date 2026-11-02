@@ -198,15 +198,13 @@ Release automation uses fixed target commands so runtime preparation, dsh prepar
 
 ```sh
 pnpm run package:desktop:mac:arm64
-pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
 pnpm run package:desktop:mac:arm64:unsigned
-pnpm run package:desktop:mac:x64:unsigned
 pnpm run package:desktop:win:x64:unsigned
 pnpm run package:linux:x64
 ```
 
-The macOS arm64 commands require Apple Silicon. The macOS x64 commands run on Intel macOS or Apple Silicon with Rosetta. The Windows x64 commands require Windows x64, and the Linux x64 command requires Linux x64 ([Linux packages](#linux-packages)).
+The macOS commands require Apple Silicon; Intel Macs are not supported. The Windows x64 commands require Windows x64, and the Linux x64 command requires Linux x64 ([Linux packages](#linux-packages)).
 
 Both release and local unsigned macOS DMGs use LZMA compression (`dmg.format: 'ULMO'`) in [the electron-builder configuration](scripts/electron-builder-config.mjs). A [build-time patch](../../patches/app-builder-lib@26.17.0.patch) adds this format to the pinned builder's validation and TypeScript declarations.
 
@@ -256,8 +254,10 @@ Pushing a `v<version>` tag (or a legacy `novaflow-v<version>` tag), or running [
 
 1. Add a `## <version>` section to the root [CHANGELOG.md](../../CHANGELOG.md) and merge it before tagging. The workflow stops before building when the tag is not `v<SemVer>` or the section is missing.
 2. Push the tag, for example `git tag v0.1.0 && git push origin v0.1.0`.
-3. One job per target packages unsigned installers with the tag version on GitHub-hosted runners: `windows-2025` (NSIS), `macos-15` (Apple Silicon DMG and ZIP), `macos-15-intel` (Intel DMG and ZIP). Each job verifies its update metadata against its installers before uploading them.
-4. The release job merges the two architectures' `latest-mac.yml`, verifies every metadata file again, writes `SHA256SUMS`, and runs `gh release create` with all installers, `latest.yml`, `latest-mac.yml`, the blockmaps, a tagged source ZIP and `SHA256SUMS`. The release stays a draft until all uploads succeed; source, Windows EXE and both DMG files are required before publication. Its title matches the tag. A version containing `-` becomes a prerelease.
+3. One job per target packages unsigned installers with the tag version on GitHub-hosted runners: `windows-2025` (NSIS) and `macos-15` (Apple Silicon DMG and ZIP). Each job verifies its update metadata against its installers before uploading them.
+4. The release job verifies every metadata file again, writes `SHA256SUMS`, and uploads all installers, update metadata, blockmaps and a tagged source ZIP. The release stays a draft until all uploads succeed; source, Windows EXE and the Apple Silicon DMG are required before publication. Its title matches the tag. A version containing `-` becomes a prerelease.
+
+A manual run may set `reuse_run_id` to publish existing Windows and Apple Silicon artifacts without rebuilding. It checks out the existing release tag and verifies that the reused run belongs to this workflow and the same source commit before downloading artifacts.
 
 The release body is the matching CHANGELOG section, then the line `<!-- novaflow:install-notes -->`, then installation instructions for unsigned builds. The application shows the text before that marker as the release notes, so the section must not contain the marker. Packaging never publishes: electron-builder always runs with `--publish never`, and only the release job holds `contents: write`. Installers read updates through the `app-update.yml` that electron-builder embeds for the `github` provider (`Prokint/NovaFlow`, release type `release`), using the fixed `latest` channel files; GitHub never reports a prerelease as the latest release.
 

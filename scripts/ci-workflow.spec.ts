@@ -1214,7 +1214,6 @@ describe('NovaFlow desktop release workflow', () => {
     expect(strategy.matrix.include.map(entry => isRecord(entry) ? [entry.target, entry.runner, entry.command] : [])).toEqual([
       ['win-x64', 'windows-2025', 'package:win:x64:unsigned'],
       ['mac-arm64', 'macos-15', 'package:mac:arm64:unsigned'],
-      ['mac-x64', 'macos-15-intel', 'package:mac:x64:unsigned'],
     ])
     expect(job.env).toMatchObject({
       VERSION: '${{ needs.prepare.outputs.version }}',
@@ -1227,9 +1226,21 @@ describe('NovaFlow desktop release workflow', () => {
     expect(runs('package')).toContain('collect-release-assets.mjs --version "$VERSION"')
   })
 
+  it('can reuse artifacts only from the tagged source commit and the desktop release workflow', () => {
+    expect(workflowJob(workflow, 'package').if).toBe('${{ !inputs.reuse_run_id }}')
+    expect(workflowJob(workflow, 'release').if).toContain("needs.package.result == 'skipped'")
+    expect(runs('release')).toContain('--jq .head_sha')
+    expect(runs('release')).toContain('--jq .path')
+    expect(runs('release')).toContain('"$RELEASE_COMMIT"')
+    expect(steps('release').find(step => step.uses === 'actions/download-artifact@v8')?.with)
+      .toMatchObject({ 'run-id': '${{ inputs.reuse_run_id || github.run_id }}', 'github-token': '${{ github.token }}' })
+    expect(JSON.stringify(workflowJob(workflow, 'package'))).not.toContain('mac-x64')
+    expect(runs('release')).not.toContain('novaflow-desktop-mac-x64')
+  })
+
   it('grants write access only to the job that creates the release, without repository secrets', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' })
-    expect(workflowJob(workflow, 'release').permissions).toEqual({ contents: 'write' })
+    expect(workflowJob(workflow, 'release').permissions).toEqual({ contents: 'write', actions: 'read' })
     for (const name of ['prepare', 'package']) expect(workflowJob(workflow, name)).not.toHaveProperty('permissions')
     expect(JSON.stringify(workflow)).not.toContain('secrets.')
   })
@@ -1252,7 +1263,7 @@ describe('NovaFlow desktop release workflow', () => {
     expect(release).toContain('--title "$TAG"')
     expect(release).toContain('gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false')
     expect(release).toContain('git archive --format=zip')
-    for (const suffix of ['source.zip', 'win-x64-unsigned.exe', 'mac-arm64-unsigned.dmg', 'mac-x64-unsigned.dmg']) {
+    for (const suffix of ['source.zip', 'win-x64-unsigned.exe', 'mac-arm64-unsigned.dmg']) {
       expect(release).toContain(`novaflow-$VERSION-${suffix}`)
     }
     expect(release).toContain('--notes-file dist/release-notes.md')

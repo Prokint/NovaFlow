@@ -200,15 +200,13 @@ pnpm run package:desktop
 
 ```sh
 pnpm run package:desktop:mac:arm64
-pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
 pnpm run package:desktop:mac:arm64:unsigned
-pnpm run package:desktop:mac:x64:unsigned
 pnpm run package:desktop:win:x64:unsigned
 pnpm run package:linux:x64
 ```
 
-macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64，Linux x64 命令要求 Linux x64（见 [Linux 安装包](#linux-packages)）。
+macOS 命令要求 Apple Silicon；不支持 Intel Mac。Windows x64 命令要求 Windows x64，Linux x64 命令要求 Linux x64（见 [Linux 安装包](#linux-packages)）。
 
 macOS 正式发布和本地未签名 DMG 都通过 [electron-builder 配置](scripts/electron-builder-config.mjs)中的 `dmg.format: 'ULMO'` 使用 LZMA 压缩。[构建时补丁](../../patches/app-builder-lib@26.17.0.patch)为固定版本 builder 的校验规则和 TypeScript 声明添加此格式。
 
@@ -258,8 +256,10 @@ Windows 安装器在启动时和选定目标目录后检查应用是否正在运
 
 1. 在仓库根目录的 [CHANGELOG.md](../../CHANGELOG.md) 中添加 `## <版本>` 小节并在打标签前合并。标签不是 `v<SemVer>` 或缺少该小节时，工作流在构建前停止。
 2. 推送标签，例如 `git tag v0.1.0 && git push origin v0.1.0`。
-3. 每个目标由一个任务在 GitHub 托管运行器上以标签版本打包未签名安装包：`windows-2025`（NSIS）、`macos-15`（Apple Silicon 的 DMG 与 ZIP）、`macos-15-intel`（Intel 的 DMG 与 ZIP）。每个任务在上传前用安装包校验自己的更新元数据。
-4. 发布任务合并两个架构的 `latest-mac.yml`，再次校验每个元数据文件，写入 `SHA256SUMS`，并以全部安装包、`latest.yml`、`latest-mac.yml`、blockmap、带标签版本的源码 ZIP 与 `SHA256SUMS` 运行 `gh release create`。所有附件上传成功前保持草稿，公开发布前必须具备源码、Windows EXE 与两个架构的 DMG。发布标题与标签一致。版本号含 `-` 时发布为预发布版本。
+3. 每个目标由一个任务在 GitHub 托管运行器上以标签版本打包未签名安装包：`windows-2025`（NSIS）和 `macos-15`（Apple Silicon 的 DMG 与 ZIP）。每个任务在上传前用安装包校验自己的更新元数据。
+4. 发布任务再次验证所有元数据文件，写入 `SHA256SUMS`，上传所有安装包、更新元数据、blockmap 与带标签源码 ZIP。所有附件上传成功前保持草稿；源码、Windows EXE 与 Apple Silicon DMG 缺一不可。标题与标签一致。版本中包含 `-` 时发布为预发布版。
+
+手动运行时可填写 `reuse_run_id`，复用已有 Windows 和 Apple Silicon 产物而不重新构建。流程检出现有发布标签，并在下载附件前确认被复用的运行属于本工作流且对应同一个源码提交。
 
 Release 正文依次为对应的 CHANGELOG 小节、一行 `<!-- novaflow:install-notes -->`，以及未签名构建的安装说明。应用把该标记之前的文字作为更新日志显示，因此小节内容不得包含该标记。打包从不发布：electron-builder 始终以 `--publish never` 运行，只有发布任务拥有 `contents: write`。安装包通过 electron-builder 为 `github` provider（`Prokint/NovaFlow`，发布类型 `release`）嵌入的 `app-update.yml` 读取更新，使用固定的 `latest` 通道文件；GitHub 不会把预发布版本报告为最新发布。
 
