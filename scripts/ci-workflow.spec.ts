@@ -1259,6 +1259,8 @@ describe('NovaFlow desktop release workflow', () => {
     expect(release).toContain('desktop-release-notes.mjs notes --version "$VERSION"')
     expect(release).toContain('if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi')
     expect(release).toContain('gh release create "$TAG" dist/release/*')
+    expect(release).toContain('gh release upload "$TAG" dist/release/*')
+    expect(release).toContain('The release is already public; refusing to overwrite it.')
     expect(release).toContain('--target "$RELEASE_COMMIT" --draft')
     expect(release).toContain('--title "$TAG"')
     expect(release).toContain('gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false')
