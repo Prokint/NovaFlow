@@ -1,0 +1,103 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NovaFlow Ark reasoning > publishes exact alias capabilities after refresh, retaining model ids and vendor defaults 1`] = `
+[
+  {
+    "id": "DeepSeek V4.1 Flash 1017 Eco",
+    "provider": "novaflow-chat",
+    "reasoning": {
+      "defaultEffort": "high",
+      "efforts": [
+        {
+          "id": "off",
+          "name": "Off",
+        },
+        {
+          "id": "low",
+          "name": "Low",
+        },
+        {
+          "id": "high",
+          "name": "High",
+        },
+        {
+          "id": "max",
+          "name": "Max",
+        },
+      ],
+    },
+  },
+  {
+    "id": "Kimi K3.1 Pro",
+    "provider": "novaflow-chat",
+    "reasoning": {
+      "defaultEffort": "max",
+      "efforts": [
+        {
+          "id": "low",
+          "name": "Low",
+        },
+        {
+          "id": "high",
+          "name": "High",
+        },
+        {
+          "id": "max",
+          "name": "Max",
+        },
+      ],
+    },
+  },
+  {
+    "id": "deepseek-v4-1-flash-economy-261017",
+    "provider": "novaflow-chat",
+    "reasoning": {
+      "defaultEffort": "high",
+      "efforts": [
+        {
+          "id": "off",
+          "name": "Off",
+        },
+        {
+          "id": "low",
+          "name": "Low",
+        },
+        {
+          "id": "high",
+          "name": "High",
+        },
+        {
+          "id": "max",
+          "name": "Max",
+        },
+      ],
+    },
+  },
+  {
+    "id": "kimi-k3-1-pro-261024",
+    "provider": "novaflow-chat",
+    "reasoning": {
+      "defaultEffort": "max",
+      "efforts": [
+        {
+          "id": "low",
+          "name": "Low",
+        },
+        {
+          "id": "high",
+          "name": "High",
+        },
+        {
+          "id": "max",
+          "name": "Max",
+        },
+      ],
+    },
+  },
+  {
+    "id": "Kimi K3.2 Pro",
+    "provider": "novaflow-chat",
+    "reasoning": undefined,
+  },
+]
+`;

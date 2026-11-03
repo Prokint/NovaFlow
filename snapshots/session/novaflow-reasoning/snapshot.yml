@@ -1,0 +1,8 @@
+version: 1
+scenario: novaflow-reasoning
+profile: headless
+composition: default
+recording: authored
+header:
+  class: novaflow-reasoning
+  pin: true

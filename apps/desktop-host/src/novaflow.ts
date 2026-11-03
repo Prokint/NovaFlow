@@ -7,6 +7,7 @@ import { LEGACY_DESKTOP_BRAND } from './brand-compat.ts'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 export { LEGACY_DESKTOP_BRAND } from './brand-compat.ts'
 import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/profiles'
+import { novaFlowReasoningProfile, withNovaFlowReasoningDefault } from './novaflow-reasoning.ts'
 import type { PiAiModality, PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat, ThinkingLevelMap } from '@earendil-works/pi-ai'
 import { getBuiltinModels, getBuiltinProviders, type BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
@@ -77,6 +78,15 @@ class NovaFlowAdapter extends PiAiAdapter {
   override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     if (routes.some(route => provider === route.id.replace('novaflow', LEGACY_DESKTOP_BRAND))) return Promise.resolve([])
     return super.listModels(provider)
+  }
+
+  override async resolveModel(provider: string, model: string, signal?: AbortSignal) {
+    return withNovaFlowReasoningDefault(await super.resolveModel(provider, model, signal))
+  }
+
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal) {
+    const prepared = await super.prepareCall(provider, model, signal)
+    return { ...prepared, model: withNovaFlowReasoningDefault(prepared.model) }
   }
 }
 
@@ -284,6 +294,7 @@ function definedFields<T extends object, K extends keyof T>(source: T | undefine
  * @returns the model, reasoning like its vendor entry when one exists.
  */
 function withVendorReasoning(model: Model<Api>): Model<Api> {
+  if (novaFlowReasoningProfile(model.api, model.id) !== undefined) return model
   const vendor = vendorCatalogModel(model.api, model.id)
     ?? (speaks(model, 'openai-completions') ? vendorCatalogIndex().chatCompletionsModels.get(model.id) : undefined)
   if (vendor?.reasoning !== true) return model
@@ -447,6 +458,7 @@ export function installNovaFlowProvider(
           return [{
             id: model.id, name: model.id, contextWindow: capacity.context.value, input: modelInput(model.id),
             ...capacity.output.source === 'catalog' ? {} : { maxTokens: capacity.output.value },
+            ...novaFlowReasoningProfile(route.api, model.id)?.model,
           }]
         }),
       }
