@@ -79,17 +79,20 @@ describe('native Host configuration', () => {
       (message) => { throw new Error(message) })
     expect(composed.find(row => row.id === 'agent-default-model')?.config).toEqual(next)
   })
-  it('preserves standard API-key mode and refuses unknown access modes', () => {
-    expect(parseNovaFlowHostConfiguration({ ...configuration(), accessMode: 'api-key' }).accessMode).toBe('api-key')
-    const hybrid = parseNovaFlowHostConfiguration({ ...configuration(), accessMode: 'hybrid' })
-    expect(hybrid.accessMode).toBe('hybrid')
-    expect(novaFlowDefaultSelection(hybrid, { provider: 'novaflow', model: 'saved-api-model' })).toBeUndefined()
-    expect(novaFlowDefaultSelection({ ...hybrid, autoSelectModel: true }, { provider: 'novaflow', model: 'select-a-model' }))
+  it('uses account-only models and replaces saved manual provider selections', () => {
+    const account = parseNovaFlowHostConfiguration({ ...configuration(), accessMode: 'desktop-account' })
+    expect(account.accessMode).toBe('desktop-account')
+    expect(novaFlowDefaultSelection(account, { provider: 'novaflow', model: 'saved-api-model' }))
+      .toEqual({ provider: 'novaflow-responses', model: 'select-a-model' })
+    expect(novaFlowDefaultSelection({ ...account, autoSelectModel: true }, { provider: 'novaflow', model: 'select-a-model' }))
       .toEqual({ provider: 'novaflow-chat', model: 'fixture-model' })
-    expect(novaFlowDefaultSelection({ ...hybrid, autoSelectModel: true }, { provider: 'novaflow', model: 'saved-api-model' })).toBeUndefined()
-    expect(novaFlowDefaultSelection({ ...hybrid, autoSelectModel: true }, { provider: 'deepseek-official', model: 'deepseek-v4-pro' }))
+    expect(novaFlowDefaultSelection({ ...account, autoSelectModel: true }, { provider: 'novaflow', model: 'saved-api-model' }))
       .toEqual({ provider: 'novaflow-chat', model: 'fixture-model' })
-    expect(() => parseNovaFlowHostConfiguration({ ...configuration(), accessMode: 'password' })).toThrow('invalid access mode')
+    expect(novaFlowDefaultSelection({ ...account, autoSelectModel: true }, { provider: 'deepseek-official', model: 'deepseek-v4-pro' }))
+      .toEqual({ provider: 'novaflow-chat', model: 'fixture-model' })
+    for (const accessMode of ['api-key', 'hybrid', 'password']) {
+      expect(() => parseNovaFlowHostConfiguration({ ...configuration(), accessMode })).toThrow('invalid access mode')
+    }
   })
   it.each(['https://api.novaflow.com', 'http://localhost:43210', 'http://127.0.0.1:43210/v1', 'http://user@127.0.0.1:43210', 'http://127.0.0.1:43210?x=1'])('rejects a non-exact loopback endpoint %s', (baseURL) => {
     expect(() => parseNovaFlowHostConfiguration(configuration(baseURL))).toThrow()

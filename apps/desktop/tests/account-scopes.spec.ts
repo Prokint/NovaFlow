@@ -52,7 +52,7 @@ it('never assigns unowned legacy data to a subsequent login or its saved record 
 })
 
 it('composes the account-owned first workspace directory after the shipped product overlay', async () => {
-  const { scopes } = await fixture()
+  const { scopes, options } = await fixture()
   const scope = scopes.resolve(b)
   await scopes.prepare(scope)
   const anchor = fileURLToPath(new URL('../../cli/package.json', import.meta.url))
@@ -63,9 +63,9 @@ it('composes the account-owned first workspace directory after the shipped produ
   const warnings: string[] = []
   const rows = composeEntries([...profile.layers.map(layer => layer.patches), profile.patches, shipped, owned],
     value => warnings.push(value))
-  const config = JSON.stringify(rows)
-  expect(config).toContain('Documents/NovaFlow/accounts')
-  expect(config).toContain(scope.key)
+  expect(rows.find(row => row.id === 'workspace-controller')?.config).toMatchObject({
+    documentsDirectory: join(options.documents, 'NovaFlow', 'accounts'), productDirectory: scope.key,
+  })
   expect(warnings).toEqual([])
 })
 
@@ -74,10 +74,9 @@ it('copies installed plugin payloads without activation, old settings, credentia
   await scopes.claimLegacy(a)
   const scope = scopes.resolve(b)
   await scopes.prepare(scope, legacy)
-  const manifest = JSON.parse(await readFile(join(scope.profile, 'package.json'), 'utf8'))
-  expect(manifest.dependencies['third-party']).toBe(`file:${legacy}/plugin.tgz`)
-  expect(manifest.dsh.profile.bundles).not.toContain('third-party')
-  expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
+  const manifest: unknown = JSON.parse(await readFile(join(scope.profile, 'package.json'), 'utf8'))
+  expect(manifest).toHaveProperty('dependencies.third-party', `file:${join(legacy, 'plugin.tgz')}`)
+  expect(manifest).toHaveProperty('dsh.profile.bundles', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
   expect(await readFile(join(scope.profile, 'node_modules', 'third-party', 'index.js'), 'utf8')).toContain('must not execute')
   expect(await readFile(join(scope.profile, 'cordis.patch.yml'), 'utf8')).not.toContain('private-old-settings')
   await expect(readFile(join(scope.profile, '.env'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -98,7 +97,7 @@ it('preserves returning account activation and gives signed-out users no inherit
   expect(await readFile(join(scope.profile, 'package.json'), 'utf8')).toBe('account-specific activation')
   const guest = scopes.resolve(null)
   await scopes.prepare(guest, legacy)
-  expect(JSON.parse(await readFile(join(guest.profile, 'package.json'), 'utf8')).dependencies).toEqual({})
+  expect(JSON.parse(await readFile(join(guest.profile, 'package.json'), 'utf8'))).toHaveProperty('dependencies', {})
   expect(guest.partition).not.toBe(scope.partition)
 })
 
@@ -106,7 +105,7 @@ it('rejects unowned or symlinked account directories and invalid legacy ownershi
   const { scopes, root, options } = await fixture()
   const scope = scopes.resolve(b)
   await mkdir(join(options.home, 'accounts'), { recursive: true })
-  await symlink(root, scope.home, 'dir')
+  await symlink(root, scope.home, 'junction')
   await expect(scopes.prepare(scope)).rejects.toThrow('directory is a link')
   await mkdir(options.userData, { recursive: true })
   await writeFile(join(options.userData, 'novaflow-account-scopes.json'), '{"version":1,"legacyOwner":"../escape"}')

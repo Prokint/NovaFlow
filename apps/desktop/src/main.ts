@@ -548,8 +548,7 @@ async function main(): Promise<void> {
   }
   // The browser callback finishes sign-in; bring the window back so the user does not have to switch apps.
   let lastAccountStatus: NovaFlowDesktopSnapshot['account']['status'] | undefined
-  let ownershipRead = false
-  let ownershipFailure: unknown
+  const ownership: { read: boolean; failure: unknown } = { read: false, failure: undefined }
   const newApi = new NewApiSessionTransport(() => server.get())
   const novaflow = new NovaFlowDesktopRuntime({
     server,
@@ -559,8 +558,8 @@ async function main(): Promise<void> {
     onStoredIdentity: async (profile) => {
       try {
         if (profile !== null) await scopes.claimLegacy({ origin: server.get(), userId: profile.id })
-        ownershipRead = true
-      } catch (error) { ownershipFailure = error; throw error }
+        ownership.read = true
+      } catch (error) { ownership.failure = error; throw error }
     },
     interactiveSignIn: async (origin, signal) => {
       const cookie = await openNewApiLoginWindow(origin, signal, { parent: mainWindow,
@@ -600,8 +599,9 @@ async function main(): Promise<void> {
   let novaflowRelay = await createRelay()
   try {
     await novaflow.restore()
-    if (ownershipFailure !== undefined) throw ownershipFailure
-    if (!ownershipRead) throw new Error(novaFlowAccountCopy(locale.id).secureStorage)
+    if (ownership.failure !== undefined) throw ownership.failure instanceof Error
+      ? ownership.failure : new Error(novaFlowAccountCopy(locale.id).secureStorage, { cause: ownership.failure })
+    if (!ownership.read) throw new Error(novaFlowAccountCopy(locale.id).secureStorage)
     await scopes.sealLegacy()
     accountScope = scopes.resolve(desktopAccountIdentity(novaflow.getSnapshot()))
     lastAuthenticatedProfile = scopes.legacyOwner === null ? undefined : resolveDesktopPaths(baseHome).profile
@@ -1072,10 +1072,6 @@ async function main(): Promise<void> {
     { type: 'separator' },
     { label: novaFlowAccountCopy(currentDesktopLocale().id).title, click: () => {
       mainWindow?.webContents.send('novaflow:open')
-      mainWindow?.show()
-    } },
-    { label: novaFlowAccountCopy(currentDesktopLocale().id).modelSettings, click: () => {
-      mainWindow?.webContents.send('novaflow:open-models')
       mainWindow?.show()
     } },
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdates(true) } },

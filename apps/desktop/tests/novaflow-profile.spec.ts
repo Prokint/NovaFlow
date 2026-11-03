@@ -52,10 +52,10 @@ it('mounts no DeepSeek-hosted service, keeps web search off DeepSeek and drops t
     expect(rows.find(row => row.id === 'web-runtime')?.config).toMatchObject({ surfaceContext: false, printUrl: true })
     expect(rows.find(row => row.id === 'harness-dev-context')?.disabled).toBe(true)
     expect(rows.find(row => row.id === 'workspace-controller')?.config).toEqual({ productDirectory: 'NovaFlow' })
-    expect(rows.find(row => row.id === 'llm-pi-ai')).toMatchObject({ disabled: false, config: {
-      providers: { novaflow: { baseURL: 'https://api.lanjiaotrade.com/v1', api: 'openai-completions', apiKeyEnv: 'NOVAFLOW_API_KEY', models: [] } },
-    } })
-    expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({ disabled: false, config: { credentialOnboarding: false } })
+    expect(rows.find(row => row.id === 'llm-pi-ai')?.disabled).toBe(true)
+    expect(rows.find(row => row.id === 'ui-settings-models')?.disabled).toBe(true)
+    expect(rows.filter(row => row.name === '@deepseek-ai/dsh-llm-pi-ai' && row.disabled !== true)).toEqual([])
+    expect(rows.filter(row => row.name === '@deepseek-ai/dsh-client-ui-settings-models' && row.disabled !== true)).toEqual([])
     // Native account discovery sets the saved selection; the invocation layer must not shadow profile edits.
     expect(rows.find(row => row.id === 'agent-default-model')?.config).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
   } finally {

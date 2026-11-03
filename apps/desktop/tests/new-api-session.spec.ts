@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
@@ -42,9 +42,10 @@ describe('New API session boundary', () => {
     let origin = 'https://issuer.example'
     const calls: string[] = []
     const fetcher: typeof fetch = async (input) => {
-      calls.push(String(input))
-      if (String(input).endsWith('/groups')) return Response.json({ success: true, data: { default: { desc: 'Default', ratio: 1 } } })
-      return new Response(JSON.stringify(String(input).endsWith('/refresh') ? response() : { success: true }), {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      calls.push(url)
+      if (url.endsWith('/groups')) return Response.json({ success: true, data: { default: { desc: 'Default', ratio: 1 } } })
+      return new Response(JSON.stringify(url.endsWith('/refresh') ? response() : { success: true }), {
         headers: { 'content-type': 'application/json', 'set-cookie': `new_api_refresh=${refresh}; HttpOnly; Path=/api/user/auth` },
       })
     }
@@ -63,7 +64,7 @@ async function fixture() {
   const expires = Math.floor(Date.now() / 1000) + 86400
   let origin = ''
   const self = { id: 42, username: 'alice', display_name: 'Alice', group: 'default', status: 1, quota: 100000, used_quota: 75 }
-  const server = createServer(async (req: IncomingMessage, res) => {
+  async function respond(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     const record = { path: req.url ?? '', cookie: req.headers.cookie ?? '', authorization: req.headers.authorization ?? '', origin: req.headers.origin ?? '', body }
@@ -88,11 +89,14 @@ async function fixture() {
       res.end('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n')
     } else if (record.path === '/api/user/auth/logout') res.end(JSON.stringify({ success: true }))
     else { res.statusCode = 404; res.end('{}') }
+  }
+  const server = createServer((req, res) => {
+    void respond(req, res).catch((error: unknown) => { res.destroy(error instanceof Error ? error : new Error('Fixture request failed', { cause: error })) })
   })
   server.listen(0, '127.0.0.1')
   onTestFinished(async () => {
     server.closeAllConnections()
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    await new Promise<void>((resolve, reject) => server.close((error) => { if (error) reject(error); else resolve() }))
   })
   await once(server, 'listening')
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`

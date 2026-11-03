@@ -46,7 +46,7 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk pnpm run build
 
 登录窗口直接使用站点的登录页面，保留站点自己的密码加密和多因素验证流程。主进程仅接收第一方 HttpOnly 刷新 Cookie，使用系统加密存储保存在独立的 `new-api-account` 目录；不保存密码、短期访问 Token 或管理 API Key。重启时自动恢复会话，退出登录时撤销本次站点会话。旧桌面授权目录保持独立，旧协议实现仍保留在源码中。模型目录和账户余额只向应用界面公开必要信息，模型请求通过受限的本地代理进入站点。
 
-API Key 模式作为备用入口保留。在“模型与 API Key”或“设置 → 模型”中编辑 `NovaFlow API`，地址为 `https://api.lanjiaotrade.com/v1`，填写专用模型 Key 后获取模型并保存。Key 经 Host 凭据服务保存，配置仅引用 `NOVAFLOW_API_KEY`。该入口也支持其他 OpenAI Chat/Responses 或 Anthropic 兼容服务。DeepSeek 账号和遥测继续关闭，现有 DSH 应用与系统 `dsh` 命令不变。
+桌面端仅通过 NovaFlow 账号接入模型，不提供手动 API Key、自定义提供方或“设置 → 模型”入口。旧的手动提供方配置不再启用；升级后从账号模型目录重新选择模型。DeepSeek 账号和遥测继续关闭，现有 DSH 应用与系统 `dsh` 命令不变。
 
 中转站必须有可用上游渠道和账户额度。账号模式只展示站点明确声明支持 Chat Completions 且该账号分组允许的模型；缺少容量元数据时使用可调整的保守默认值（上下文 65536、输出 8192），已知模型优先使用适配器目录中的容量。账号模式不显示不存在的设备独立额度。
 

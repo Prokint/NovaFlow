@@ -27,7 +27,7 @@ const novaflowTest = vi.hoisted(() => ({
 }))
 vi.mock('../src/novaflow/runtime.ts', () => ({ NovaFlowDesktopRuntime: class {
   constructor(options: { onChange(snapshot: NovaFlowDesktopSnapshot): void; onStoredIdentity(profile: null): Promise<void> }) {
-    novaflowTest.changed = options.onChange
+    novaflowTest.changed = (snapshot) => { options.onChange(snapshot) }
     novaflowTest.restore.mockImplementation(async () => { await options.onStoredIdentity(null) })
   }
   getSnapshot() { return novaflowTest.snapshot }
@@ -755,7 +755,7 @@ describe('desktop main startup', () => {
     const application = handler(event, 'application', 48, 34)
     // Linux installs no dsh command, so it offers no command management.
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
-      '关于 NovaFlow', 'separator', 'NovaFlow 账号', '模型与 API Key', '检查更新…',
+      '关于 NovaFlow', 'separator', 'NovaFlow 账号', '检查更新…',
       ...platform === 'win32' ? ['管理 dsh 命令…'] : [], 'separator', '退出',
     ])
     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
@@ -791,7 +791,7 @@ describe('desktop main startup', () => {
     expect(template.map(describeItem)).toEqual(['Desktop test', en.fileMenu, 'editMenu', 'windowMenu'])
     const application = template[0]!.submenu as MenuItemConstructorOptions[]
     expect(application.filter(item => item.visible !== false).map(describeItem)).toEqual(
-      ['about', 'separator', 'NovaFlow account', 'Models & API Key', en.checkUpdatesMenu, en.cliCommandMenu,
+      ['about', 'separator', 'NovaFlow account', en.checkUpdatesMenu, en.cliCommandMenu,
         'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit'])
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledOnce()
   })

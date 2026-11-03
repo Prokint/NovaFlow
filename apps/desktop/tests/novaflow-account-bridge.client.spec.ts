@@ -22,7 +22,6 @@ interface ExposedBridge {
   accessMode: string
   subscribe(listener: (state: unknown) => void): () => void
   onOpen(listener: () => void): () => void
-  onOpenModels(listener: () => void): () => void
   mount(head: unknown, content: unknown): () => void
 }
 
@@ -65,7 +64,7 @@ describe('NovaFlow account page bridge', () => {
 
   it('routes the shell open request to the page and renders the page into connected hosts only', async () => {
     const bridge = install()
-    expect(bridge.accessMode).toBe('hybrid')
+    expect(bridge.accessMode).toBe('desktop-account')
     electron.handlers.get('novaflow:open')?.({})
     const open = vi.fn()
     bridge.onOpen(open)
@@ -86,19 +85,17 @@ describe('NovaFlow account page bridge', () => {
     expect(content.childElementCount).toBe(0)
   })
 
-  it('keeps model settings requests separate from account requests', async () => {
+  it('exposes account navigation without a manual model settings bridge', async () => {
     const bridge = install()
     const account = vi.fn()
-    const models = vi.fn()
     bridge.onOpen(account)
     electron.handlers.get('novaflow:open-models')?.({})
-    bridge.onOpenModels(models)
     await Promise.resolve()
-    expect(models).toHaveBeenCalledOnce()
+    expect(bridge).not.toHaveProperty('onOpenModels')
+    expect(electron.handlers.has('novaflow:open-models')).toBe(false)
     expect(account).not.toHaveBeenCalled()
     electron.handlers.get('novaflow:open')?.({})
     expect(account).toHaveBeenCalledOnce()
-    expect(models).toHaveBeenCalledOnce()
   })
 
   it('re-creates the mounted page when the client language changes', async () => {

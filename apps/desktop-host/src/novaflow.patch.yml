@@ -1,4 +1,4 @@
-# NovaFlow supplies its own account session and optional API keys. DeepSeek account routes stay disabled.
+# NovaFlow model access comes only from its native account session.
 - id: deepseek-account
   disabled: true
 - id: llm-deepseek
@@ -6,23 +6,13 @@
 - id: llm-deepseek-account
   disabled: true
 - id: llm-pi-ai
-  disabled: false
-  config:
-    providers:
-      novaflow:
-        displayName: NovaFlow API
-        api: openai-completions
-        baseURL: https://api.lanjiaotrade.com/v1
-        apiKeyEnv: NOVAFLOW_API_KEY
-        models: []
+  disabled: true
 - id: ui-settings-account
   disabled: true
 - id: account-controller
   disabled: true
 - id: ui-settings-models
-  disabled: false
-  config:
-    credentialOnboarding: false
+  disabled: true
 - id: product-analytics
   disabled: true
 # DeepSeek-hosted services stay off. Feedback (like/dislike, the feedback dialog and /feedback) would upload the

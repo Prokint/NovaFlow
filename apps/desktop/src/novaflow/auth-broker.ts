@@ -116,8 +116,9 @@ export class NovaFlowAuthBroker {
       this.assertCurrent(generation, attempt.expiresAt)
       this.#options.store.assertAvailable()
       const origin = this.#options.origin()
-      if (this.#options.interactiveSignIn !== undefined) {
-        this.track(this.finishInteractiveSignIn(attempt, this.#options.interactiveSignIn, origin, signal))
+      const interactiveSignIn = this.#options.interactiveSignIn?.bind(this.#options)
+      if (interactiveSignIn !== undefined) {
+        this.track(this.finishInteractiveSignIn(attempt, interactiveSignIn, origin, signal))
         return this.getSnapshot()
       }
       attempt.callback = await createLoopbackLogin(state, { signal, expiresAt: attempt.expiresAt, now: this.#now, origin })

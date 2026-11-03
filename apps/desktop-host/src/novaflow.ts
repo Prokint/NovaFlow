@@ -57,7 +57,7 @@ export type NovaFlowCapacitySaver = (model: string, contextWindow: number | null
 /** Main-to-Host private message. localCapability grants only access to this process's limited loopback relay. */
 export interface NovaFlowHostConfiguration {
   readonly type: 'novaflow-config'
-  readonly accessMode?: 'api-key' | 'desktop-account' | 'hybrid'
+  readonly accessMode?: 'desktop-account'
   /** Select the first available account model only when no model was chosen. */
   readonly autoSelectModel?: boolean
   readonly baseURL: string
@@ -112,7 +112,7 @@ export function parseNovaFlowHostConfiguration(value: unknown): NovaFlowHostConf
   const accessMode: unknown = Reflect.get(value, 'accessMode')
   const autoSelectModel: unknown = Reflect.get(value, 'autoSelectModel')
   if (autoSelectModel !== undefined && typeof autoSelectModel !== 'boolean') throw new Error('novaflow Host: invalid model selection mode')
-  if (accessMode !== undefined && accessMode !== 'api-key' && accessMode !== 'desktop-account' && accessMode !== 'hybrid') {
+  if (accessMode !== undefined && accessMode !== 'desktop-account') {
     throw new Error('novaflow Host: invalid access mode')
   }
   const url = new URL(value.baseURL)
@@ -391,7 +391,7 @@ function describeCapacity(model: NovaFlowHostModel): ModelCapacity {
 
 /**
  * Correct a saved default model selection for a configuration. Account-only deployments replace outside routes with
- * an unselected placeholder; hybrid deployments retain API-key routes. A listed model moves to its native route without its
+ * an unselected placeholder. A listed model moves to its native route without its
  * reasoning effort, whose levels belong to the route.
  * @param configuration - applied native configuration.
  * @param saved - current default selection.
@@ -403,13 +403,12 @@ export function novaFlowDefaultSelection(configuration: NovaFlowHostConfiguratio
     return novaFlowDefaultSelection(configuration, { ...saved, provider: previousRoute.id }) ?? { ...saved, provider: previousRoute.id }
   }
   if (configuration.autoSelectModel === true && (saved.model === 'select-a-model'
-    || (saved.provider !== 'novaflow' && !routes.some(route => route.id === saved.provider)))) {
+    || !routes.some(route => route.id === saved.provider))) {
     const first = configuration.models.find(model => resolveCapacity(model, true) !== undefined && modelRoute(model) !== undefined)
     const route = first === undefined ? undefined : modelRoute(first)
     if (first !== undefined && route !== undefined) return { provider: route.id, model: first.id }
   }
-  if (!routes.some(route => route.id === saved.provider)) return configuration.accessMode === 'hybrid'
-    ? undefined : { provider: 'novaflow-responses', model: 'select-a-model' }
+  if (!routes.some(route => route.id === saved.provider)) return { provider: 'novaflow-responses', model: 'select-a-model' }
   const model = configuration.models.find(entry => entry.id === saved.model)
   const route = model === undefined || resolveCapacity(model, true) === undefined ? undefined : modelRoute(model)
   return route === undefined || route.id === saved.provider ? undefined : { provider: route.id, model: saved.model }

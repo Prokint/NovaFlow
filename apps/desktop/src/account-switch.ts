@@ -35,15 +35,15 @@ export class DesktopAccountSwitch {
     this.options.block()
     const operation = this.tail.then(async () => {
       await this.options.stop()
-      if (this.wanted !== request || this.closed) return
+      if (!this.isCurrent(request)) return
       await this.options.prepare(scope)
-      if (this.wanted !== request || this.closed) return
+      if (!this.isCurrent(request)) return
       await this.options.start(scope)
-      if (this.wanted !== request || this.closed) { await this.options.stop(); return }
+      if (!this.isCurrent(request)) { await this.options.stop(); return }
       await this.options.reveal(scope)
-      if (this.wanted === request && !this.closed) { this.settledKey = scope.key; this.wanted = undefined }
+      if (this.isCurrent(request)) { this.settledKey = scope.key; this.wanted = undefined }
     }).catch((error: unknown) => {
-      if (this.wanted === request && !this.closed) { this.options.block(); this.options.failed(error) }
+      if (this.isCurrent(request)) { this.options.block(); this.options.failed(error) }
       throw error
     }).finally(() => { if (this.pending === operation) this.pending = undefined })
     this.pending = operation
@@ -54,4 +54,6 @@ export class DesktopAccountSwitch {
 
   /** Cancel later activation and wait for already-started lifecycle work; the caller also closes its backend. */
   async close(): Promise<void> { this.closed = true; this.wanted = undefined; await this.tail }
+
+  private isCurrent(request: { scope: DesktopAccountScope }): boolean { return this.wanted === request && !this.closed }
 }

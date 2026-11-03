@@ -2,7 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { canonicalReferenceText } from './verify-public-repository-links.ts'
 
@@ -13,6 +13,8 @@ const organizationUrl = new RegExp(`\\bgithub\\.com/${organization}(?![a-z0-9-])
 const kitRepositoryUrl = new RegExp(`\\bgithub\\.com/${organization}/libreoffice-kit(?:\\.git)?(?=/|[^a-zA-Z0-9_.-]|$)`, 'g')
 const commitCandidate = /(?<![a-z0-9])[\da-f]{7,40}(?![a-z0-9])/gi
 const excludedPrefixes = ['vendor/', '.agents/notes/archived/']
+// Dependency managers own these generated records, including incidental numeric and digest values.
+const generatedLockfiles = new Set(['pnpm-lock.yaml', 'uv.lock'])
 const gitOutputLimit = 64 * 1024 * 1024
 // One 41-byte line per object; 1.2 million objects produce about 49 MiB.
 const objectListingLimit = 1024 * 1024 * 1024
@@ -28,7 +30,7 @@ export interface RepositoryReference {
 }
 
 function isMaintained(file: string): boolean {
-  return !excludedPrefixes.some(prefix => file.startsWith(prefix))
+  return !generatedLockfiles.has(basename(file)) && !excludedPrefixes.some(prefix => file.startsWith(prefix))
 }
 
 /**
@@ -134,7 +136,7 @@ export function repositoryCommits(repoRoot: string, sources: Iterable<string>): 
 /**
  * Scan tracked and nonignored new files using only the local Git object database.
  * @param repoRoot - Working tree whose files and Git objects are inspected.
- * @returns Prohibited references outside vendor and frozen Agent Notes; absent shallow-history objects cannot match.
+ * @returns Prohibited references outside vendor, frozen Agent Notes, and generated lockfiles; absent shallow-history objects cannot match.
  */
 export function scanRepositoryReferences(repoRoot: string): RepositoryReference[] {
   const sources = readMaintainedFiles(repoRoot)

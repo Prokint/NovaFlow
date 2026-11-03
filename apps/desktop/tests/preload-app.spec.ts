@@ -234,7 +234,7 @@ it('exposes only a credential-free NovaFlow account summary, open requests and t
   await import('../src/preload-app.ts')
   const api = electron.contextBridge.exposeInMainWorld.mock.calls.find(([name]) => name === 'dshNovaFlow')?.[1] as
     { subscribe(listener: (state: unknown) => void): () => void; mount(head: HTMLElement, content: HTMLElement): () => void }
-  expect(Object.keys(api).sort()).toEqual(['accessMode', 'mount', 'onOpen', 'onOpenModels', 'subscribe'])
+  expect(Object.keys(api).sort()).toEqual(['accessMode', 'mount', 'onOpen', 'subscribe'])
   const listener = vi.fn()
   const off = api.subscribe(listener)
   await vi.waitFor(() => { expect(listener).toHaveBeenCalledExactlyOnceWith({ status: 'signed-in', name: '7' }) })

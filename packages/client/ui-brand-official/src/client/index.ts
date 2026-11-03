@@ -36,7 +36,7 @@ export function apply(ctx: ClientContext): void {
   const bridge = readDesktopAccountBridge(globalThis)
   if (bridge === undefined) return
   if (bridge.onOpenModels !== undefined) {
-    const onOpenModels = bridge.onOpenModels
+    const onOpenModels = bridge.onOpenModels.bind(bridge)
     ctx.inject(['settingsNavigation'], (settings) => {
       settings.effect(() => onOpenModels(() => { settings.settingsNavigation.open('models') }), 'novaflow: model settings')
     })

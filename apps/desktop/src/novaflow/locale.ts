@@ -2,7 +2,6 @@
 /** Localized account page copy. */
 export interface NovaFlowAccountCopy {
   title: string
-  modelSettings: string
   signIn: string
   signInSite: string
   waitingSite: string
@@ -102,7 +101,6 @@ export interface NovaFlowAccountCopy {
  */
 export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
   return language.toLowerCase().startsWith('zh') ? {
-    modelSettings: '模型与 API Key',
     switchTitle: '切换账号', switchMessage: '当前工作区仍有运行中或已安排的任务。继续将停止这些任务并关闭当前工作区。', switchContinue: '停止任务并继续', switchCancel: '保留当前账号',
     signInSite: '登录并使用模型', waitingSite: '请在登录窗口完成账号验证…', siteGroupHint: '登录后自动加载当前账号可用的模型。',
     devicePage: '安全与设备', walletPage: '钱包与充值', usagePage: '用量记录', wallet: '钱包剩余', walletQuota: '钱包剩余（额度）', numberLocale: 'zh-CN', accountUsage: '账号累计用量', quotaUnavailable: '暂不可用',
@@ -131,7 +129,6 @@ export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
     autoNoRoute: '顺序中的分组目前都不可用，请求会失败。请换一个分组或重新设置顺序。',
     moveUp: '上移', moveDown: '下移', saveRouting: '保存设置', routingSaved: '已保存分组设置',
   } : {
-    modelSettings: 'Models & API Key',
     switchTitle: 'Switch account', switchMessage: 'This workspace has running or scheduled tasks. Continuing will stop them and close this workspace.', switchContinue: 'Stop tasks and continue', switchCancel: 'Keep current account',
     signInSite: 'Sign in and use models', waitingSite: 'Complete account verification in the sign-in window…', siteGroupHint: 'Signing in loads the models available to your account.',
     devicePage: 'Security & devices', walletPage: 'Wallet & top-up', usagePage: 'Usage', wallet: 'Wallet balance', walletQuota: 'Wallet balance (quota)', numberLocale: 'en-US', accountUsage: 'Account usage', quotaUnavailable: 'Unavailable',

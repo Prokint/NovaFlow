@@ -206,6 +206,14 @@ describe('maintained repository reference policy', () => {
     )
   })
 
+  it.each(['uv.lock', 'python/sdk/uv.lock', 'pnpm-lock.yaml', 'nested/pnpm-lock.yaml'])('excludes generated dependency lockfile %s', (file) => {
+    const commit = 'a'.repeat(40)
+    const source = `${organizationUrl}\n${commit}`
+    const commits = new Set([commit])
+    expect(findRepositoryReferences(file, source, commits)).toEqual([])
+    expect(findRepositoryReferences(`${file}.md`, source, commits)).toHaveLength(2)
+  })
+
   it('accepts distinct organization names and excludes the frozen and vendored paths', () => {
     expect(findRepositoryReferences('source.md', `${organizationUrl}-tools/project`, new Set())).toEqual([])
     expect(findRepositoryReferences('vendor/project/source.md', organizationUrl, new Set())).toEqual([])

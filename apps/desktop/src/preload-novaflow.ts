@@ -82,7 +82,7 @@ export function installNovaFlowAccountUi(): void {
   const pageOperations: NovaFlowAccountUiOperations = {
     ...operations,
     async state() {
-      // Opening the account page restores its session; API-key use does not read account credentials.
+      // Opening the account page restores its native session once.
       restored ??= operations.restore().then(() => {}, (error: unknown) => { restored = undefined; throw error })
       await restored
       return operations.state()
@@ -106,10 +106,7 @@ export function installNovaFlowAccountUi(): void {
   const language = new MutationObserver(() => { render() })
   const opens = createAccountOpenRequests()
   const open = (): void => { opens.request() }
-  const modelOpens = createAccountOpenRequests()
-  const openModels = (): void => { modelOpens.request() }
   ipcRenderer.on('novaflow:open', open)
-  ipcRenderer.on('novaflow:open-models', openModels)
   contextBridge.exposeInMainWorld('dshNovaFlow', {
     accessMode: NOVAFLOW_ACCESS_MODE,
     subscribe(listener: (state: NovaFlowSidebarAccount) => void): () => void {
@@ -123,7 +120,6 @@ export function installNovaFlowAccountUi(): void {
       return () => { active = false; unsubscribe() }
     },
     onOpen: (listener: () => void): (() => void) => opens.listen(listener),
-    onOpenModels: (listener: () => void): (() => void) => modelOpens.listen(listener),
     mount(head: unknown, content: unknown): () => void {
       if (!(head instanceof HTMLElement) || !(content instanceof HTMLElement) || !head.isConnected || !content.isConnected) {
         throw new TypeError('novaflow: the account page needs connected head and content hosts')
@@ -142,7 +138,6 @@ export function installNovaFlowAccountUi(): void {
   })
   window.addEventListener('unload', () => {
     ipcRenderer.off('novaflow:open', open)
-    ipcRenderer.off('novaflow:open-models', openModels)
     language.disconnect(); ui?.dispose()
   }, { once: true })
 }
