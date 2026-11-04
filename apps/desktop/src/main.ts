@@ -14,6 +14,7 @@ import { checkNovaFlowRelease, fetchNovaFlowReleaseNotes, ReleaseNoticeState } f
 import type { NovaFlowHostConfiguration } from '@deepseek-ai/dsh-desktop-host/novaflow'
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 import { DesktopAccountScopes, desktopAccountIdentity, desktopAccountKey } from './account-scopes.ts'
+import { readNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
 import { DesktopAccountSwitch } from './account-switch.ts'
 /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
 
@@ -379,7 +380,8 @@ async function main(): Promise<void> {
   const resources = runtimeResources()
   let paths = resolveDesktopPaths()
   const baseHome = dirname(dirname(paths.profile))
-  const scopes = new DesktopAccountScopes({ home: baseHome, userData: app.getPath('userData'), documents: app.getPath('documents') })
+  const scopes = new DesktopAccountScopes({ home: baseHome, userData: app.getPath('userData'), documents: app.getPath('documents'),
+    bundledPlugins: readNovaFlowBundledPlugins(resources.dsh) })
   let accountScope = scopes.resolve(null)
   let accountAdmission = false
   let accountSwitching = false

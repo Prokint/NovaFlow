@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/monagisa/douyin-ai-collector",
+  "tag": "v0.5.62",
+  "packages": [
+    {
+      "name": "dsh-douyin-comments",
+      "version": "0.5.62",
+      "upstreamPath": "dsh-douyin-comments",
+      "declaredLicense": null
+    },
+    {
+      "name": "dsh-comment-viewer",
+      "version": "0.2.16",
+      "upstreamPath": "dsh-comment-viewer",
+      "declaredLicense": "MIT"
+    }
+  ],
+  "localChanges": [
+    "Preserve upstream README as UPSTREAM-README.txt for third-party attribution.",
+    "Add distribution notices.",
+    "Use a white comment-viewer palette and iframe."
+  ]
+}

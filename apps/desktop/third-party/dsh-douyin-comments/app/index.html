@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>抖音评论采集</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <h1>抖音评论采集</h1>
+        <span class="version" id="version">v—</span>
+      </div>
+      <div class="topbar-meta">
+        <span id="outDir">输出目录加载中…</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card create-card">
+        <div class="card-head">
+          <h2>新建采集</h2>
+          <span class="muted">公开评论 · 本机浏览器 · 数据不出本机</span>
+        </div>
+
+        <label class="field">
+          <span>视频链接</span>
+          <input id="url" type="url" spellcheck="false"
+                 placeholder="https://www.douyin.com/video/7660328050596371819" />
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>目标条数</span>
+            <input id="max" type="number" min="1" max="1000000" step="1" />
+          </label>
+          <label class="field">
+            <span>顶层路数</span>
+            <select id="lanes">
+              <option value="1">1 路（单路）</option>
+              <option value="2">2 路</option>
+              <option value="3">3 路（默认）</option>
+              <option value="4">4 路</option>
+              <option value="5">5 路</option>
+              <option value="6">6 路</option>
+              <option value="7">7 路</option>
+              <option value="8">8 路</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>总超时（分钟）</span>
+            <input id="timeout" type="number" min="1" max="240" step="1" />
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>等扫码（秒）</span>
+            <input id="waitLogin" type="number" min="0" max="1800" step="10" />
+          </label>
+          <label class="check">
+            <input id="replies" type="checkbox" checked />
+            <span>补采二级回复</span>
+          </label>
+          <label class="check">
+            <input id="clearBefore" type="checkbox" />
+            <span>先清空旧数据</span>
+          </label>
+          <label class="check">
+            <input id="cloud" type="checkbox" />
+            <span>同时导出词云 HTML</span>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="start" class="btn primary" type="button">开始采集</button>
+          <button id="cancel" class="btn" type="button" disabled>取消</button>
+        </div>
+
+        <p class="hint">
+          开始后会在本机启动一个有头 Chromium 并自动装入采集扩展。登录、扫码或风控验证都在那个浏览器窗口里完成；
+          本页面负责开始/取消、看进度和下载结果。
+        </p>
+      </section>
+
+      <section class="card status-card">
+        <div class="card-head">
+          <h2>采集状态</h2>
+          <span id="badge" class="badge idle">空闲</span>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>已采（去重）</span><strong id="count">0</strong></div>
+          <div class="stat"><span>落库</span><strong id="saved">0</strong></div>
+          <div class="stat"><span>服务端 total</span><strong id="total">—</strong></div>
+          <div class="stat"><span>已用</span><strong id="elapsed">0s</strong></div>
+        </div>
+
+        <div id="loginHint" class="login-hint hidden">
+          <strong>需要登录 / 验证</strong>
+          <span>请切到本机打开的 Chromium 窗口，用抖音 App 扫码或完成页面上的验证；完成后这里会自动继续。</span>
+        </div>
+
+        <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+        <div id="statusLine" class="status-line">还没有开始采集。</div>
+
+        <div class="log-head">
+          <span>运行日志</span>
+          <span class="muted" id="logCount"></span>
+        </div>
+        <pre id="log" class="log">—</pre>
+
+        <div id="result" class="result hidden">
+          <div class="card-head"><h3>本次结果</h3><span id="resultBadge" class="badge"></span></div>
+          <div id="resultBody" class="result-body"></div>
+        </div>
+      </section>
+
+      <section class="card exports-card">
+        <div class="card-head">
+          <h2>导出记录</h2>
+          <button id="refreshExports" class="btn small" type="button">刷新</button>
+        </div>
+        <p class="hint">这里是本机输出目录里的 CSV / JSON / 词云 HTML，可直接下载。</p>
+        <div id="exports" class="exports">加载中…</div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

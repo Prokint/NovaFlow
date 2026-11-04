@@ -1,0 +1,6 @@
+Upstream: monagisa/douyin-ai-collector, tag v0.5.62
+https://github.com/monagisa/douyin-ai-collector
+
+This is a third-party NovaFlow distribution. Original source and authorship are retained.
+The upstream README is preserved as UPSTREAM-README.txt.
+NovaFlow changes: white comment-viewer presentation and desktop packaging metadata.

@@ -1,0 +1,1684 @@
+// 抖音评论采集核心（DSH 插件专用「司机」）
+//
+// 分工：
+//   · Chrome 扩展（douyin-collector）= 唯一能拿到 a_bogus 签名的东西（hook.js 必须在页面
+//     主世界里抢 window.fetch），它负责「拿签名 → 重放分页 → 按 cid 落库」。
+//   · 本文件 = 司机：自动把扩展装进浏览器 → 灌 cookies（可选）→ 打开视频页 → 点面板
+//     「开始采集」→ 盯着签名/条数 → 到量点「暂停」→ 从 chrome.storage.local 取结构化数据
+//     → 写 CSV/JSON。
+//
+// 两条硬要求（都是踩过坑之后加的）：
+//   1) **自动装扩展**：插件自带扩展副本，运行时同步到 ~/.dsh/douyin-collector/extension，
+//      再用 --load-extension 把它装进本次启动的浏览器。使用者不需要手动去 chrome://extensions
+//      加载，AI 第一次调用就装好了。
+//   2) **只交付本次新采的数据**：开始前快照 + 清空，结束时把「开始前就存在」的 cid 全部剔掉；
+//      一条新数据都没有 ⇒ 返回失败并说明原因，绝不给上一轮的残留。
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+
+const require = createRequire(import.meta.url);
+const PLUGIN_DIR = fileURLToPath(new URL('.', import.meta.url));
+
+// ---------- 可配置项（都有默认值，env / 插件 config 可覆盖） ----------
+
+/** 插件工作目录：默认 ~/.dsh/douyin-collector；DOUYIN_HOME 可整体搬走（测试/多实例隔离）。 */
+const DEFAULT_HOME = process.env.DOUYIN_HOME || path.join(os.homedir(), '.dsh', 'douyin-collector');
+
+export const DEFAULTS = {
+  /** 显式指定扩展目录（留空 = 自动：插件自带副本 → 已安装副本 → 开发目录） */
+  extDir: process.env.DOUYIN_EXT_DIR || '',
+  /** cookies.json（可选；留空则试 <home>/cookies.json） */
+  cookies: process.env.DOUYIN_COOKIES || '',
+  /** 浏览器 profile 默认跟 home 走，这样 DOUYIN_HOME 一改，整个采集环境都隔离。 */
+  profile: process.env.DOUYIN_PROFILE || path.join(DEFAULT_HOME, 'chrome-profile'),
+  chrome: process.env.DOUYIN_CHROME || '',
+  port: Number(process.env.DOUYIN_CDP_PORT || 9510),
+  outDir: process.env.DOUYIN_OUT_DIR || path.join(DEFAULT_HOME, 'out'),
+  /** 插件工作目录（扩展安装位置、默认 cookies、默认输出都在这下面） */
+  home: DEFAULT_HOME,
+  /**
+   * 检测到未登录时，默认等使用者扫码的秒数（工具参数 waitLoginSec 优先；显式传 0 = 不等）。
+   * 以前默认 0：没登录也照采，被限流后数据是残的 —— 默认值必须等得住人。
+   */
+  waitLoginSec: Number(process.env.DOUYIN_WAIT_LOGIN_SEC ?? 180),
+  /**
+   * 明知未登录也照采（默认关）。开了就退回「裸采」：抖音对匿名评论接口限流很凶，
+   * 采到的可能是残的，只有明确知道自己在干什么时才打开。
+   */
+  allowAnonymous: process.env.DOUYIN_ALLOW_ANONYMOUS === '1',
+  /**
+   * 目标条数上限（工具参数 max 优先）。默认 8 万 = 扩展单视频评论池的防御上限
+   * （douyin-collector/background.js:22 MAX_COMMENTS_PER_VIDEO = 80000）。
+   * v0.5.11 起作为 maxCount **下发给扩展**：到量只停顶层扫描，二级回复仍补完再收工
+   * （旧版既不封一级、又会在回复阶段点暂停 —— 见 README「目标条数」一节）。
+   */
+  max: Number(process.env.DOUYIN_MAX || 0) || 80000,
+  /**
+   * 顶层列表路数：错峰多路推进（每路一个 cursor，路与路之间错开 200ms）。
+   * v0.5.13 起真正生效，内置默认 3（`lanes=1` 就是老的单路串行）。
+   * 2026-10-07 真机实测（视频 7600000000000000004，扫完 21 页）：单路含 400ms 间隔 15.8s、
+   * 3~4 路错峰 200ms 7.7s（2.04×），唯一 cid 907 vs 912（一样多）。同时发（不错峰）会被
+   * 服务端并成同一页：4 个 cursor Σ200 条只去重出 56 条，next 字段还是对的（静默少采）。
+   * 扩展侧一旦发现两路拿到同一页会自动降回单路并在面板说明；这里仍会钳到 1..8。
+   */
+  lanes: Number(process.env.DOUYIN_LANES || 0) || 3,   // 顶层错峰多路（v0.5.13 起生效，1 = 老单路）
+  /**
+   * 单次采集总超时（工具参数 timeoutMs 优先）。默认 30 分钟：max 默认 8 万，
+   * 原先的 4 分钟根本采不到，会让人误以为已经「采到底」。
+   */
+  timeoutMs: Number(process.env.DOUYIN_TIMEOUT_MS || 0) || 1800000,
+  /**
+   * 采集前是否清空扩展里已有的数据（默认**不清空**）。
+   * 以前默认清空，会把扩展的「断点续采」进度一起抹掉（清空会重置去重表和 cursor）：
+   * 二级回复采到一半失败后再跑一轮，前面的进度全白费 —— 这正是用户报告里回复采不到的成因之一。
+   * 不清空时靠结束时按 cid 差集剔除旧数据，交付的仍然只有本轮新采的。
+   */
+  clearBefore: process.env.DOUYIN_CLEAR_BEFORE === '1',
+  /**
+   * 二级回复阶段的并发线程数（写进扩展 dts_settings）。0 = 不指定，用扩展内置的 4。
+   * 回复接口比列表接口更容易被限流（实测 4 路 × 600ms 就会撞窗口），所以单独留一个档位。
+   */
+  replyLanes: Number(process.env.DOUYIN_REPLY_LANES || 0) || 0,
+  /**
+   * v0.5.11：回复请求**跨线程**的全局最小间隔（毫秒，写进扩展 dts_settings）。
+   * 0 = 不指定，用扩展内置的 250ms（≈ ≤4 次/秒）。实测：4 路各自「取到线程就发」、
+   * 而绝大多数线程只有一页 ⇒ 速率 ≈ 20 次/秒，同一视频两轮能差到「0/46 线程被拒」
+   * 与「~139 条」——扩展侧现在按这个间隔全局限速，撞限流还会自动降 1 路。
+   */
+  replyGlobalGapMs: Number(process.env.DOUYIN_REPLY_GLOBAL_GAP_MS || 0) || 0,
+  /**
+   * 二级回复「等窗口」的**总**墙钟预算（秒，写进扩展 dts_settings）。0 = 扩展内置的 120 秒。
+   * v0.5.12 起扩展不再「一波判终局」：单波最多撞 12 秒，波间停 15/30/60 秒再打一波，
+   * 总等待封顶在这个预算上。真机依据（2026-10-07，同一视频 7600000000000000004）：
+   * A 轮会话内连撞 108 秒、48 次回复请求全是 HTTP 200 + 0 字节 body；11 秒后新会话的
+   * B 轮 39/39 线程全成；C 轮把预算放宽到 300 秒连撞 125 秒仍一次没放行；D 轮跨 8.5 分钟
+   * 4 波全被拒，随后新会话 x1 轮 23/23 全成 ⇒ 「10 秒」是假终局，但一口气硬撞也没用。
+   * 想回到老行为（十秒不行就收尾）就设 10。
+   */
+  replyThrottleSec: Number(process.env.DOUYIN_REPLY_THROTTLE_SEC || 0) || 0,
+  /**
+   * v0.5.18：进入二级回复补采前的「静默预热」秒数（写进扩展 dts_settings.replyWarmupMs）。
+   * 顶层列表刚扫完就打回复接口是风控挑战的高发点（实测会被成片拒绝/空 body），停一下让配额回血，
+   * 能明显削掉进入补采时的失败尖峰。**默认 10 秒**（v0.5.17 及以前扩展里写死 30 秒、谁也改不了）；
+   * 0 = 不预热。面板「回复预热 s」优先级更高（dts_user_settings > dts_settings）。
+   * 关闭/改时长：DOUYIN_REPLY_WARMUP_SEC=0 或 DSH 设置 → 插件 → 二级回复预热。
+   */
+  replyWarmupSec: Number.isFinite(Number(process.env.DOUYIN_REPLY_WARMUP_SEC))
+    ? Math.max(0, Math.min(600, Math.round(Number(process.env.DOUYIN_REPLY_WARMUP_SEC))))
+    : 10,
+  /**
+   * 二级回复阶段「多久没有新数据就收工」的秒数（默认 15 分钟）。
+   * 原来只有 120 秒：回复被限流、退避重试的过程中条数自然会长时间不动，
+   * 结果刚进回复阶段就被判定「没有新评论」直接收工 —— 回复永远是 0 条。
+   */
+  replyNoProgressSec: Number(process.env.DOUYIN_REPLY_NOPROGRESS_SEC || 0) || 900,
+  /**
+   * 采集失败（或超时/无进展收工）时，把现场存下来便于报障（默认开）：
+   * 截图 + 整页 HTML + 扩展状态 JSON + 这次运行的完整日志，落在 <home>/failures/<时间戳>-<videoId>/。
+   * 起因：2026-10-07 验收 A 轮只拿到 55 条、面板一句「没能自动找到评论入口」，
+   * 事后除了采集器的一行日志什么都查不了 —— 现场必须自动留下来。
+   * 关闭：DOUYIN_FAIL_SNAPSHOT=0（或插件设置里的 failSnapshot 关掉）。
+   */
+  failSnapshot: process.env.DOUYIN_FAIL_SNAPSHOT !== '0',
+  /**
+   * 失败快照最多保留几份（默认 20，按时间戳清最旧的）。
+   * 一份快照含整页 HTML + PNG（几百 KB 到几 MB），不清理迟早把磁盘塞满。
+   */
+  keepSnapshots: Number(process.env.DOUYIN_KEEP_SNAPSHOTS || 0) || 20,
+};
+
+/**
+ * 抖音登录态 cookie：任意一个非空值就说明这个 profile 已经登录过（实测 2026-10-05：
+ * 日常已登录 profile 有 sessionid / sessionid_ss / sid_tt / sid_guard / uid_tt / login_time，
+ * 全新未登录 profile 只有 passport_csrf_token、odin_tt、ttwid、passport_auth_mix_state）。
+ */
+export const SESSION_COOKIE_NAMES = ['sessionid', 'sessionid_ss', 'sid_tt'];
+
+/**
+ * 登录闸门：**没登录就不开始采集**。
+ * 判据是 cookie，不是 DOM —— 实测未登录时抖音页面上经常连登录按钮/弹窗都探不到
+ * （`[data-e2e="login-button"]`、`.trust-login-dialog-mask` 全空），只看 DOM 会漏判，
+ * 然后就开始裸采、被限流、拿到残缺数据。
+ * @param {{cookies?: Array<{name?: string, value?: string}>, loginButton?: boolean, mask?: boolean}} [signals]
+ * @returns {{hasSession: boolean, needLogin: boolean, dialog: boolean}}
+ */
+export function loginGate({ cookies = [], loginButton = false, mask = false } = {}) {
+  const hasSession = (Array.isArray(cookies) ? cookies : [])
+    .some((c) => c && SESSION_COOKIE_NAMES.includes(c.name) && String(c.value || '') !== '');
+  const dialog = loginButton === true || mask === true;
+  return { hasSession, dialog, needLogin: !hasSession };
+}
+
+/** playwright-core 可能在插件自己的 node_modules、也可能在全局；找不到就报清楚的错 */
+function loadChromium() {
+  const names = ['playwright-core', 'playwright'];
+  const home = os.homedir();
+  const execDir = path.dirname(process.execPath);
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  const dshHome = process.env.DSH_HOME || path.join(home, '.dsh');
+  const tried = [];
+
+  // 0) 显式指定优先（可以是模块目录，也可以是含有它的 node_modules 根）
+  const explicit = process.env.DOUYIN_PLAYWRIGHT;
+  if (explicit) {
+    try { return require(explicit).chromium; } catch (e) { tried.push(explicit); }
+  }
+  // 1) 宿主/插件自己的解析（插件 node_modules、profile node_modules 的逐级向上查找）
+  for (const n of names) {
+    try { return require(n).chromium; } catch (e) { tried.push(n); }
+  }
+  // 2) 全局安装位置。这一堆候选都是「node_modules 的父目录」，最后用 require.resolve(name, {paths}) 让 Node 自己走。
+  const roots = [
+    path.join(execDir, 'node_modules'),                       // 便携版 node：<node>/node_modules
+    path.join(execDir, 'node_global', 'node_modules'),        // 便携版 node + npm prefix=<node>/node_global（本机就是这种）
+    path.join(execDir, '..', 'lib', 'node_modules'),          // npm 默认 prefix：/usr/local/lib、/opt/homebrew/lib
+    path.join(execDir, '..', 'node_modules'),
+    path.join(appData, 'npm', 'node_modules'),                // Windows：npm i -g
+    path.join(home, '.npm-global', 'lib', 'node_modules'),
+    '/usr/local/lib/node_modules',
+    '/opt/homebrew/lib/node_modules',
+    '/usr/lib/node_modules',
+    path.join(dshHome, 'profiles', 'node_modules'),           // 装在 DSH profile 里
+  ];
+  try { // nvm 每个版本一个 prefix（mac/linux）
+    const nvm = path.join(home, '.nvm', 'versions', 'node');
+    for (const v of fs.readdirSync(nvm)) roots.push(path.join(nvm, v, 'lib', 'node_modules'));
+  } catch (e) { /* 没有 nvm 就算了 */ }
+  for (const p of String(process.env.NODE_PATH || '').split(path.delimiter)) if (p) roots.push(p);
+  for (const n of names) {
+    for (const root of roots) {
+      try { return require(require.resolve(n, { paths: [root] })).chromium; } catch (e) { tried.push(path.join(root, n)); }
+    }
+  }
+  throw new Error('找不到 playwright-core（试过：' + tried.join('、') + '）。'
+    + '装一个即可：npm i -g playwright-core，或在本 profile 里 pnpm add playwright-core；'
+    + '也可以用环境变量 DOUYIN_PLAYWRIGHT 直接指定模块目录。');
+}
+
+/** ms-playwright 的浏览器缓存在各平台的默认位置（playwright 自己就是按这个顺序找的） */
+function msPlaywrightCaches() {
+  const home = os.homedir();
+  return [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : path.join(home, 'AppData', 'Local', 'ms-playwright'), // Windows
+    path.join(home, 'Library', 'Caches', 'ms-playwright'), // macOS
+    path.join(home, '.cache', 'ms-playwright'), // Linux
+    '/ms-playwright', // 官方 playwright docker 镜像
+  ].filter(Boolean);
+}
+
+/** 一个 ms-playwright 缓存目录里 Chromium 的相对路径：新老目录结构（mac 新结构是 Google Chrome for Testing）都认 */
+const CHROMIUM_REL_PATHS = [
+  'chrome-win64/chrome.exe',
+  'chrome-win/chrome.exe',
+  'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium',
+  'chrome-mac-x64/Chromium.app/Contents/MacOS/Chromium',
+  'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+  'chrome-linux64/chrome',
+  'chrome-linux/chrome',
+];
+
+/** 系统里可能已经装好的 Chrome / Edge（不用下 playwright 的浏览器也能跑；注意品牌版装不了扩展） */
+function systemBrowsers() {
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  const home = os.homedir();
+  return [
+    // 非品牌版优先：Chromium / Google Chrome for Testing（mac 上 brew 装的 Chromium 也在这里）
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium',
+    path.join(home, 'Applications', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+    // 品牌版兜底（137+ 忽略命令行 --load-extension，见 isBrandedBrowser）
+    path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/microsoft-edge',
+  ];
+}
+
+/**
+ * 品牌版 Chrome / Edge 从 137 起忽略命令行 `--load-extension`，扩展装不进去
+ * （playwright 的默认参数也换不来）；非品牌版（Chromium / Google Chrome for Testing）不受影响。
+ * 只按路径特征判断，用来给用户一句能对症的提示。
+ */
+function isBrandedBrowser(exe) {
+  const p = String(exe || '').replace(/\\/g, '/').toLowerCase();
+  if (!p) return false;
+  if (p.includes('for testing')) return false;
+  if (p.includes('chromium.app') || p.includes('/chrome-linux') || p.includes('chromium-')) return false;
+  return /google\/chrome\/application\/chrome\.exe$/.test(p)
+    || /google chrome\.app\/contents\/macos\/google chrome$/.test(p)
+    || /microsoft\/edge\/application\/msedge\.exe$/.test(p)
+    || /microsoft edge\.app\/contents\/macos\/microsoft edge$/.test(p)
+    || /\/google-chrome(-stable)?$/.test(p);
+}
+
+/**
+ * 找可用的 Chromium 可执行文件（playwright 的 chromium 不一定会下载浏览器，
+ * 所以先看各平台的 ms-playwright 缓存，再退到系统已装的 Chromium / Chrome / Edge）。
+ */
+function findChrome() {
+  const ok = (p) => p && fs.existsSync(p);
+  if (ok(DEFAULTS.chrome)) return String(DEFAULTS.chrome).replace(/\\/g, '/');
+
+  for (const base of msPlaywrightCaches()) {
+    if (!fs.existsSync(base)) continue;
+    let dirs = [];
+    try { dirs = fs.readdirSync(base).filter((d) => /^chromium-\d+$/.test(d)); } catch (e) { continue; }
+    dirs.sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1])); // 版本号大的优先
+    for (const d of dirs) {
+      for (const rel of CHROMIUM_REL_PATHS) {
+        const exe = path.join(base, d, ...rel.split('/'));
+        if (ok(exe)) return exe.replace(/\\/g, '/');
+      }
+    }
+  }
+  for (const exe of systemBrowsers()) if (ok(exe)) return exe.replace(/\\/g, '/');
+  return '';
+}
+
+/**
+ * 上一次调用为了「等扫码」故意留下的浏览器窗口：这次别再抢 profile 锁，直接接上去。
+ * 先用调试端口问一句，只认「开着 douyin.com 页面的窗口」——不是我们的就绝不碰。
+ * @returns {Promise<{browser: object, ctx: object, page: object}|null>}
+ */
+async function attachRunningBrowser(chromium, log) {
+  const endpoint = `http://127.0.0.1:${DEFAULTS.port}`;
+  const targets = await fetch(`${endpoint}/json/list`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const mine = (Array.isArray(targets) ? targets : [])
+    .find((t) => t && t.type === 'page' && /^https:\/\/www\.douyin\.com\//.test(String(t.url || '')));
+  if (!mine) return null;
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(endpoint, { timeout: 5000 });
+  } catch (e) {
+    log('接上一次的浏览器窗口失败（' + e.message + '），重新开一个');
+    return null;
+  }
+  const ctx = browser.contexts()[0];
+  const page = ctx && (ctx.pages().find((p) => !p.isClosed() && /^https:\/\/www\.douyin\.com\//.test(p.url())) || ctx.pages()[0]);
+  if (!ctx || !page) {
+    await browser.close().catch(() => {});
+    return null;
+  }
+  log(`接上上一次留下的浏览器窗口（CDP :${DEFAULTS.port}）：${page.url()}`);
+  return { browser, ctx, page };
+}
+
+/**
+ * 采集锁：同一个浏览器 profile 同一时刻只能有一个采集在跑。
+ * 工具上的 `isConcurrencySafe=false` 只管得住**同一个宿主进程**；同一个 DSH_HOME 下可以装好几个
+ * profile（比如 desktop + web），两边的 agent 可能同时调这个工具 —— 后来者会「接上」前一个的
+ * 浏览器窗口，两个采集互相踩。所以锁必须落到文件系统上（`~/.dsh/douyin-collector/collector.lock`）。
+ * @returns {() => void} 释放函数（幂等，可重复调用）
+ */
+export function acquireRunLock({ log, url }) {
+  const lockPath = path.join(DEFAULTS.home, 'collector.lock');
+  fs.mkdirSync(DEFAULTS.home, { recursive: true });
+  const read = () => { try { return JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch { return null; } };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; } };
+  const held = read();
+  const heldPid = held && Number(held.pid);
+  if (heldPid && heldPid !== process.pid && alive(heldPid)) {
+    throw new Error('已经有一个采集在跑（pid ' + heldPid
+      + (held.profile ? '，profile ' + held.profile : '')
+      + (held.startedAt ? '，开始于 ' + held.startedAt : '')
+      + '）：同一个浏览器 profile 同一时刻只能跑一个采集，等它结束（或关掉它留下的浏览器窗口）再试。'
+      + '锁文件：' + lockPath);
+  }
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    profile: process.env.DSH_PROFILE || '',
+    url,
+  }, null, 2) + '\n');
+  log('拿到采集锁（' + lockPath + '，pid ' + process.pid + '）');
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try {
+      const current = read();
+      if (current === null || Number(current.pid) === process.pid) fs.rmSync(lockPath, { force: true });
+    } catch { /* 放锁失败不影响本次结果 */ }
+  };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 结果默认落在「当前会话工作区」下的这个子目录里（不污染工作区根目录；可用 outDir 覆盖）。 */
+export const WORKSPACE_OUT_SUBDIR = 'douyin-comments';
+
+/**
+ * 当前会话的工作区目录。DSH 把每个会话的工作区放在 `exec.agent.session.header.cwd`
+ * （实测 dsh 0.1.7-rc.2 与 0.2.0-rc.2 同形；内置 fs 工具也是这么取 cwd 的）。
+ * @param {object} [exec] 工具执行上下文
+ * @returns {string} 工作区绝对路径，取不到时空串
+ */
+export function sessionWorkspaceCwd(exec) {
+  const cwd = exec && exec.agent && exec.agent.session && exec.agent.session.header
+    ? exec.agent.session.header.cwd
+    : undefined;
+  return typeof cwd === 'string' && cwd.trim() !== '' ? cwd.trim() : '';
+}
+
+/**
+ * 本次调用的输出目录：显式 outDir > 当前会话工作区/`douyin-comments` > 全局默认目录。
+ * 「别人的机器上采完的数据就在自己的工作区里」——不用去 `~/.dsh/douyin-collector/out` 里翻。
+ * @param {{explicit?: string, exec?: object, fallback?: string}} [o]
+ * @returns {string}
+ */
+export function resolveOutDir({ explicit, exec, fallback } = {}) {
+  const asked = typeof explicit === 'string' && explicit.trim() !== '' ? explicit.trim() : '';
+  if (asked) return asked;
+  const workspace = sessionWorkspaceCwd(exec);
+  if (workspace) return path.join(workspace, WORKSPACE_OUT_SUBDIR);
+  return fallback || DEFAULTS.outDir;
+}
+
+export function videoIdFromUrl(u) {
+  const s = String(u || '');
+  // ① 只认 /video/<id> 与 modal_id= 两级（上下文明确，不会误伤）
+  let m = /\/video\/(\d{15,25})/.exec(s);
+  if (m) return m[1];
+  m = /[?&]modal_id=(\d{15,25})/.exec(s);
+  if (m) return m[1];
+  // ② 兜底仅在 URL 里恰好只有一个 15~25 位数字串时采用。
+  //    分享文案常带 19 位时间戳（如 1760000000000000000）等干扰数字，正则层面
+  //    无法与视频 id 区分；有多个候选说明无法确定，宁可返回 null（上层用原 URL
+  //    继续，由页面签名侧识别真实 id），也不静默采错目标。
+  const uniq = [...new Set(s.match(/\d{15,25}/g) || [])];
+  return uniq.length === 1 ? uniq[0] : null;
+}
+
+// ---------- 扩展：定位 + 自动安装 ----------
+
+/** 扩展运行必需的文件（manifest 里引用到的） */
+const EXT_FILES = ['manifest.json', 'hook.js', 'content.js', 'background.js', 'panel.css', 'app.js'];
+
+function readManifest(dir) {
+  try {
+    // manifest.json 可能带 UTF-8 BOM（Chrome 不在意，JSON.parse 会炸）——统一去掉再解析
+    return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''));
+  } catch (e) { return null; }
+}
+
+/**
+ * 哈希前的路径字节，按 Chromium 的定法（crx_file::id_util::GenerateIdForPath）：
+ *   · 哈希的是 base::FilePath 的**原生**字节 —— Windows 上是 wchar（UTF-16LE），
+ *     POSIX 上是 char（UTF-8）。以前一律用 UTF-16LE，mac/Linux 上算出来的 ID 是错的，
+ *     扩展 SW 睡着时的兜底页 chrome-extension://<id>/index.html 打不开；
+ *   · Windows 上先把盘符转大写（MaybeNormalizePath）；
+ *   · 加载未打包扩展时路径先过 MakeAbsoluteFilePath，POSIX 上就是 realpath（会解开符号链接，
+ *     比如 macOS 的 /var → /private/var），所以这里也解一次（目录不存在就按原样）。
+ * platform 参数只给自检用（在一台机器上把两种定法都钉住）。
+ */
+export function extensionIdPathBytes(dir, platform = process.platform) {
+  if (platform === 'win32') {
+    let p = path.win32.resolve(dir);
+    if (/^[a-z]:/.test(p)) p = p[0].toUpperCase() + p.slice(1);
+    return Buffer.from(p, 'utf16le');
+  }
+  let p = path.posix.resolve(dir);
+  if (platform === process.platform) {
+    try { p = fs.realpathSync.native(p); } catch (e) { /* 目录还不存在：按原样 */ }
+  }
+  return Buffer.from(p, 'utf8');
+}
+
+/** 未打包扩展的 ID：SHA256(路径原生字节) 前 16 字节，每个半字节 0-f 映射到 a-p（Chromium 定法） */
+export function extensionIdFromPath(dir, platform = process.platform) {
+  const h = crypto.createHash('sha256').update(extensionIdPathBytes(dir, platform)).digest();
+  let id = '';
+  for (let i = 0; i < 16; i++) {
+    id += String.fromCharCode(97 + (h[i] >> 4)) + String.fromCharCode(97 + (h[i] & 15));
+  }
+  return id;
+}
+
+/** 目录指纹（内容哈希），用来判断要不要重新安装 */
+function dirSignature(dir) {
+  const manifest = readManifest(dir);
+  const files = EXT_FILES.filter((f) => fs.existsSync(path.join(dir, f)));
+  const h = crypto.createHash('sha256');
+  for (const f of files) {
+    h.update(f);
+    h.update(fs.readFileSync(path.join(dir, f)));
+  }
+  return { version: (manifest && manifest.version) || '0', name: (manifest && manifest.name) || '', files, hash: h.digest('hex').slice(0, 16) };
+}
+
+/** 按优先级找扩展源目录：显式指定 → 插件自带 → 已安装副本 → 开发目录（仓库布局的相对路径） */
+export function findExtensionSource() {
+  const cands = [];
+  if (DEFAULTS.extDir) cands.push({ dir: DEFAULTS.extDir, why: 'DOUYIN_EXT_DIR / 插件配置' });
+  cands.push({ dir: path.join(PLUGIN_DIR, 'extension'), why: '插件自带（随包分发）' });
+  cands.push({ dir: path.join(DEFAULTS.home, 'extension'), why: '上次安装的副本' });
+  // 开发兜底：仓库里 douyin-collector/ 与 dsh-douyin-comments/ 是平级目录，相对定位不写死盘符
+  cands.push({ dir: path.resolve(PLUGIN_DIR, '..', 'douyin-collector'), why: '开发目录（仓库平级）' });
+  for (const c of cands) {
+    if (fs.existsSync(path.join(c.dir, 'manifest.json'))) return c;
+  }
+  return null;
+}
+
+function copyExtFiles(srcDir, dstDir) {
+  fs.mkdirSync(dstDir, { recursive: true });
+  for (const f of fs.readdirSync(srcDir)) {
+    const s = path.join(srcDir, f);
+    if (!fs.statSync(s).isFile()) continue;
+    if (!/\.(json|js|css|html)$/i.test(f)) continue;
+    fs.copyFileSync(s, path.join(dstDir, f));
+  }
+}
+
+/**
+ * 把扩展「装进浏览器」。
+ *
+ * 背景：MV3 未打包扩展只能靠 `--load-extension=<目录>` 让 Chrome 加载，没有别的官方
+ * 自动化入口。所以「自动安装」= 本插件自带一份扩展 → 同步到一个稳定目录 →
+ * 每次启动浏览器都用它加载。使用者视角就是：AI 第一次调用时扩展已经装好了。
+ *
+ * @returns {{dir:string, version:string, name:string, source:string, sourceWhy:string,
+ *            copied:boolean, hash:string, files:string[]}}
+ */
+export function installExtension({ log = () => {} } = {}) {
+  const src = findExtensionSource();
+  if (!src) {
+    throw new Error('找不到抖音评论采集扩展（manifest.json）：'
+      + '插件自带副本缺失，也没在 ' + path.join(DEFAULTS.home, 'extension')
+      + ' 或开发目录（仓库平级的 douyin-collector/）找到。可用 DOUYIN_EXT_DIR 显式指定。');
+  }
+  const target = path.join(DEFAULTS.home, 'extension');
+  const sSrc = dirSignature(src.dir);
+  const sDst = fs.existsSync(path.join(target, 'manifest.json')) ? dirSignature(target) : null;
+  let copied = false;
+
+  if (path.resolve(src.dir) !== path.resolve(target)) {
+    if (!sDst || sDst.hash !== sSrc.hash) {
+      fs.rmSync(target, { recursive: true, force: true });
+      copyExtFiles(src.dir, target);
+      copied = true;
+    }
+  }
+  const sig = dirSignature(target);
+  fs.mkdirSync(DEFAULTS.home, { recursive: true });
+  fs.writeFileSync(path.join(DEFAULTS.home, 'extension.installed.json'), JSON.stringify({
+    installedAt: new Date().toISOString(), dir: target,
+    from: src.dir, why: src.why, version: sig.version, hash: sig.hash, copiedAtThisRun: copied,
+  }, null, 2), 'utf8');
+
+  log(`扩展就绪：v${sig.version}${sig.name ? '（' + sig.name + '）' : ''}`
+    + ` @ ${target}` + (copied ? `（本次从「${src.why}」安装）` : '（已是最新，无需重装）'));
+  return { dir: target, version: sig.version, name: sig.name, source: src.dir, sourceWhy: src.why, copied, hash: sig.hash, files: sig.files };
+}
+
+/** 记录「上一次启动浏览器时用的扩展 hash」，用来判断扩展文件有没有变过 */
+const LAUNCH_STATE_FILE = 'extension.launched.json';
+
+export function readLaunchState() {
+  try { return JSON.parse(fs.readFileSync(path.join(DEFAULTS.home, LAUNCH_STATE_FILE), 'utf8')) || {}; } catch { return {}; }
+}
+
+export function writeLaunchState(next) {
+  fs.mkdirSync(DEFAULTS.home, { recursive: true });
+  fs.writeFileSync(path.join(DEFAULTS.home, LAUNCH_STATE_FILE), JSON.stringify(next, null, 2), 'utf8');
+}
+
+/**
+ * 清掉浏览器 profile 里对「未打包扩展脚本」的缓存。
+ *
+ * 实测坑（v0.2.6 排查了两小时）：Chrome 把扩展的脚本/代码缓存在 profile 里
+ * （`Default/Code Cache`、`Default/Service Worker/ScriptCache`）。扩展目录里的
+ * background.js 换了新代码、`chrome.runtime.getManifest().version` 也是新版本，
+ * 但**新开的浏览器里跑的 `executeAiCommand` 还是旧代码**（AI 桥回 UNKNOWN_COMMAND），
+ * 只有把这两个目录挪走才生效。所以扩展内容一变，启动前先清一次。
+ *
+ * @returns {string[]} 真正删掉的目录
+ */
+export function clearStaleScriptCaches(profileDir, { log = () => {} } = {}) {
+  const targets = [
+    path.join(profileDir, 'Default', 'Code Cache'),
+    // 整个 Service Worker 目录一起删（不只是里面的 ScriptCache）：
+    // 只删脚本缓存会留下指向已删脚本的注册记录（同目录的 Database/），Chrome 下次启动
+    // 可能起不来扩展后台 —— 实测表现是面板注入正常、页面照常采集，但页面里每次
+    // chrome.runtime.sendMessage 都回「Receiving end does not exist」：清空无效、
+    // 评论一条不落库，采集器最后只能报「交付 0 条」（2026-10-06 真机踩过一次）。
+    // 整个删掉让 Chrome 按 manifest 重新注册，代价只是首次启动多几十毫秒。
+    path.join(profileDir, 'Default', 'Service Worker'),
+  ];
+  const cleared = [];
+  for (const t of targets) {
+    try {
+      if (fs.existsSync(t)) { fs.rmSync(t, { recursive: true, force: true }); cleared.push(t); }
+    } catch (e) {
+      log('清浏览器脚本缓存失败（继续跑，但可能还在用旧扩展代码）：' + t + ' — ' + e.message);
+    }
+  }
+  return cleared;
+}
+
+// ---------- CSV（列契约抄自扩展 background.js，顺序不变） ----------
+
+// 与扩展 background.js 的 csvCell 必须保持同源（verify-tool.mjs 有一致性断言）：
+// 评论文本完全由他人控制，以 = + - @ \t \r 开头时 Excel/WPS 会当公式执行
+// （=HYPERLINK / DDE），前置单引号挡掉。本表无合法负数字段，误伤面为零。
+function csvCell(v) {
+  if (v === null || v === undefined) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+export function cleanText(t) {
+  if (!t) return '';
+  return String(t)
+    .replace(/\[[^\[\]]{1,12}\]/g, '')
+    .replace(/@[^\s@]{1,30}/g, '')
+    .replace(/#[^\s#]{1,40}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * v0.5.27：CSV 第 2 行是中文列名解释，方便不看英文的同事直接读表。
+ * 第 1 行仍是英文键（机器解析、AI 读取口径不变）；说明行首列以 "# " 开头，
+ * 解析器看到 cid 以 "#" 开头就当说明行跳过即可。
+ */
+export const CSV_COL_LABELS = {
+  cid: '评论ID',
+  create_time: '发布时间戳(秒)',
+  create_time_str: '发布时间(UTC)',
+  text: '评论原文',
+  text_clean: '文本(去表情话题)',
+  text_len: '字数',
+  digg_count: '点赞数',
+  reply_comment_total: '该评论回复数',
+  ip_label: 'IP属地',
+  is_hot: '是否热评(1/0)',
+  is_folded: '是否折叠(1/0)',
+  level: '层级(1一级2二级)',
+  stick_position: '置顶位(0非置顶)',
+  user_nickname: '昵称',
+  user_uid: '用户内部ID(不可搜)',
+  is_reply: '是否二级回复(1/0)',
+  parent_cid: '父评论ID',
+  user_sec_uid: 'sec_uid(主页链接用)',
+  user_unique_id: '抖音号(空则填数字短号)',
+  video_id: '视频ID(多视频导出)'
+};
+
+/** 说明行：按 cols 顺序取中文标签，首列加 "# " 标记 */
+export function csvLabelRow(cols) {
+  return cols
+    .map((k, i) => csvCell((i === 0 ? '# ' : '') + (CSV_COL_LABELS[k] || k)))
+    .join(',');
+}
+
+export function toCsv(comments) {
+  const cols = [
+    'cid', 'create_time', 'create_time_str', 'text', 'text_clean', 'text_len',
+    'digg_count', 'reply_comment_total', 'ip_label', 'is_hot', 'is_folded',
+    'level', 'stick_position', 'user_nickname', 'user_uid',
+    'is_reply', 'parent_cid',
+    // v0.5.17：末尾追加「能用的用户标识」列。user_uid 是抖音内部数字 ID，不是抖音号、
+    // 搜不到人也拼不出主页；用户真正需要的是 sec_uid（拼主页）与 unique_id（抖音号）。
+    // v0.5.28：按客户要求删掉 user_short_id（抖音内部短号，客户用不到；JSON 里仍有原始字段）。
+  // v0.5.29：按客户要求加回兜底——`user_unique_id` 为空时改填数字短号（不新增列，标签改成「抖音号(空则填数字短号)」）。
+    'user_sec_uid', 'user_unique_id',
+  ];
+  const rows = [cols.join(','), csvLabelRow(cols)];
+  for (const c of comments) {
+    const t = c.text || '';
+    const ct = c.create_time ? new Date(c.create_time * 1000).toISOString() : '';
+    const u = c.user || {};
+    rows.push([
+      csvCell(c.cid), csvCell(c.create_time), csvCell(ct), csvCell(t), csvCell(cleanText(t)),
+      csvCell([...String(t)].length),
+      csvCell(c.digg_count), csvCell(c.reply_comment_total), csvCell(c.ip_label),
+      csvCell(c.is_hot), csvCell(c.is_folded), csvCell(c.level), csvCell(c.stick_position),
+      csvCell(u.nickname), csvCell(u.uid),
+      csvCell(c.is_reply ? 1 : 0), csvCell(c.parent_cid),
+      csvCell(u.sec_uid), csvCell(u.unique_id || u.short_id),
+    ].join(','));
+  }
+  return rows.join('\r\n');
+}
+
+// ---------- 运行日志与失败现场快照（0.5.14）----------
+// 报障的两件套：① 每次采集都有一份完整日志（不再只是工具输出里被截断的 60 行）；
+// ② 失败/超时时自动留现场（截图 + 整页 HTML + 扩展状态 + 日志副本），不用再让用户复现。
+
+/** 运行日志目录：<home>/logs */
+export function runLogDir(home = DEFAULTS.home) { return path.join(home, 'logs'); }
+
+/** 运行日志最多留几份（每次采集一份；小的文本文件，但别无限攒） */
+export const RUN_LOG_KEEP = 50;
+
+/** 失败现场快照根目录：<home>/failures */
+export function failureRootDir(home = DEFAULTS.home) { return path.join(home, 'failures'); }
+
+/**
+ * 只留最新的 keep 个条目（按名字排序；日志/快照的名字都带 ISO 时间戳前缀），返回删掉的个数。
+ * 删除前再核一次「待删路径确实在 dir 里面」——目录名来自 readdir，理论上不会越界，
+ * 但这是 rm -r，宁可笑一次也不冒险。
+ */
+export function pruneDir(dir, keep) {
+  const n = Math.max(1, Math.round(Number(keep) || 0) || 20);
+  let names;
+  try { names = fs.readdirSync(dir); } catch (e) { return 0; }
+  const victims = names.slice().sort().slice(0, Math.max(0, names.length - n));
+  const root = path.resolve(dir) + path.sep;
+  let removed = 0;
+  for (const v of victims) {
+    const p = path.resolve(path.join(dir, v));
+    if (!p.startsWith(root)) continue;
+    try { fs.rmSync(p, { recursive: true, force: true }); removed++; } catch (e) { /* 删不掉就算了 */ }
+  }
+  return removed;
+}
+
+/**
+ * 本次采集的运行日志：**边跑边 append**（进程被杀也留得下），同时留一份内存尾巴给失败快照用。
+ * 写日志失败绝不影响采集本身（磁盘满/只读时退回「只有内存尾巴」）。
+ */
+export function createRunLog({ home = DEFAULTS.home, header = [] } = {}) {
+  const t0 = Date.now();
+  let file = '';
+  try {
+    fs.mkdirSync(runLogDir(home), { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    file = path.join(runLogDir(home), `collect-${stamp}-${process.pid}.log`);
+  } catch (e) { file = ''; }
+  const lines = [];
+  const push = (s) => {
+    const line = `[+${((Date.now() - t0) / 1000).toFixed(1)}s] ${String(s)}`;
+    lines.push(line);
+    if (lines.length > 80) lines.shift();
+    if (file) { try { fs.appendFileSync(file, line + '\n', 'utf8'); } catch (e) { /* 忽略 */ } }
+  };
+  for (const h of header) push(h);
+  // 日志只留最近 50 份（一次采集一份，小文件，但别无限攒）
+  pruneDir(runLogDir(home), RUN_LOG_KEEP);
+  return {
+    path: file,
+    /** 最近 80 行（失败快照的 status.json 里带上，一眼能看到失败前发生了什么） */
+    ring: () => lines.slice(),
+    push,
+    /** 把整份日志复制进某个目录（失败快照要自带一份，一次性打包发给别人就行） */
+    copyTo: (targetDir) => {
+      if (!file || !targetDir) return '';
+      try {
+        const p = path.join(targetDir, 'run.log');
+        fs.copyFileSync(file, p);
+        return p;
+      } catch (e) { return ''; }
+    },
+  };
+}
+
+/** 失败结果里统一附上的「去哪儿看」提示。 */
+export function hints({ logPath = '', snapshotDir = '' } = {}) {
+  const bits = [];
+  if (logPath) bits.push('运行日志：' + logPath);
+  if (snapshotDir) bits.push('失败现场：' + snapshotDir);
+  return bits.length ? '（' + bits.join('；') + '）' : '';
+}
+
+/**
+ * 失败现场快照：截图 + 整页 HTML + 扩展状态 JSON + 运行日志副本。
+ * page 可能已经不可用（比如浏览器崩了），每一项各自兜错，能留几样留几样；
+ * status.json 优先写 —— 它是唯一一定写得成的东西。
+ */
+export async function captureFailureSnapshot({
+  home = DEFAULTS.home, page = null, reason = '', status = null, extra = {}, runLog = null, keep = 20,
+} = {}) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const dir = path.join(failureRootDir(home), `${stamp}-${String(extra.videoId || 'unknown').slice(0, 24)}`);
+  const out = { dir: '', files: [] };
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return out; }
+  out.dir = dir;
+  const ok = (name) => out.files.push(name);
+
+  // 没有现成状态就自己从页面里抠一份（旧扩展没有 getStatus 也不怕，全部兜错）
+  let live = status || null;
+  if (!live && page) {
+    live = await page.evaluate(() => {
+      try {
+        const c = window.__DTS_COLLECTOR__;
+        const s = (c && c.getStatus) ? c.getStatus() : null;
+        const p = document.getElementById('dts-collector-panel');
+        return {
+          phase: s && s.phase, unique: s && s.unique, savedCount: s && s.savedCount,
+          note: s && s.note, error: s && s.error, bgOk: s && s.bgOk, bgErr: s && s.bgErr,
+          panel: p ? p.innerText.replace(/\s+/g, ' ') : '',
+        };
+      } catch (e) { return { evalError: String((e && e.message) || e) }; }
+    }).catch(() => null);
+  }
+  let pageUrl = '';
+  try { pageUrl = page && !page.isClosed() ? page.url() : ''; } catch (e) { pageUrl = ''; }
+
+  try {
+    fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify({
+      at: new Date().toISOString(), reason, pageUrl, status: live,
+      ...extra, runLogTail: runLog ? runLog.ring() : [],
+    }, null, 2), 'utf8');
+    ok('status.json');
+  } catch (e) { /* 忽略 */ }
+
+  if (page && !page.isClosed()) {
+    try {
+      await page.screenshot({ path: path.join(dir, 'screenshot.png'), timeout: 15000 });
+      ok('screenshot.png');
+    } catch (e) { /* 忽略 */ }
+    try {
+      const html = await page.content();
+      fs.writeFileSync(path.join(dir, 'page.html'), String(html || ''), 'utf8');
+      ok('page.html');
+    } catch (e) { /* 忽略 */ }
+  }
+
+  if (runLog && typeof runLog.copyTo === 'function' && runLog.copyTo(dir)) ok('run.log');
+  pruneDir(failureRootDir(home), keep);
+  return out;
+}
+
+// ---------- 主流程 ----------
+
+/**
+ * 采一个抖音视频的公开评论。
+ * @param {object} o
+ * @param {string} o.url        视频链接（/video/<id>、带 modal_id 的浮层链接、或含 id 的分享文本）
+ * @param {number} [o.max]      目标条数上限（默认 DEFAULTS.max = 80000，到量即暂停）
+ * @param {boolean} [o.replies] 是否等二级回复补采（默认 true）
+ * @param {number} [o.timeoutMs] 总超时（默认 DEFAULTS.timeoutMs = 1800000）
+ * @param {number} [o.lanes]    顶层列表路数（v0.5.13 起生效：错峰多路，默认 3，1 = 老单路；会写进扩展 dts_settings.lanes）
+ * @param {number} [o.waitLoginSec] 检测到未登录时等使用者扫码的秒数（不传用 DEFAULTS.waitLoginSec，默认 180；显式 0 = 不等）
+ * @param {string} [o.outDir]   输出目录
+ * @param {boolean} [o.keep]    采完不关浏览器（调试用）
+ * @param {AbortSignal} [o.signal] 调用方取消
+ * @param {(s:string)=>void} [o.onLog]
+ */
+export async function collectDouyinComments(o = {}) {
+  const userLog = o.onLog || (() => {});
+  const url = String(o.url || '').trim();
+  if (!url) throw new Error('缺少 url');
+  // 本次运行的日志（<home>/logs/collect-<时间戳>-<pid>.log）：边跑边写，工具输出里那 60 行只是摘要
+  const runLog = createRunLog({
+    home: DEFAULTS.home,
+    header: [
+      '== douyin_comments 运行日志 ==',
+      'at=' + new Date().toISOString(),
+      'url=' + url,
+      'node=' + process.version + ' pid=' + process.pid,
+      'home=' + DEFAULTS.home,
+    ],
+  });
+  const log = (s) => { runLog.push(String(s)); userLog(s); };
+  log('运行日志：' + (runLog.path || '(写不进日志文件，只有内存尾巴)'));
+  const max = Number(o.max) > 0 ? Number(o.max) : (Number(DEFAULTS.max) > 0 ? Number(DEFAULTS.max) : 80000);
+  const wantReplies = o.replies !== false;
+  const timeoutMs = Number(o.timeoutMs) > 0
+    ? Number(o.timeoutMs)
+    : (Number(DEFAULTS.timeoutMs) > 0 ? Number(DEFAULTS.timeoutMs) : 1800000);
+  // 顶层路数：工具参数 > 插件设置（DEFAULTS.lanes）> 3；v0.5.13 起真正生效（错峰多路，1 = 老单路）
+  const lanes = Math.max(1, Math.min(8, Math.round(
+    Number(o.lanes) > 0 ? Number(o.lanes) : (Number(DEFAULTS.lanes) > 0 ? Number(DEFAULTS.lanes) : 3),
+  )));
+  // 采集前清空扩展缓存：默认不清（清空会毁掉扩展的断点续采进度）
+  const clearBefore = o.clearBefore === undefined ? !!DEFAULTS.clearBefore : !!o.clearBefore;
+  // 二级回复阶段的三档设置（0/空 = 用扩展内置值）
+  const numOr = (v, d) => {
+    const n = Number(v);
+    if (isFinite(n) && n > 0) return n;
+    const dn = Number(d);
+    return isFinite(dn) && dn > 0 ? dn : 0;
+  };
+  const replyLanes = Math.max(0, Math.min(8, Math.round(numOr(o.replyLanes, DEFAULTS.replyLanes))));
+  // v0.5.11：回复请求全局限速（0 = 用扩展内置的 250ms）
+  const replyGlobalGapMs = Math.max(0, Math.min(2000, Math.round(numOr(o.replyGlobalGapMs, DEFAULTS.replyGlobalGapMs))));
+  const replyThrottleSec = numOr(o.replyThrottleSec, DEFAULTS.replyThrottleSec);
+  // v0.5.18：回复预热允许显式 0（= 不预热），所以不能用 numOr（它把 0 当「未指定」）
+  const replyWarmupSec = Math.max(0, Math.min(600, Math.round(
+    (o.replyWarmupSec === undefined || o.replyWarmupSec === null || o.replyWarmupSec === ''
+      ? Number(DEFAULTS.replyWarmupSec)
+      : Number(o.replyWarmupSec)) || 0,
+  )));
+  const replyNoProgressMs = Math.max(60000, Math.round(
+    (numOr(o.replyNoProgressSec, DEFAULTS.replyNoProgressSec) || 900) * 1000,
+  ));
+  const waitLoginSec = o.waitLoginSec === undefined || o.waitLoginSec === null || o.waitLoginSec === ''
+    ? Math.max(0, Number(DEFAULTS.waitLoginSec) || 0)
+    : Math.max(0, Number(o.waitLoginSec) || 0);
+  const outDir = o.outDir || DEFAULTS.outDir;
+  // v0.5.38：可选「顺手导一份交互词云 HTML」（点面板「导出词云」按钮，把下载文件搬到 outDir）
+  const wantCloud = o.cloud === true || o.cloud === 'true' || o.cloud === 1 || o.cloud === '1';
+  // 失败现场快照：默认开（插件设置 failSnapshot / 工具参数可关；关掉就没有截图和整页 HTML）
+  const failSnapshot = o.failSnapshot === undefined || o.failSnapshot === null || o.failSnapshot === ''
+    ? DEFAULTS.failSnapshot !== false
+    : (o.failSnapshot === true || o.failSnapshot === 'true' || o.failSnapshot === 1 || o.failSnapshot === '1');
+  const keepSnapshots = Math.max(1, Math.round(numOr(o.keepSnapshots, DEFAULTS.keepSnapshots) || 20));
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  const rest = () => deadline - Date.now();
+  const aborted = () => !!(o.signal && o.signal.aborted);
+  // DSH Web 控制台用：把页面侧状态实时推给调用方（工具调用不传就完全不做事）。
+  const emitStatus = (status) => {
+    if (typeof o.onStatus !== 'function' || !status) return;
+    try { o.onStatus(status); } catch { /* UI 回调异常不能拖垮采集 */ }
+  };
+
+  // ③ 之前的每一步都可能抛错（装扩展、找浏览器、接管旧窗口、磁盘错误），
+  //    所以 page/vid/target 先声明在 try 外面，catch 里才存得下现场。
+  let page = null;
+  let vid = '';
+  let target = url;
+  let endedBy = '';   // done / max-cap / top-done / stall / timeout / abort —— 收工原因写进日志与失败快照
+
+  /** 留失败现场（截图 + 整页 HTML + 扩展状态 + 日志副本）；返回快照目录（关了或没写成 = 空串） */
+  const snap = async (reason, statusVal = null, extra = {}) => {
+    if (!failSnapshot) return '';
+    const r = await captureFailureSnapshot({
+      home: DEFAULTS.home, page, reason, status: statusVal, runLog, keep: keepSnapshots,
+      extra: {
+        videoId: extra.videoId || vid || '', url: extra.url || target || url,
+        max, lanes, replies: wantReplies, timeoutMs, clearBefore, waitLoginSec,
+        ...extra,
+      },
+    }).catch((e) => ({ dir: '', files: [], error: String((e && e.message) || e) }));
+    if (r.dir) log('📸 失败现场已存：' + r.dir + '（' + (r.files || []).join('、') + '）');
+    else log('⚠ 失败现场没存下来（' + failureRootDir(DEFAULTS.home) + ' 不可写？）：' + (r.error || ''));
+    return r.dir || '';
+  };
+  /** 失败信息统一附上「去哪儿看现场」 */
+  const hint = (dir) => hints({ logPath: runLog.path, snapshotDir: dir });
+
+  // ① 自动装扩展（插件自带副本 → 稳定目录）
+  const ext = installExtension({ log });
+
+  const chromium = loadChromium();
+  const chrome = findChrome();
+  if (!chrome) throw new Error('找不到 Chromium 可执行文件：ms-playwright 缓存里没有 chromium-*'
+    + '（Windows 在 %LOCALAPPDATA%\\ms-playwright，macOS 在 ~/Library/Caches/ms-playwright，Linux 在 ~/.cache/ms-playwright），'
+    + '系统里也没发现 Chromium / Chrome / Edge。用 DOUYIN_CHROME 指定可执行文件的绝对路径，'
+    + '或先跑一次 `npx playwright install chromium`。');
+  if (isBrandedBrowser(chrome)) {
+    log('⚠ 选中的是品牌版 Chrome / Edge：' + chrome);
+    log('  品牌版 Chrome 137 起会忽略命令行的 --load-extension，插件自带的那份扩展装不进去（面板不会出现）。');
+    log('  非品牌版不受影响，装一个即可：npx playwright install chromium（或 brew install --cask chromium），');
+    log('  然后用 DOUYIN_CHROME 指向它（例如 "…/Chromium.app/Contents/MacOS/Chromium"），或在设置里填浏览器路径。');
+  }
+
+  const profile = DEFAULTS.profile;
+  fs.mkdirSync(profile, { recursive: true });
+
+  // 采集锁：先拿锁再碰浏览器 —— 同一个 DSH_HOME 下装了多个 profile 时，两边同时调用要立刻失败，
+  // 而不是都去接同一个浏览器窗口互相踩。
+  const releaseLock = acquireRunLock({ log, url });
+
+  // 护栏：拿锁之后、进入主 try/finally 之前的每一步都必须兜住——任何一步抛错
+  // （接管失败、磁盘错误等）都要泄锁，否则锁文件里留着一个活 pid，后续调用永远拿不到锁。
+  let running = null;
+  let adopted = null;
+  let ctx;
+  try {
+    // 上一次为了等扫码把窗口留着了？那就接上去：同一个 profile 目录不能再开第二个进程。
+    running = await attachRunningBrowser(chromium, log);
+
+    // 扩展文件变过（或第一次记录）→ profile 里的旧脚本缓存会让新窗口继续跑旧代码。
+    // 接了旧窗口也一样（它的扩展代码是启动那一刻的），先关掉它再重开。
+    const launchState = readLaunchState();
+    const extChanged = launchState.hash !== ext.hash;
+    if (running && extChanged) {
+      log('扩展文件跟上次启动时不一样（' + (launchState.hash || '没有记录') + ' → ' + ext.hash + '）：'
+        + '旧窗口里跑的还是旧扩展代码，关掉它重新开一个');
+      await running.browser.close().catch(() => {});
+      running = null;
+    }
+    adopted = running ? running.browser : null;
+    if (!running) {
+      if (extChanged) {
+        const cleared = clearStaleScriptCaches(profile, { log });
+        if (cleared.length) {
+          log('清掉浏览器里缓存的旧扩展脚本（扩展更新过，不清的话新窗口还在跑旧代码）：'
+            + cleared.map((p) => path.relative(profile, p) || p).join('、'));
+        }
+      }
+      log('启动 Chromium（已装入扩展 v' + ext.version + '）…');
+    }
+    try {
+      ctx = running ? running.ctx : await chromium.launchPersistentContext(profile, {
+        headless: false,
+        executablePath: chrome,
+        // playwright 默认会加 --disable-extensions，那会盖掉我们的 --disable-extensions-except
+        ignoreDefaultArgs: ['--disable-extensions'],
+        args: [
+          `--disable-extensions-except=${ext.dir}`,
+          `--load-extension=${ext.dir}`,
+          `--remote-debugging-port=${DEFAULTS.port}`,
+          '--no-first-run', '--no-default-browser-check',
+          '--autoplay-policy=no-user-gesture-required',
+          '--disable-features=ExtensionManifestV2Disabled,DisableLoadExtensionCommandLineSwitch',
+        ],
+        viewport: { width: 1440, height: 900 },
+        acceptDownloads: true,
+      });
+    } catch (e) {
+      throw new Error('打开浏览器失败：' + (e && e.message)
+        + '（如果上一次采集留了个窗口没关，先关掉它，或用 DOUYIN_PROFILE 换一个 profile 目录）');
+    }
+    // 记下这次启动用的扩展 hash：下次扩展一变，就先清 profile 里的旧脚本缓存
+    writeLaunchState({
+      hash: ext.hash, version: ext.version, profile,
+      adopted: !!running, launchedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    releaseLock();
+    // 本次新拉起的浏览器一并关掉（沿用的旧窗口不动——它可能开着用户的东西）
+    if (ctx && !running) await ctx.close().catch(() => {});
+    // 这一段的失败（装扩展 / 找浏览器 / 接管旧窗口 / 磁盘）也要查得到原因：
+    // 至少留下 status.json + 日志副本（这一段还没有页面，截不了图）。
+    const d = await snap('启动阶段失败：' + String((e && e.message) || e), null, { stage: 'pre-browser' });
+    throw new Error(String((e && e.message) || e) + hint(d));
+  }
+
+  let closed = false;
+  let keepForLogin = false;      // 「没登录，窗口留给你扫码」时不许关窗口
+  let extHelperPage = null;      // 扩展 SW 睡着时开的兜底扩展页（读/写 chrome.storage 用）
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    releaseLock();
+    try { if (extHelperPage && !extHelperPage.isClosed()) await extHelperPage.close(); } catch (e) { /* 忽略 */ }
+    extHelperPage = null;
+    if (o.keep || keepForLogin) {
+      log('浏览器窗口保持打开（' + (keepForLogin ? '等你扫码登录' : 'keepOpen=true') + '）');
+      return;
+    }
+    if (adopted) await adopted.close().catch(() => {});
+    else await ctx.close().catch(() => {});
+  };
+
+  try {
+    // ② cookies（可选）：没有就靠持久化 profile 里的登录态
+    const cookieFiles = [DEFAULTS.cookies, path.join(DEFAULTS.home, 'cookies.json')].filter(Boolean);
+    const cookieFile = cookieFiles.find((f) => fs.existsSync(f));
+    if (cookieFile) {
+      try {
+        await ctx.addCookies(JSON.parse(fs.readFileSync(cookieFile, 'utf8')));
+        log('已灌入 cookies：' + cookieFile);
+      } catch (e) { log('cookies 灌入失败（继续）：' + e.message); }
+    } else {
+      log('没用 cookies 文件，用浏览器 profile 里的登录态：' + profile);
+    }
+
+    page = running ? running.page : (ctx.pages()[0] || (await ctx.newPage()));
+    vid = videoIdFromUrl(url);
+    target = vid ? `https://www.douyin.com/video/${vid}` : url;
+    if (running) {
+      // 沿用的窗口可能停在别的视频上：请求的不是同一个就导航过去，否则原地继续（保住登录态）。
+      if (vid && !page.url().includes(`/video/${vid}`)) {
+        log('沿用浏览器窗口，换到 ' + target);
+        await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => log('goto: ' + e.message));
+      } else {
+        log('沿用已在打开的页面，不重新导航：' + page.url());
+      }
+    } else {
+      log('打开 ' + target);
+      await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => log('goto: ' + e.message));
+    }
+
+    // ③ 确认扩展真的装进浏览器了（面板是扩展注入的）
+    await page.waitForSelector('#dts-collector-panel', { timeout: 30000 }).catch(() => null);
+    if (!(await page.$('#dts-collector-panel'))) {
+      const sws = ctx.serviceWorkers().map((s) => s.url());
+      throw new Error('扩展面板没出现（装进去的扩展没生效）：' + ext.dir
+        + '；用的浏览器=' + chrome
+        + (isBrandedBrowser(chrome) ? '（这是品牌版 Chrome/Edge：137 起忽略 --load-extension，请换成非品牌版 Chromium，见上面的提示）' : '')
+        + '；serviceWorkers=' + JSON.stringify(sws)
+        + '；可试 DOUYIN_PROFILE 换一个 profile 目录重来。');
+    }
+    log('扩展已在浏览器里生效（面板已注入）');
+
+    // ③.5 扩展后台可达性预检（v0.2.7 批次 1 真机踩坑，2026-10-06）
+    // Chrome 偶尔让页面里的 content script 拿到一个**已作废的扩展上下文**：面板注入正常、
+    // 页面照常采集，但每次 chrome.runtime.sendMessage 都回 lastError
+    // 「Receiving end does not exist」—— 于是「清空」点了没反应、评论一条不落库，
+    // 采集器最后只能报「交付 0 条」，还误导用户以为是限流。
+    // 自愈：刷新页面（新文档会重新注入脚本）→ 复测；两次都不行就把启动状态标脏并明确报错。
+    const bgProbe = () => page.evaluate(() => {
+      try {
+        const c = window.__DTS_COLLECTOR__;
+        const s = (c && c.getStatus) ? c.getStatus() : null;
+        return { bgOk: s ? s.bgOk : null, bgErr: s ? s.bgErr : '' };
+      } catch (e) { return { bgOk: null, bgErr: String(e && e.message || e) }; }
+    }).catch(() => null);
+    const bgDead = (t) => !!t && t.bgOk === false
+      && /Receiving end does not exist|Extension context invalidated/i.test(String(t.bgErr || ''));
+    const awaitBgProbe = async () => {                 // 等页面脚本自测出结果（旧脚本永远没有 → 放弃）
+      let t = null;
+      for (let i = 0; i < 15; i++) {
+        t = await bgProbe();
+        if (t && t.bgOk !== null && t.bgOk !== undefined) return t;
+        await sleep(400);
+      }
+      return t;
+    };
+    let pre = await awaitBgProbe();
+    for (let i = 0; i < 2 && bgDead(pre); i++) {
+      log('扩展后台不可达（' + pre.bgErr + '）：刷新页面重新注入脚本后复测（第 ' + (i + 1) + ' 次）…');
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => log('reload: ' + e.message));
+      await page.waitForSelector('#dts-collector-panel', { timeout: 30000 }).catch(() => null);
+      await sleep(600);
+      pre = await awaitBgProbe();
+    }
+    if (bgDead(pre)) {
+      // 标脏启动状态：下次运行会重装扩展并清掉扩展脚本缓存（含 SW 注册库），而不是照样再跑一遍
+      writeLaunchState({ hash: '', version: ext.version, profile, adopted: false, launchedAt: new Date().toISOString(), bgDead: true });
+      throw new Error('扩展后台没有响应（' + pre.bgErr + '）：面板能注入，但扩展收不到页面消息，'
+        + '本轮采到的评论不会落库（历史表现：页面采到几百条，最后「交付 0 条」）。'
+        + '已刷新页面重试仍不通 —— 请重跑一次（下次会自动清掉扩展脚本缓存并重装扩展），或关掉浏览器窗口后重跑。'
+        + '；扩展=' + ext.dir + '；用的浏览器=' + chrome);
+    }
+    if (pre && pre.bgOk === true) log('扩展后台可达（bgOk=true）');
+    else if (pre && pre.bgOk === false) log('⚠️ 扩展后台探针异常（bgOk=false：' + pre.bgErr + '），继续跑；结束若空手会给出真实原因');
+    else log('（扩展脚本没有后台探针字段，跳过预检：装进浏览器的还是旧脚本？）');
+
+    // ④ 登录闸门：**没登录就不开始采集**。
+    //    未登录时抖音对评论接口限流很凶，硬采只会拿到残缺数据，还提前把限流额度耗掉。
+    //    正确姿势：把二维码留着/叫出来 → 等使用者扫码 → 登上了才继续；等不到就明确失败。
+    const loginProbe = () => page.evaluate(() => ({
+      loginButton: !!document.querySelector('[data-e2e="login-button"], [data-e2e="login"]'),
+      mask: !!document.querySelector('.trust-login-dialog-mask'),
+    })).catch(() => ({ loginButton: false, mask: false }));
+    const readLoginSignals = async () => {
+      const dom = await loginProbe();
+      const jar = await ctx.cookies('https://www.douyin.com').catch(() => []);
+      return { ...loginGate({ cookies: jar, loginButton: dom.loginButton, mask: dom.mask }), dom };
+    };
+    /** 把二维码叫出来：已经有弹窗就别动它（动一下二维码就没了），没有就点页面上的「登录」 */
+    const ensureLoginDialog = async () => {
+      const dom = await loginProbe();
+      if (dom.mask) return true;
+      if (dom.loginButton) {
+        await page.evaluate(() => {
+          const b = document.querySelector('[data-e2e="login-button"], [data-e2e="login"]');
+          if (b) b.click();
+        }).catch(() => {});
+        await sleep(1500);
+      }
+      return (await loginProbe()).mask;
+    };
+    /** 已经登录时，顺手把挡着页面的弹窗点掉 */
+    const dismissOverlays = async () => {
+      for (const label of ['取消', '关闭', '稍后', '我知道了', '暂不']) {
+        const mask = await page.evaluate(() => !!document.querySelector('.trust-login-dialog-mask'));
+        if (!mask) break;
+        await page.evaluate((l) => {
+          const cs = [...document.querySelectorAll('button,div[role="button"],span')].filter((x) => (x.innerText || '').trim() === l);
+          if (cs.length) cs[cs.length - 1].click();
+        }, label).catch(() => {});
+        await sleep(1200);
+      }
+    };
+
+    let gate = await readLoginSignals();
+    if (gate.hasSession) {
+      await dismissOverlays();          // 已登录：顺手把可能挡着页面的弹窗点掉
+    } else if (DEFAULTS.allowAnonymous) {
+      log('未登录（没有 sessionid / sid_tt），但 DOUYIN_ALLOW_ANONYMOUS=1：按匿名继续 —— 匿名评论接口随时可能限流，采到的可能不完整');
+      await dismissOverlays();
+    } else {
+      log('页面未登录（没有 sessionid / sid_tt 登录 cookie）—— 先不开始采集：未登录调评论接口会被限流，采出来是残的');
+      await ensureLoginDialog();
+      if (waitLoginSec > 0) {
+        log(`请在浏览器窗口里用抖音 App 扫码登录（最多等 ${waitLoginSec}s）…`);
+        const loginDeadline = Date.now() + waitLoginSec * 1000;
+        let nextLog = Date.now() + 30000;
+        while (Date.now() < loginDeadline && rest() > 0 && !aborted()) {
+          await sleep(2000);
+          gate = await readLoginSignals();
+          if (gate.hasSession) break;
+          if (Date.now() >= nextLog) {
+            nextLog = Date.now() + 30000;
+            log(`还没扫码，继续等（剩 ${Math.max(0, Math.round((loginDeadline - Date.now()) / 1000))}s）…`);
+          }
+        }
+      }
+      if (!gate.hasSession) {
+        keepForLogin = true;   // 窗口留着，使用者还能接着扫
+        // 未登录这一条也存现场：能看出当时页面停在哪、登录闸门读到了什么信号
+        const snapDir = await snap('未登录（need-login）', null, { stage: 'login-gate', gate });
+        const why = '未登录：没检测到抖音登录态，本次**没有开始采集**（未登录采集会被限流，数据残缺）。'
+          + '请在已经打开的浏览器窗口里用抖音 App 扫码登录，然后**再调用一次** douyin_comments；'
+          + `登录态保存在 ${profile}，扫一次以后都不用再扫。` + hint(snapDir);
+        log('❌ ' + why);
+        return {
+          ok: false, error: why, videoId: vid || '', title: '', count: 0,
+          csvPath: '', jsonPath: '', phase: 'need-login', note: '等待扫码登录',
+          durationSec: Number(((Date.now() - started) / 1000).toFixed(1)),
+          outDir, url: target, sample: [], extension: ext, paused: false,
+          logPath: runLog.path, snapshotDir: snapDir,
+        };
+      }
+      log('已登录（检测到登录 cookie），继续采集');
+      // 扫码后抖音常常整页刷新：等扩展面板回来再往下走
+      await page.waitForSelector('#dts-collector-panel', { timeout: 30000 }).catch(() => null);
+    }
+
+    // ⑤ 状态/按钮工具
+    const st = () => page.evaluate(() => {
+      const c = window.__DTS_COLLECTOR__;
+      const s = (c && c.getStatus) ? c.getStatus() : null;
+      const sig = (c && c.getSigned) ? c.getSigned() : null;
+      let sigAweme = null;
+      try { sigAweme = new URL(sig.url).searchParams.get('aweme_id'); } catch (e) { /* 忽略 */ }
+      const p = document.getElementById('dts-collector-panel');
+      return {
+        phase: s && s.phase, videoId: s && s.videoId, unique: s && s.unique,
+        savedCount: s && s.savedCount, total: s && s.total, note: s && s.note,
+        error: s && s.error, liveVideoId: s && s.liveVideoId,
+        autoOpen: s && s.autoOpen, commentAreaOpen: s && s.commentAreaOpen, hint: s && s.hint,
+        hasSig: !!(sig && sig.url), sigAweme,
+        // 扩展后台可达性（页面脚本自测后镜像过来）；undefined = 页面跑的还是没有这个探针的旧脚本
+        bgOk: s && s.bgOk, bgErr: s && s.bgErr,
+        panel: p ? p.innerText.replace(/\s+/g, ' ') : '',
+      };
+    });
+    /**
+     * 点面板上的按钮。给了 act 就**优先**按 data-dts-act 精确匹配：面板上「清空」与
+     * 「全部清空」都含「清空」，按文案匹配会点错（clearBefore 只想清本条视频）。
+     * 找不到 data 挂点（老版本扩展）时退回按文案正则。
+     */
+    const clickPanel = (re, act) => page.evaluate(({ src, a }) => {
+      const p = document.getElementById('dts-collector-panel');
+      if (!p) return false;
+      let b = a ? p.querySelector('[data-dts-act="' + a + '"]') : null;
+      if (!b) b = [...p.querySelectorAll('button')].find((x) => new RegExp(src).test(x.innerText));
+      if (b) { b.click(); return true; }
+      return false;
+      // 注意：page.evaluate() 只接受**一个**参数（第二参是 options）。写成 (fn, re.source, act)
+      // 会直接抛 `Too many arguments. If you need to pass more than 1 argument to the function
+      // wrap them in an object.`（2026-10-06 真机 E2E 踩过：clearBefore 一跑就崩）。
+    }, { src: re.source, a: act || '' });
+    /**
+     * 只在「扩展自己的」service worker / 扩展页里 eval。
+     * 不能用 ctx.serviceWorkers()[0]：抖音页面自己也注册了 sw.js，清过脚本缓存后它可能排在前面，
+     * 在里面 eval chrome.storage 会直接 `ReferenceError: chrome is not defined`（实测踩过：
+     * 设置没写进去、落库读成 0 条、明明采到了却判「没本轮新数据」）。
+     * 扩展 SW 睡着时开一个扩展自己的页面兜底（扩展页同样有 chrome.* 权限，顺手把 SW 唤醒）。
+     */
+    const isExtWorker = (s) => /^chrome-extension:\/\//.test(s.url());
+    const extEval = async (fn, arg) => {
+      const sw = ctx.serviceWorkers().find(isExtWorker)
+        || await ctx.waitForEvent('serviceworker', { timeout: 8000, predicate: isExtWorker }).catch(() => null);
+      if (sw) {
+        try { return await sw.evaluate(fn, arg); } catch (e) { if (!/chrome is not defined/.test(String(e))) throw e; }
+      }
+      if (!extHelperPage || extHelperPage.isClosed()) {
+        extHelperPage = await ctx.newPage();
+        await extHelperPage.goto('chrome-extension://' + extensionIdFromPath(ext.dir) + '/index.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        const back = ctx.serviceWorkers().find(isExtWorker);
+        if (back) { try { return await back.evaluate(fn, arg); } catch (e) { /* 落到扩展页兜底 */ } }
+      }
+      return extHelperPage.evaluate(fn, arg);
+    };
+
+    /** 从扩展 SW 读该视频的落库快照 */
+    const readBucket = async (videoId) => {
+      const r = await extEval(async (id) => {
+        const store = await chrome.storage.local.get(['dts_c_' + id, 'dts_videos']);
+        const bucket = store['dts_c_' + id] || {};
+        const meta = (store.dts_videos || {})[id] || {};
+        return { keys: Object.keys(bucket), title: meta.title || '' };
+      }, videoId).catch(() => null);
+      if (!r) return { ok: false, keys: [], title: '' };
+      return { ok: true, keys: r.keys || [], title: r.title || '' };
+    };
+    const readComments = async (videoId) => {
+      const r = await extEval(async (id) => {
+        const store = await chrome.storage.local.get(['dts_c_' + id, 'dts_videos']);
+        const bucket = store['dts_c_' + id] || {};
+        const meta = (store.dts_videos || {})[id] || {};
+        return { list: Object.values(bucket), title: meta.title || '' };
+      }, videoId).catch(() => null);
+      if (!r) return { list: [], title: '' };
+      return { list: Array.isArray(r.list) ? r.list : [], title: r.title || '' };
+    };
+    /**
+     * 把本轮的运行时设置写进扩展（chrome.storage.local.dts_settings）。
+     * 扩展在每次「开始采集」时读一次 → 改并发路数不用重开浏览器、也不用重装扩展。
+     * 写不进去不算致命：扩展会退回内置的 4 路，只是设置没生效，所以只记日志。
+     */
+    const pushExtensionSettings = async (settings) => {
+      const r = await extEval(async (value) => {
+        await chrome.storage.local.set({ dts_settings: value });
+        const back = await chrome.storage.local.get(['dts_settings']);
+        return back.dts_settings || null;
+      }, settings).catch((e) => ({ error: String((e && e.message) || e) }));
+      if (!r) return { ok: false, error: '没拿到扩展的 service worker（设置没写进去，扩展用内置默认值）' };
+      if (r.error) return { ok: false, error: r.error };
+      return { ok: true, value: r };
+    };
+    /**
+     * 读回扩展「实际用了几路」：content.js 每次开始采集都会写 dts_settings_effective。
+     * 拿不到就返回 null（只是诊断信息，不影响采集结果）。
+     */
+    const readEffectiveLanes = async () => {
+      const r = await extEval(async () => {
+        const o = await chrome.storage.local.get(['dts_settings_effective']);
+        return o.dts_settings_effective || null;
+      }).catch(() => null);
+      return r && Number(r.lanes) > 0 ? r : null;
+    };
+    /**
+     * v0.5.11：扩展有没有按我们下发的 maxCount 生效（≥0.5.11 会把 maxCount 写回 dts_settings_effective）。
+     * 没生效（旧扩展 / 设置写不进去）时，采集器退回「轮询到量点暂停」的兜底逻辑。
+     */
+    let extMaxOk = null;
+    const extHandlesMax = async () => {
+      if (extMaxOk !== null) return extMaxOk;
+      const eff = await readEffectiveLanes();   // 整条 dts_settings_effective
+      extMaxOk = !!(eff && Number(eff.maxCount) > 0 && Number(eff.maxCount) === max);
+      log(extMaxOk
+        ? '扩展已按 maxCount=' + max + ' 生效：一级到目标只停顶层扫描，二级回复继续补采'
+        : '扩展没有按 max=' + max + ' 生效（旧版扩展或设置没写进去）：采集器用轮询兜底（到量点暂停）');
+      return extMaxOk;
+    };
+
+    let s = await st();
+    emitStatus(s);
+    log('面板就绪：phase=' + s.phase + ' videoId=' + s.videoId + ' 现有条数=' + (s.unique || 0));
+
+    // ⑥ 新鲜度：先记下「开始前就存在」的 cid。
+    //    默认**不清空**扩展缓存 —— 清空会重置去重表和 cursor，把扩展的「断点续采」进度一起抹掉
+    //    （二级回复采到一半被限流时，下一次再跑本该接着采，旧版却是从零开始）。
+    //    不清空时靠结束时按 cid 差集剔除旧数据，交付的仍然只有本轮新采的。
+    const before = await readBucket(s.videoId || s.liveVideoId || vid);
+    const beforeCids = new Set(before.keys);
+    if (clearBefore) {
+      if (beforeCids.size > 0) log('扩展里已有上一轮残留 ' + beforeCids.size + ' 条，按要求先清空（这会丢掉断点续采进度）…');
+      // 清空只能靠点面板按钮。点了却没清有两种已知原因：
+      // ① 扩展刚被重新加载（页面里还是旧脚本）——点击既不报错也什么都不做；
+      // ② 首次点击撞上扩展的异步串扰。所以第一次没清掉就再点一次，
+      //    并把面板自己的文案（note/error/phase）带进日志，别再让用户对着「交付 0 条」猜。
+      const clickAndCheck = async () => {
+        if (!(await clickPanel(/^清空$/, 'clear-video'))) return { clicked: false, left: -1 };
+        await sleep(1800);
+        const after = await readBucket(s.videoId || s.liveVideoId || vid);
+        return { clicked: true, left: after.keys.length };
+      };
+      let cl = await clickAndCheck();
+      if (cl.clicked && cl.left > 0) {
+        log('清空后仍有 ' + cl.left + ' 条，再点一次「清空」…');
+        cl = await clickAndCheck();
+      }
+      if (cl.clicked && cl.left > 0) {
+        // 点了两次都没清掉 → 页面脚本与扩展后台之间多半断了（sendMessage 回
+        // 「Receiving end does not exist」时，点击既不报错也什么都不做）。
+        // 绝不能「记一句日志接着跑」：页面照采但评论一条不落库，用户最后只看到「交付 0 条」。
+        const why1 = await st();
+        log('清空后仍有 ' + cl.left + ' 条（扩展清空没生效）：面板 phase=' + why1.phase
+          + (why1.note ? '，提示「' + why1.note + '」' : '')
+          + (why1.error ? '，错误「' + why1.error + '」' : '')
+          + '；刷新页面自愈后重试…');
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => log('reload: ' + e.message));
+        await page.waitForSelector('#dts-collector-panel', { timeout: 30000 }).catch(() => null);
+        await sleep(1200);
+        cl = await clickAndCheck();
+        if (cl.clicked && cl.left > 0) {
+          const why2 = await st();
+          throw new Error('面板的「清空」没生效（点了 3 次，扩展里仍有 ' + cl.left + ' 条）：'
+            + '扩展后台收不到页面消息，本轮采到的评论也不会落库。'
+            + '面板 phase=' + why2.phase
+            + (why2.error ? '，错误「' + why2.error + '」' : '')
+            + (why2.note ? '，提示「' + why2.note + '」' : '')
+            + '。请重跑一次（会自动清扩展脚本缓存并重装扩展），或关掉浏览器窗口后重跑。');
+        }
+      }
+      if (!cl.clicked) {
+        log('面板上没有「清空」按钮，改用 cid 差集保证只交付本轮新采');
+      } else if (cl.left > 0) {
+        const why = await st();
+        log('清空后仍有 ' + cl.left + ' 条（扩展清空没生效）：面板 phase=' + why.phase
+          + (why.note ? '，提示「' + why.note + '」' : '')
+          + (why.error ? '，错误「' + why.error + '」' : '')
+          + '；结束时按 cid 差集剔除旧数据');
+      } else {
+        beforeCids.clear();   // 清空成功：开始前不存在任何数据，结束时的任何数据都是本轮新采
+      }
+      s = await st();
+    } else if (beforeCids.size > 0) {
+      log('扩展里已有上一轮 ' + beforeCids.size + ' 条：不清空（保留断点续采进度），结束时按 cid 差集只交付本轮新采');
+    }
+
+    if (!s.liveVideoId && !s.videoId) log('提示：页面还没识别到视频 ID，仍会点「开始采集」让扩展自己判形态');
+
+    // ⑥.5 把运行时设置推给扩展（DSH「设置 → 插件」里可改；写不进去就用扩展内置值）
+    const extSettings = { lanes };
+    // v0.5.11：max 必须下发给扩展（maxCount）——扩展会「一级到量只停顶层扫描、二级回复仍补完」。
+    // 不下发时采集器只能靠轮询点「暂停」，一级根本封不住（旧版实测 max=100 却采回 896 条）。
+    if (max > 0) extSettings.maxCount = max;
+    if (replyLanes > 0) extSettings.replyLanes = replyLanes;
+    if (replyGlobalGapMs > 0) extSettings.replyGlobalGapMs = replyGlobalGapMs;
+    if (replyThrottleSec > 0) extSettings.replyThrottleMaxWaitMs = Math.round(replyThrottleSec * 1000);
+    // v0.5.18：回复预热**总是**下发（0 = 不预热，不能被 `> 0` 判断吞掉）
+    extSettings.replyWarmupMs = Math.round(replyWarmupSec * 1000);
+    const pushed = await pushExtensionSettings(extSettings);
+    if (pushed.ok) log('已把设置写进扩展：dts_settings=' + JSON.stringify(pushed.value));
+    else log('写扩展设置失败（改用扩展内置值）：' + pushed.error);
+
+    // ⑦ 点开始采集，并确保拿到签名（拿不到就助推/重试）
+    const startedPhases = new Set(['collecting', 'replies', 'done']);
+    const progressing = (x) => x.hasSig || (x.unique || 0) > 0 || startedPhases.has(x.phase);
+    const waitFor = async (ms, what) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until && rest() > 0 && !aborted()) {
+        const x = await st();
+        if (progressing(x)) return x;
+        if (x.phase === 'error') throw new Error('扩展报错：' + (x.error || x.note || '(无详情)'));
+        await sleep(1500);
+      }
+      log('等了 ' + Math.round(ms / 1000) + 's 还没' + what);
+      return null;
+    };
+    const nudgeCommentEntry = async () => {
+      const cands = await page.evaluate(() => {
+        const sels = ['[data-e2e="comment-icon"]', '[data-e2e="feed-comment-icon"]', '[data-e2e="comment"]',
+          'span[data-e2e*="comment"]', '.comment-icon', '[class*="commentIcon"]', '[class*="comment-icon"]'];
+        const out = [];
+        for (const q of sels) {
+          for (const el of document.querySelectorAll(q)) {
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) out.push({ sel: q, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
+          }
+        }
+        return out.slice(0, 4);
+      }).catch(() => []);
+      for (const c of cands) {
+        log('助推：点页面评论入口 ' + c.sel);
+        await page.mouse.click(c.x, c.y).catch(() => {});
+        const r = await waitFor(8000, '拿到签名');
+        if (r) return true;
+      }
+      return false;
+    };
+    const nudgeScroll = async () => {
+      log('助推：在页面上小幅滚动，让页面自己发评论请求');
+      for (let i = 0; i < 3; i++) {
+        await page.mouse.move(420, 700).catch(() => {});
+        await page.mouse.wheel(0, 500).catch(() => {});
+        const r = await waitFor(6000, '拿到签名');
+        if (r) return true;
+      }
+      return false;
+    };
+    /** 点「暂停」后等扩展把手上的页收尾：条数连续两次不变（≈2.4s）才算稳定 */
+    const settle = async (cappedMs = 15000) => {
+      let prev = -1, stable = 0;
+      const until = Date.now() + cappedMs;
+      while (Date.now() < until) {
+        const x = await st();
+        const u = x.unique || 0;
+        if (u === prev) stable++; else stable = 0;
+        prev = u;
+        if (stable >= 2) return x;
+        await sleep(1200);
+      }
+      return await st();
+    };
+
+    log('点「开始采集」…');
+    if (!(await clickPanel(/开始采集/))) throw new Error('面板上没找到「开始采集」按钮');
+
+    let sig = await waitFor(20000, '拿到签名');
+    if (!sig) {
+      if (!(await nudgeCommentEntry())) {
+        if (!(await nudgeScroll())) {
+          log('仍未拿到签名：刷新页面后重试一次…');
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+          await page.waitForSelector('#dts-collector-panel', { timeout: 20000 }).catch(() => null);
+          await sleep(3000);
+          await clickPanel(/开始采集/);
+          sig = await waitFor(25000, '拿到签名（reload 后）');
+        }
+      }
+    }
+
+    // ---- 轮询：到量 / 采完 / 报错 / 超时 ----
+    // sawSig：本轮是否真的拿到过页面签名。没拿到 = 扩展根本没发出评论请求，
+    // 那 storage 里出现的东西只可能是上一轮残留 ⇒ 必须判失败，绝不能当成本轮结果。
+    let sawSig = !!(sig && sig.hasSig);
+    if (sawSig) log('已拿到页面签名（扩展能自己发评论请求了）');
+    else if (sig) log('扩展已在采集（phase=' + sig.phase + '），继续观察是否拿到签名');
+    let lastUnique = -1, stallSince = Date.now();
+    let paused = false;
+    let topCapLogged = false;
+    while (rest() > 0 && !aborted()) {
+      s = await st();
+      emitStatus(s);
+      const u = s.unique || 0;
+      if (s.hasSig) sawSig = true;
+      if (s.phase === 'error') throw new Error('扩展报错：' + (s.error || s.note || '(无详情)'));
+      if (u !== lastUnique) { lastUnique = u; stallSince = Date.now(); }
+
+      // max 只算「一级评论」（v0.5.11 起单独上报 topSeen；unique 是一二级同池）：
+      //   ① 扩展认 maxCount 时（0.5.11+）采集器什么都不用做 —— 扩展到量只停顶层扫描，
+      //      把二级回复补完再置 done；
+      //   ② 旧扩展不认 maxCount：退回「轮询到量点暂停」兜底。旧版不分阶段地 u >= max 就点暂停，
+      //      一进回复阶段就被掐掉（回复永远是 0 条）；现在至少不会掐掉刚进回复阶段的那一轮。
+      const uTop = typeof s.topSeen === 'number' ? s.topSeen : u;
+      if (uTop >= max && !(await extHandlesMax())) {
+        if (wantReplies && s.phase === 'collecting') {
+          if (!topCapLogged) {
+            log('一级评论已到目标 ' + max + ' 条（当前 ' + uTop + ' 条），继续等二级回复补采…');
+            topCapLogged = true;
+          }
+        } else {
+          log('已到目标 ' + max + ' 条（当前 ' + uTop + ' 条），点「暂停」…');
+          await clickPanel(/暂停/);
+          paused = true;
+          endedBy = 'max-cap';
+          s = await settle();
+          break;
+        }
+      }
+      if (!wantReplies && s.phase === 'replies') {
+        log('顶层评论采完（' + u + ' 条），按要求不等二级回复，点「暂停」…');
+        await clickPanel(/暂停/);
+        paused = true;
+        endedBy = 'top-done';
+        s = await settle();
+        break;
+      }
+      if (s.phase === 'done') { log('采集完成：' + u + ' 条'); endedBy = 'done'; break; }
+
+      if (Date.now() - stallSince > 60000 && !['collecting', 'replies', 'waiting-sign'].includes(s.phase)) {
+        log('60s 没动静（phase=' + s.phase + '），收工');
+        endedBy = 'stall';
+        break;
+      }
+      // 无进展收工：二级回复阶段的退避重试本来就会让条数长时间不动，
+      // 所以那个阶段用宽松得多的上限（默认 900s，可配置），别刚进回复就收工。
+      const stallLimit = s.phase === 'replies' ? replyNoProgressMs : 120000;
+      if (Date.now() - stallSince > stallLimit) {
+        log(Math.round(stallLimit / 1000) + 's 没有新评论（phase=' + s.phase + '），收工（当前 ' + u + ' 条）');
+        endedBy = 'stall';
+        break;
+      }
+      await sleep(1000);
+    }
+    if (!endedBy) endedBy = aborted() ? 'abort' : (rest() <= 0 ? 'timeout' : 'unknown');
+
+    if (aborted() && !paused) {
+      log('调用方已取消，点「暂停」并落盘已采到的部分…');
+      await clickPanel(/暂停/).catch(() => {});
+      paused = true;
+      endedBy = 'abort';
+      s = await settle(8000);
+    }
+
+    const finalStatus = await st();
+    emitStatus(finalStatus);
+    const videoId = finalStatus.videoId || finalStatus.liveVideoId || vid;
+    // 收工原因（done / max-cap / top-done / stall / timeout / abort）先落日志：
+    // 以前只有「60s 没动静」这种一行，事后完全看不出是超时还是被取消。
+    const incomplete = endedBy === 'timeout' || endedBy === 'stall' || endedBy === 'abort';
+    log('收工原因：' + endedBy + '（phase=' + finalStatus.phase + '，页面侧 ' + (finalStatus.unique || 0) + ' 条）');
+    // 没采完就收工（超时 / 无进展 / 被取消）＝ 数据可能残缺：留一份现场，返回值里带上目录
+    let snapDir = incomplete ? await snap('采集未完成：' + endedBy, finalStatus, { endedBy }) : '';
+
+    // 扩展侧实际用了几路（content.js 每次开始采集都会把 dts_settings_effective 写回 storage）
+    // v0.5.13：默认错峰多路；若扩展发现「两路返回同一页」会当轮降回 1，并把原因写进 lanesNote。
+    const effLanes = await readEffectiveLanes();
+    if (effLanes) {
+      const actual = Number(effLanes.lanes) || 0;
+      const wanted = Number(effLanes.lanesWanted) > 0 ? Number(effLanes.lanesWanted) : lanes;
+      log('顶层列表实际路数：' + actual
+        + '（本次请求 ' + wanted + ' 路'
+        + (effLanes.lanesNote ? '；' + effLanes.lanesNote : (actual > 1 ? '；错峰多路' : '；单路'))
+        + '）');
+    }
+
+    // ⑧ 取数据 + 剔除「开始前就有」的 cid（只交付本轮新采）
+    const got = await readComments(videoId);
+    const all = got.list;
+    const fresh = beforeCids.size > 0 ? all.filter((c) => c && !beforeCids.has(String(c.cid))) : all;
+    let title = got.title || '';
+    log('扩展里本轮落库 ' + all.length + ' 条，剔除开始前就存在的 ' + (all.length - fresh.length) + ' 条，交付 ' + fresh.length + ' 条');
+
+    if (!sawSig) {
+      snapDir = snapDir || await snap('没拿到页面签名：' + (finalStatus.note || '评论区没能打开'), finalStatus, { endedBy });
+      const why = '本轮从头到尾没拿到页面签名（' + (finalStatus.note || '评论区没能打开') + '），扩展没有真正发出评论请求；'
+        + '为避免把上一轮残留当成本轮结果，本次不返回数据' + hint(snapDir);
+      log('❌ ' + why);
+      return {
+        ok: false, error: why, videoId: videoId || '', title, count: 0,
+        csvPath: '', jsonPath: '', phase: String(finalStatus.phase || ''),
+        note: String(finalStatus.note || ''), durationSec: Number(((Date.now() - started) / 1000).toFixed(1)),
+        outDir, url: target, sample: [], extension: ext, paused,
+        logPath: runLog.path, snapshotDir: snapDir,
+      };
+    }
+
+    if (fresh.length === 0) {
+      // 区分「真没新评论」和「评论没落库」：后者是扩展后台不可达（页面照采、一条不进库），
+      // 早先被错报成「抖音正在限流」，用户看到「交付 0 条」根本不知道发生了什么。
+      // 2026-10-22 修正：落库失败必须有**明确证据**（后台探针挂 / 内容脚本报错），不能只看
+      // 「存储条数没涨」——续采一个已采完的视频时，页面看到的 105 条全是旧 cid、后台 dedupe 后
+      // 存储 163→163 一条没涨，旧逻辑会把它误报成「扩展后台不可达」。真机日志
+      // C:\Users\mo\.dsh\douyin-collector\logs\collect-2026-10-22T04-08-30-8580.log
+      // （bgOk=true、扩展里已有 163 条、交付 0 条）就是这种假失败。
+      const pageSaw = Number(finalStatus.unique) || 0;
+      const bgTold = finalStatus.bgOk === false
+        || /Receiving end does not exist|Extension context invalidated|扩展后台没有响应|落库失败|上报 background 失败/i.test(String(finalStatus.error || ''));
+      const stalled = bgTold || (pageSaw > 0 && all.length === 0 && beforeCids.size === 0);
+      const whyHead = stalled
+        ? '页面采到 ' + pageSaw + ' 条，但扩展存储没有增加（落库失败）：'
+          + (finalStatus.error || finalStatus.note || '扩展后台没有响应')
+          + (finalStatus.bgErr ? '（后台探针：' + finalStatus.bgErr + '）' : '')
+          + '。这是扩展后台不可达，不是「视频没有新评论」——请重跑一次（下次会自动清扩展脚本缓存并重装扩展），或关掉浏览器窗口后重跑。'
+        : '拿到了签名但没采到任何新评论（可能该视频评论已全部采过、或评论接口返回空）';
+      snapDir = snapDir || await snap('本轮没有新数据：' + whyHead.slice(0, 120), finalStatus, { endedBy, pageSaw, storedCount: all.length, beforeCount: beforeCids.size });
+      const why = whyHead + hint(snapDir);
+      log('❌ 没有本轮新数据：' + why);
+      return {
+        ok: false, error: why, videoId: videoId || '', title, count: 0,
+        csvPath: '', jsonPath: '', phase: String(finalStatus.phase || ''),
+        note: stalled ? why : String(finalStatus.note || ''),
+        durationSec: Number(((Date.now() - started) / 1000).toFixed(1)),
+        outDir, url: target, sample: [], extension: ext, paused,
+        extLanes: effLanes ? Number(effLanes.lanes) || 0 : 0,
+        logPath: runLog.path, snapshotDir: snapDir,
+      };
+    }
+
+    // ⑨ 落盘
+    fs.mkdirSync(outDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const base = path.join(outDir, `douyin-comments-${videoId || 'unknown'}-${stamp}`);
+    const csvPath = base + '.csv';
+    const jsonPath = base + '.json';
+    fs.writeFileSync(csvPath, '\uFEFF' + toCsv(fresh), 'utf8');   // BOM：Excel 直接开中文
+    // v0.5.32：JSON 也带 text_clean（与 CSV 同口径），词云/分析台直接用它分词
+    const jsonComments = fresh.map((c) => Object.assign({}, c, { text_clean: cleanText(c && c.text) }));
+    fs.writeFileSync(jsonPath, JSON.stringify({
+      videoId, title, url: target, collectedAt: new Date().toISOString(),
+      count: fresh.length, phase: finalStatus.phase, note: finalStatus.note || '',
+      extension: { dir: ext.dir, version: ext.version, source: ext.sourceWhy },
+      freshOnly: true, comments: jsonComments,
+    }, null, 2), 'utf8');
+
+    const dur = ((Date.now() - started) / 1000).toFixed(1);
+    log(`写盘完成：${fresh.length} 条（本轮新采）→ ${csvPath}`);
+
+    // ⑨b 可选：交互词云 HTML（v0.5.38）。走面板按钮 → 扩展 background 生成自包含 HTML → 浏览器下载，
+    // 这里把下载文件另存到 outDir。失败不影响评论数据（只在 note/日志里写一句）。
+    let htmlPath = '';
+    if (wantCloud) {
+      try {
+        const btn = page.locator('#dts-collector-panel [data-dts-act="export-cloud"]').first();
+        if (!(await btn.count())) {
+          log('词云导出跳过：面板上没有「导出词云」按钮（扩展可能太旧，需要 v0.5.30+）');
+        } else {
+          const [dl] = await Promise.all([
+            page.waitForEvent('download', { timeout: 90000 }),
+            btn.click({ timeout: 15000 }),
+          ]);
+          const name = String(dl.suggestedFilename() || `douyin-wordcloud-${videoId || 'unknown'}-${stamp}.html`)
+            .replace(/[\\/:*?"<>|\s]+/g, '_');
+          const dest = path.join(outDir, name.endsWith('.html') ? name : name + '.html');
+          await dl.saveAs(dest);
+          htmlPath = dest;
+          log('词云 HTML：' + htmlPath);
+        }
+      } catch (e) {
+        log('词云导出失败（不影响评论数据）：' + String((e && e.message) || e));
+      }
+    }
+
+    return {
+      ok: true, error: '', videoId, title, count: fresh.length, csvPath, jsonPath, htmlPath,
+      phase: finalStatus.phase, paused, note: finalStatus.note || '',
+      panel: finalStatus.panel, durationSec: Number(dur), outDir, url: target,
+      extLanes: effLanes ? Number(effLanes.lanes) || 0 : 0,
+      sample: fresh.slice(0, 5).map((c) => (c.user && c.user.nickname ? c.user.nickname + '：' : '') + cleanText(c.text)),
+      extension: ext,
+      logPath: runLog.path, snapshotDir: snapDir,
+    };
+  } catch (e) {
+    // 主流程里任何没被单独兜住的抛错（面板异常、CDP 断了、写盘失败…）：
+    // 先存现场再往上抛，错误信息里带上日志与快照路径。
+    const msg0 = String((e && e.message) || e);
+    // 页面在采集途中跳转/关闭（视频被删、跳登录、窗口被手动操作）时 CDP 会抛
+    // 「Execution context was destroyed」—— 这句话对用户毫无信息量，补一句人话。
+    const msg = /Execution context was destroyed|Target closed|Execution context/i.test(msg0)
+      ? msg0 + '（页面在采集途中跳转或关闭了：视频可能已被删、需要重新登录，或浏览器窗口被手动操作过）'
+      : msg0;
+    const d = await snap('主流程抛错：' + msg, null, { endedBy }).catch(() => '');
+    log('❌ 采集抛错：' + msg);
+    throw new Error(msg + hint(d));
+  } finally {
+    await close();
+  }
+}
+
+export default { collectDouyinComments, videoIdFromUrl, toCsv, cleanText, DEFAULTS, installExtension, findExtensionSource, loginGate, SESSION_COOKIE_NAMES, acquireRunLock, clearStaleScriptCaches, readLaunchState, writeLaunchState };

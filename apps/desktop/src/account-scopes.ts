@@ -26,6 +26,8 @@ export interface DesktopAccountScopeOptions {
   readonly home: string
   readonly userData: string
   readonly documents: string
+  /** Shipped bundles enabled for a new signed-in account; absent means only the base Web profile. */
+  readonly bundledPlugins?: readonly string[]
 }
 
 /**
@@ -136,7 +138,8 @@ export class DesktopAccountScopes {
       const profile = join(temporary, 'profiles', 'desktop')
       const template = PROFILE_TEMPLATES.web
       if (template === undefined) throw new Error('NovaFlow account isolation: desktop template is unavailable')
-      initProfile(profile, template.bundles)
+      const bundles = [...template.bundles, ...scope.authenticated ? this.options.bundledPlugins ?? [] : []]
+      initProfile(profile, bundles)
       if (scope.authenticated && seedProfile !== undefined && existsSync(join(seedProfile, 'package.json'))) {
         const source: unknown = JSON.parse(await readFile(join(seedProfile, 'package.json'), 'utf8'))
         if (typeof source !== 'object' || source === null) throw new Error('NovaFlow account isolation: invalid plugin manifest')
@@ -152,7 +155,7 @@ export class DesktopAccountScopes {
           }
         }
         await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'novaflow-account-profile', private: true,
-          dependencies, dsh: { profile: { bundles: [...template.bundles] } } }, null, 2) + '\n', { mode: 0o600 })
+          dependencies, dsh: { profile: { bundles } } }, null, 2) + '\n', { mode: 0o600 })
         const installed = join(seedProfile, 'node_modules')
         if (existsSync(installed)) await cp(installed, join(profile, 'node_modules'), {
           recursive: true, dereference: false, verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE,

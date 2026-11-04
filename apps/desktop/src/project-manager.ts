@@ -22,6 +22,7 @@ import {
 import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
+import { readNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
 import {
   initProfile, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile, type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
@@ -85,7 +86,7 @@ export class DesktopProjectManager {
       // Validation only: an unreadable or mismatched runtime descriptor stops preparation before the Host starts.
       readDesktopRuntime(this.runtime.dsh)
       migrateProfileSettings(this.paths.profile)
-      createPluginProfile(this.paths.profile)
+      createPluginProfile(this.paths.profile, readNovaFlowBundledPlugins(this.runtime.dsh))
       removeLinkProjections(this.paths.profile)
     })
   }
@@ -170,7 +171,11 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
   writeFileSync(join(projectDir, 'pnpm-workspace.yaml'), workspaceFile(), { mode: 0o600 })
 }
 
-/** Create the first external plugin profile without running a package manager. */
-export function createPluginProfile(projectDir: string): void {
-  initProfile(projectDir, WEB_PROFILE.bundles)
+/**
+ * Initialize a profile without changing existing activation choices or installing packages.
+ * @param projectDir - Private profile directory.
+ * @param bundledPlugins - Initially enabled shipped third-party bundles; omission keeps the standard Web profile.
+ */
+export function createPluginProfile(projectDir: string, bundledPlugins: readonly string[] = []): void {
+  initProfile(projectDir, [...WEB_PROFILE.bundles, ...bundledPlugins])
 }
