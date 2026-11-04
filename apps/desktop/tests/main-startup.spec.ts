@@ -2,7 +2,7 @@ import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
@@ -191,6 +191,7 @@ const harness = await vi.hoisted(async () => {
   const app = Object.assign(new EventEmitter(), {
     isPackaged: true,
     name: 'Desktop test',
+    setName(name: string): void { app.name = name },
     whenReady: () => Promise.resolve(),
     getLocale: (): string => 'en-US',
     getPreferredSystemLanguages: () => ['en-US'],
@@ -794,6 +795,32 @@ describe('desktop main startup', () => {
       ['about', 'separator', 'NovaFlow account', en.checkUpdatesMenu, en.cliCommandMenu,
         'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit'])
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledOnce()
+  })
+
+  it('initializes a recovered macOS Keychain identity before ready and restores the product name before creating menus', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const root = mkdtempSync(join(tmpdir(), 'novaflow-main-keychain-'))
+    onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
+    const appData = join(root, 'apps')
+    const userData = join(appData, 'novaflow')
+    mkdirSync(userData, { recursive: true })
+    const { LEGACY_DESKTOP_BRAND } = await import('@deepseek-ai/dsh-desktop-host/novaflow')
+    writeFileSync(join(userData, 'novaflow-keychain.json'), JSON.stringify({ version: 1, identity: LEGACY_DESKTOP_BRAND }))
+    harness.app.getPath.mockImplementation(name => name === 'home' ? join(root, 'home')
+      : name === 'appData' ? appData : name === 'userData' ? userData : `desktop-test-${name}`)
+    const productName = harness.app.name
+    const setName = vi.spyOn(harness.app, 'setName')
+    vi.spyOn(harness.app, 'whenReady').mockImplementation(() => {
+      expect(harness.app.name).toBe(LEGACY_DESKTOP_BRAND)
+      return Promise.resolve()
+    })
+    try {
+      await import('../src/main.ts')
+      await harness.preparing.promise
+      expect(setName.mock.calls).toEqual([[LEGACY_DESKTOP_BRAND], [productName]])
+      expect(harness.app.name).toBe(productName)
+      expect(harness.menu.mock.calls[0]?.[0][0]?.label).toBe(productName)
+    } finally { harness.app.name = productName }
   })
 
   it.each(['en-US', 'zh-CN'])('localizes macOS application commands without changing the application name (%s)', async (locale) => {

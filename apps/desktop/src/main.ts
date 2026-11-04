@@ -6,7 +6,7 @@ import { startNovaFlowLoopbackRelay } from './novaflow/loopback-relay.ts'
 import type { NovaFlowLoopbackRelay } from './novaflow/loopback-relay.ts'
 import { novaFlowAccountCopy } from './novaflow/locale.ts'
 import { NOVAFLOW_ACCESS_MODE } from './novaflow/server-default.ts'
-import { novaFlowDataFile, resolveNovaFlowDataDirectories } from './brand-compat.ts'
+import { novaFlowDataFile, pinNovaFlowKeychainIdentity, resolveNovaFlowDataDirectories } from './brand-compat.ts'
 import { ServerOriginSetting } from './novaflow/server-origin.ts'
 import { ModelCapacitySettings, type ModelCapacityOverride } from './novaflow/model-capacity.ts'
 import { desktopDeviceName } from './novaflow/device-name.ts'
@@ -107,10 +107,12 @@ let backendReady = false
 const rendererConsole = new RendererConsoleTail()
 
 // Packaged NovaFlow builds use a separate data home from the upstream CLI.
+let restoreProductName = () => {}
 if (app.isPackaged) {
   const data = resolveNovaFlowDataDirectories(app.getPath('home'), app.getPath('appData'))
   process.env.DSH_HOME ??= data.home
   if (existsSync(data.userData)) app.setPath('userData', data.userData)
+  if (process.platform === 'darwin') restoreProductName = pinNovaFlowKeychainIdentity(app, data.userData)
 }
 
 // Platform-conventional logs directory (macOS ~/Library/Logs/<name>, otherwise under userData);
@@ -369,6 +371,8 @@ function createWindow(preload: string, show = false, primary = false, partition?
 }
 
 async function main(): Promise<void> {
+  // Electron captures its macOS Keychain service before ready; product UI keeps its normal name.
+  restoreProductName()
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
   const updateJournal = journalDirectory === undefined ? undefined : new DesktopUpdateJournal(journalDirectory, app.getVersion())
