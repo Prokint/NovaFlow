@@ -4,7 +4,8 @@ import { constants, existsSync, readFileSync } from 'node:fs'
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
-import { initProfile, PROFILE_TEMPLATES } from '@deepseek-ai/dsh-app-boot'
+import { initProfile } from '@deepseek-ai/dsh-app-boot'
+import { PROFILE_TEMPLATES } from '@deepseek-ai/dsh-official-bundles'
 import type { NovaFlowDesktopSnapshot } from './novaflow/runtime.ts'
 
 /** Authenticated identity, never a username, group, or credential. */

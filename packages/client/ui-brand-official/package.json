@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-brand-official",
   "description": "NovaFlow brand occupants for the Web client sidebar and conversation hero, plus the desktop account entry and page",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.1",
   "publishConfig": {
     "access": "public"
   },

@@ -110,7 +110,10 @@ describe('master-only platform scheduling', () => {
   it('runs Wine once on hosted master CI and seeds its own apt cache', () => {
     const master = workflow('ci-master.yml')
     const wine = master.jobs.windows!
-    expect(wine).toMatchObject({ if: masterPush, 'runs-on': 'ubuntu-latest' })
+    expect(wine).toMatchObject({
+      if: `(${masterPush}) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'wine')`,
+      'runs-on': 'ubuntu-latest',
+    })
     expect(wine.needs).toBeUndefined()
     expect(wine['continue-on-error']).toBeUndefined()
     expect(master.jobs['wine-apt-cache']).toBeUndefined()

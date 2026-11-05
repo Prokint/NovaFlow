@@ -28,7 +28,7 @@ describe('CI workflow', () => {
     expect(compatibilityLimit).toBeGreaterThan(0)
     expect(compatibility.strategy).toMatchObject({
       'fail-fast': false,
-      matrix: { include: [{ node: '22.19' }, { node: '24.9' }, { node: 26 }] },
+      matrix: { include: [{ node: '24.9' }, { node: 26 }] },
     })
     expect(workflowJob(ci, 'all-checks-passed').needs).toContain('node-compat')
     const ordinaryJobs = Object.entries(ci.jobs)
@@ -71,7 +71,10 @@ describe('CI workflow', () => {
       expect(job.steps).toContainEqual(expect.objectContaining({ run: command }))
     }
     const scripts = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    expect(scripts.scripts['build:lib:host']).toContain('tsc -b tsconfig.host.json')
+    const hostSteps = scripts.scripts['build:lib:host']!.split(' && ')
+    expect(hostSteps[0]).toBe('tsx scripts/compile-referenced-projects.ts host-libraries')
+    expect(hostSteps).toContain('node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc -p tsconfig.host.json')
+    expect(hostSteps.at(-1)).toBe('pnpm --filter @deepseek-ai/dsh-desktop run bundle')
     expect(scripts.scripts['build:lib:client']).toContain('tsc -b tsconfig.client.json')
     expect(scripts.scripts.typecheck).toBe('tsx scripts/build.ts --scope typecheck')
   })
@@ -656,7 +659,7 @@ describe('CI workflow', () => {
     const wineGates = readFileSync(resolve(root, 'scripts/wine-windows-gates.sh'), 'utf8')
 
     expect(wineGates).toContain(
-      'wine_node "$scratch/logs/host-tsc.log" --max-old-space-size=4096 "$tsc_js" -b tsconfig.host.json --pretty false',
+      'wine_node "$scratch/logs/host-tsc.log" --max-old-space-size=8192 "$tsc_js" -p tsconfig.host.json --pretty false',
     )
   })
 
@@ -980,7 +983,7 @@ describe('DeepSeek e2e workflow', () => {
     if (!Array.isArray(e2e.steps)) throw new TypeError('DeepSeek e2e workflow must define steps')
 
     const step = e2e.steps.filter(isRecord).find(candidate => candidate.name === 'E2E tests (real DeepSeek API)')
-    expect(step).toMatchObject({ env: { DSH_E2E_MAX_WORKERS: 4 } })
+    expect(step).toMatchObject({ env: { DSH_E2E_MAX_WORKERS: 6 } })
   })
 })
 
@@ -1168,8 +1171,11 @@ describe('npm release workflows', () => {
       isRecord(step) && typeof step.run === 'string' ? [step.run] : [])
 
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
-    expect(commands).toContain('pnpm run verify-package-dependencies')
-    expect(commands).toContain('pnpm run verify-npm-install-layout')
+    // Both checks share a step but preserve each process's exit status.
+    const combined = commands.find(command => command.includes('verify-package-dependencies'))
+    expect(combined).toContain('pnpm run verify-npm-install-layout')
+    expect(combined).toContain('wait "$dependencies_pid" || dependencies_status=$?')
+    expect(combined).toContain('wait "$layout_pid" || layout_status=$?')
   })
 })
 

@@ -127,7 +127,8 @@ describe('native NovaFlow account UI', () => {
   it('provides actionable keyring failure without a plaintext fallback', async () => {
     const { ui, page } = fixture({ account: { status: 'signed-out', errorCode: 'secure_storage_unavailable' }, serverOrigin, catalogStatus: 'unavailable' })
     await ui.open()
-    expect(page.textContent).toContain('Enable your operating-system keyring')
+    expect(page.textContent).toContain('Saved account credentials could not be read and have been preserved.')
+    expect(page.textContent).toContain('Check system keyring access')
     expect(page.querySelector('input[type="password"]')).toBeNull()
     expect(novaFlowAccountCopy('zh-CN').signIn).toBe('在浏览器中登录')
   })

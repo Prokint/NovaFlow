@@ -1,5 +1,6 @@
 /** Origin-scoped boot, native directory selection, host paths of picked files, and update presentation with native confirmation actions. */
 
+import type { FileSaveResult } from '@deepseek-ai/dsh-client-ui-file-actions/types'
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { installNovaFlowAccountUi } from './preload-novaflow.ts'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
@@ -12,6 +13,11 @@ import { createDesktopBrowserBridge } from './preload-browser.ts'
 function createProductApi(): DshDesktopProductApi {
   return {
     protocolVersion: 1,
+    fileActions: {
+      save: request => ipcRenderer.invoke(DESKTOP_IPC.fileSave, request) as Promise<FileSaveResult>,
+      readClipboardImage: url => ipcRenderer.invoke(DESKTOP_IPC.clipboardImageRead, url) as
+        Promise<{ bytes: Uint8Array; mediaType: string }>,
+    },
     browser: createDesktopBrowserBridge(),
     deviceInfo: () => ipcRenderer.invoke(DESKTOP_IPC.deviceInfo) as Promise<string>,
     keyboard: {

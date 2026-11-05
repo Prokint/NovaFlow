@@ -18,7 +18,6 @@ const DEEPSEEK_SERVICES = [
   '@deepseek-ai/dsh-session-log-deepseek', '@deepseek-ai/dsh-client-ui-settings-session-log',
   '@deepseek-ai/dsh-deepseek-llm-api-extensions', '@deepseek-ai/dsh-plugin-package-inventory-deepseek',
   '@deepseek-ai/dsh-web-search-deepseek', '@deepseek-ai/dsh-web-deepseek-api', '@deepseek-ai/dsh-client-ui-settings-web-search',
-  '@deepseek-ai/dsh-client-ui-deepseek-model-label-1017',
   '@deepseek-ai/dsh-client-ui-settings-account',
 ]
 

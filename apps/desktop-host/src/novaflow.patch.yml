@@ -17,7 +17,7 @@
   disabled: true
 # DeepSeek-hosted services stay off. Feedback (like/dislike, the feedback dialog and /feedback) would upload the
 # whole session to DeepSeek's collector, and web search and the DeepSeek Search and Fetch APIs would call
-# api.deepseek.com; the wire extensions, session-log toggle, package inventory and the `1017` model label only
+# api.deepseek.com; the wire extensions, session-log toggle, package inventory only
 # serve the disabled DeepSeek routes. Local session-log download remains, and web_fetch keeps its local HTTP provider.
 - id: session-telemetry-otel
   disabled: true
@@ -42,8 +42,6 @@
 - id: web-deepseek-api
   disabled: true
 - id: ui-settings-web-search
-  disabled: true
-- id: ui-deepseek-model-label-1017
   disabled: true
 - id: web
   config:

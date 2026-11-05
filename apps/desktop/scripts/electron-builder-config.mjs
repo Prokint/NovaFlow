@@ -160,7 +160,7 @@ export function createElectronBuilderConfig(
       hardenedRuntime: !unsigned,
       extendInfo: {
         // macOS matches the application locale against this bundle, not Electron Framework resources.
-        CFBundleLocalizations: ['en', 'zh_CN'],
+        CFBundleLocalizations: ['en', 'zh_CN', 'ja', 'es', 'fr', 'de', 'ru', 'pt_BR'],
         NSMicrophoneUsageDescription: 'NovaFlow uses your microphone to transcribe speech into message drafts.',
       },
       entitlements: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
@@ -262,7 +262,7 @@ export function createElectronBuilderConfig(
       perMachine: false,
       allowElevation: false,
       allowToChangeInstallationDirectory: false,
-      installerLanguages: ['en_US', 'zh_CN'],
+      installerLanguages: ['en_US', 'zh_CN', 'ja_JP', 'es_ES', 'fr_FR', 'de_DE', 'ru_RU', 'pt_BR'],
       differentialPackage: true,
     },
     // Every version, including prereleases, writes the `latest` channel files.

@@ -10,7 +10,7 @@ import { AccountAction, type AccountActionFace } from './AccountAction.tsx'
 import { ACCOUNT_PANEL_ID, AccountPage, type AccountPageFace } from './AccountPage.tsx'
 import { readDesktopAccountBridge } from './bridge.ts'
 import { NovaFlowMark, NovaFlowName } from './Brand.tsx'
-import { en, NS, zh } from './locales.ts'
+import { en, NS, zh, ja, es, fr, de, ru, pt } from './locales.ts'
 
 export type { AccountActionFace } from './AccountAction.tsx'
 export type { AccountPageFace } from './AccountPage.tsx'
@@ -26,7 +26,7 @@ export const inject = ['slots', 'locale', 'layout']
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'novaflow: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'novaflow: dictionaries')
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', function* () {
       yield ctx.slots.register({ name: 'sidebar.brand.mark' }, NovaFlowMark)

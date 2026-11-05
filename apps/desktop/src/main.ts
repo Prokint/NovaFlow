@@ -1,3 +1,4 @@
+import { installFileActions } from './file-actions.ts'
 import { NovaFlowDesktopRuntime, type NovaFlowDesktopSnapshot } from './novaflow/runtime.ts'
 import { NewApiSessionTransport, newApiSessionEndpoint, parseNewApiRefreshRecord, readNewApiCatalog, readNewApiWallet } from './novaflow/new-api.ts'
 import { openNewApiLoginWindow } from './novaflow/new-api-login.ts'
@@ -501,13 +502,15 @@ async function main(): Promise<void> {
   const browserGuests = new DesktopBrowserGuests(() => hostUrl)
   let injections: readonly unknown[] = []
   let settingsBackend: DesktopWelcomeBackend | undefined
-  const assertProductSender = (event: IpcMainInvokeEvent): void => {
+  const assertProductSender = (event: IpcMainInvokeEvent): BrowserWindow => {
     assertDesktopSender(event, ['app'])
     if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
       || event.senderFrame === null || event.senderFrame !== mainWindow.webContents.mainFrame) {
       throw new Error('dsh desktop: rejected IPC from an unowned renderer')
     }
+    return mainWindow
   }
+  installFileActions(assertProductSender, () => hostUrl)
   let navigation: { window: BrowserWindow; url: string; promise: Promise<void> } | undefined
   const navigateMain = (url: string): Promise<void> => {
     const window = mainWindow

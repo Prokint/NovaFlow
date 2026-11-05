@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-desktop",
   "description": "NovaFlow desktop coding agent that signs in with a New API account",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -68,6 +68,9 @@
     "@types/ws": "^8.18.1",
     "@deepseek-ai/dsh-client-shortcuts": "workspace:*",
     "@deepseek-ai/dsh-atomic-write": "workspace:*",
-    "@deepseek-ai/dsh-desktop-host": "workspace:*"
+    "@deepseek-ai/dsh-desktop-host": "workspace:*",
+    "@deepseek-ai/dsh-official-bundles": "workspace:*",
+    "@deepseek-ai/dsh-util-file-drag": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-file-actions": "workspace:*"
   }
 }

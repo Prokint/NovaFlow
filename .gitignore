@@ -56,3 +56,6 @@ apps/desktop/.env.linux
 /NovaFlow.app/
 /NavaFlow.app/
 /customizations/novaflow/__pycache__/
+
+# Generated company-signed CUA release record.
+/packages/experimental/cua-macos/cua-helper.json

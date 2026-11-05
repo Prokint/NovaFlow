@@ -2,7 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { canonicalReferenceText } from './verify-public-repository-links.ts'
 
@@ -11,10 +11,9 @@ const organization = ['deepseek', 'harness'].join('-')
 const organizationUrl = new RegExp(`\\bgithub\\.com/${organization}(?![a-z0-9-])`)
 // The independent kit repository owns the engine source and documentation.
 const kitRepositoryUrl = new RegExp(`\\bgithub\\.com/${organization}/libreoffice-kit(?:\\.git)?(?=/|[^a-zA-Z0-9_.-]|$)`, 'g')
-const commitCandidate = /(?<![a-z0-9])[\da-f]{7,40}(?![a-z0-9])/gi
+// Decimal-only tokens collide with sizes, counts, and version components; see docs/AGENTS.md#repository-references.
+const commitCandidate = /(?<![a-z0-9])(?=[\da-f]{0,39}[a-f])[\da-f]{7,40}(?![a-z0-9])/gi
 const excludedPrefixes = ['vendor/', '.agents/notes/archived/']
-// Dependency managers own these generated records, including incidental numeric and digest values.
-const generatedLockfiles = new Set(['pnpm-lock.yaml', 'uv.lock'])
 const gitOutputLimit = 64 * 1024 * 1024
 // One 41-byte line per object; 1.2 million objects produce about 49 MiB.
 const objectListingLimit = 1024 * 1024 * 1024
@@ -30,7 +29,7 @@ export interface RepositoryReference {
 }
 
 function isMaintained(file: string): boolean {
-  return !generatedLockfiles.has(basename(file)) && !excludedPrefixes.some(prefix => file.startsWith(prefix))
+  return !excludedPrefixes.some(prefix => file.startsWith(prefix))
 }
 
 /**
@@ -39,6 +38,7 @@ function isMaintained(file: string): boolean {
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
  * @returns One finding per line and reference kind; digests and other Git object types are accepted.
+ * Decimal-only tokens are ignored, including actual commit identifiers.
  */
 export function findRepositoryReferences(
   file: string,
@@ -109,7 +109,7 @@ export function uniquePrefixMatch(objects: readonly string[], prefix: string): s
  * Resolve commit-identifier candidates in maintained sources against the local object database.
  * @param repoRoot - Working tree whose Git objects are inspected.
  * @param sources - File texts or symlink targets to extract candidates from.
- * @returns Lowercase candidates that name exactly one available object, which is a commit.
+ * @returns Lowercase candidates containing a hexadecimal letter that name exactly one available object, which is a commit.
  */
 export function repositoryCommits(repoRoot: string, sources: Iterable<string>): Set<string> {
   const candidates = [...new Set([...sources].flatMap(source =>
@@ -136,7 +136,7 @@ export function repositoryCommits(repoRoot: string, sources: Iterable<string>): 
 /**
  * Scan tracked and nonignored new files using only the local Git object database.
  * @param repoRoot - Working tree whose files and Git objects are inspected.
- * @returns Prohibited references outside vendor, frozen Agent Notes, and generated lockfiles; absent shallow-history objects cannot match.
+ * @returns Prohibited references outside vendor and frozen Agent Notes; absent shallow-history objects cannot match.
  */
 export function scanRepositoryReferences(repoRoot: string): RepositoryReference[] {
   const sources = readMaintainedFiles(repoRoot)
@@ -148,7 +148,7 @@ const invokedPath = process.argv[1]
 if (invokedPath !== undefined && import.meta.url === pathToFileURL(resolve(invokedPath)).href) {
   const references = scanRepositoryReferences(root)
   if (references.length === 0) {
-    console.log('verify-repository-references: maintained files contain no repository commit identifiers or disallowed organization URLs.')
+    console.log('verify-repository-references: maintained files contain no prohibited references (decimal-only tokens are ignored).')
   } else {
     console.error('verify-repository-references: use release tags or maintained repository links:')
     for (const { file, line, kind } of references) console.error(`  ${file}:${String(line)} ${kind}`)
