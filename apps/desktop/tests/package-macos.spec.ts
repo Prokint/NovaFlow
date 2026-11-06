@@ -158,13 +158,13 @@ describe('parallel macOS artifacts', () => {
     }
   })
 
-  it('promotes the update metadata and keeps the GitHub Releases updater configuration in the stapled App', async () => {
+  it('promotes the update metadata and keeps the static feed updater configuration in the stapled App', async () => {
     const f = await fixture()
     try {
       await packageMacOSArtifacts(f.request, f.build, f.apple)
       expect((await readdir(f.request.artifactsRoot)).sort())
         .toEqual(['latest-mac.yml', 'mac-arm64', `${f.base}.dmg`, `${f.base}.zip`, `${f.base}.zip.blockmap`])
-      expect(await readFile(join(f.appPath, 'Contents', 'Resources', 'app-update.yml'), 'utf8')).toContain('provider: github')
+      expect(await readFile(join(f.appPath, 'Contents', 'Resources', 'app-update.yml'), 'utf8')).toContain('url: https://updates.lanjiaotrade.com/')
       expect(f.apple.verifySignature).toHaveBeenCalledTimes(4)
       expect(f.apple.verifyNotarization).toHaveBeenCalledOnce()
     } finally { await rm(f.root, { recursive: true, force: true }) }

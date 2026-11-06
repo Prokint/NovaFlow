@@ -62,10 +62,10 @@ Host 保留旧版提供方名称以读取已有会话和解析旧模型调用；
 
 ## 更新与更新日志
 
-更新来自本仓库公开的 GitHub Releases，标签格式为 `v<semver>`（仍兼容 `novaflow-v<semver>`），只提供已发布的正式版。未经用户确认不会下载或安装任何内容：每次提示都会显示更新日志，内容取自 Release 说明中 `<!-- novaflow:install-notes -->` 标记之前的部分，按纯文本显示。Windows 与 AppImage 构建在用户确认后于应用内下载，安装重启前会再次确认。没有 Developer ID 签名的 macOS 构建和 deb 安装无法原地替换，弹窗改为打开 Release 页面；这类构建在启动后检查一次，并跳过用户已选择稍后的版本，从菜单手动检查则总会给出结果。安装包不包含强制更新策略，因此不会强制更新。
+更新来自静态更新源 `https://updates.lanjiaotrade.com/`；发布任务把 `latest*.yml`、安装包和 `release.json` 上传到该目录，并且只提供已发布的正式版。未经用户确认不会下载或安装任何内容：每次提示都会显示更新日志，内容取自 `release.json` 中 `<!-- novaflow:install-notes -->` 标记之前的部分，按纯文本显示。Windows 与 AppImage 构建在用户确认后于应用内下载，安装重启前会再次确认。没有 Developer ID 签名的 macOS 构建和 deb 安装无法原地替换，弹窗改为打开下载页；这类构建在启动后检查一次，并跳过用户已选择稍后的版本，从菜单手动检查则总会给出结果。安装包不包含强制更新策略，因此不会强制更新。
 
 ## 验证与启用条件
 
 定向无密钥测试使用模拟远端响应和真实本机回调监听器。通过 `vitest run apps/desktop/tests/novaflow-auth.spec.ts apps/desktop/tests/novaflow-routing.spec.ts apps/desktop/tests/novaflow-quota-display.spec.ts apps/desktop/tests/novaflow-model-capacity.spec.ts apps/desktop/tests/novaflow-account-ui.client.spec.ts apps/desktop/tests/novaflow-account-bridge.client.spec.ts apps/desktop/tests/host-process.spec.ts apps/desktop/tests/main-startup.spec.ts apps/desktop-host/tests/novaflow-provider.spec.ts packages/client/ui-model-selection/tests/model-select.client.spec.tsx --maxWorkers=2` 运行账号、路由、金额显示、模型容量、原生账号页面、页面桥接、模型菜单与 IPC 校验。页面集成用例连接真实账号运行时和 HTTP 授权传输，仅替换网络、存储等外部依赖；中英文可见状态快照保存在桌面测试的 `__snapshots__` 中。这些测试不验证真实账号、付费模型调用、实际操作系统钥匙串或安装后的桌面构建，jsdom 断言也不等于真实浏览器视觉验收。
 
-品牌发行需要带有本桌面授权的 New API 服务器、设为公开来源的 ServerAddress，以及 Windows、macOS、Linux 的真实安装验收。在客户端切换分组还需要授予 `group:select` 的服务器版本；使用 auto 还需要站点把 `auto` 列入账号的可用分组，撤下后使用它的设备会退出登录，与撤下其他分组时相同。元数据未配置的容量要改用厂商目录，需要服务器提供 `capacity_defaults`。安装包只从本仓库的 GitHub Releases 读取更新，不含强制更新策略，也不使用继承自 DeepSeek Harness 的更新源。Host 适配器使用原有模型选择器，目录发布会刷新已打开的输入框。首次原生启动通过可写 profile 设置尚未选择模型的初始状态，保留用户后续保存的模型选择。目录把已保存默认模型列到另一个端点下时，默认选择随之移过去并清除推理等级。会话已选的模型不再列出时，发送前需重新选择模型。打包本身不包含这些接入。发布、真实凭证和生产调用属于独立操作。
+品牌发行需要带有本桌面授权的 New API 服务器、设为公开来源的 ServerAddress，以及 Windows、macOS、Linux 的真实安装验收。在客户端切换分组还需要授予 `group:select` 的服务器版本；使用 auto 还需要站点把 `auto` 列入账号的可用分组，撤下后使用它的设备会退出登录，与撤下其他分组时相同。元数据未配置的容量要改用厂商目录，需要服务器提供 `capacity_defaults`。安装包只从静态更新源 `https://updates.lanjiaotrade.com/` 读取更新，不含强制更新策略，也不使用继承自 DeepSeek Harness 的更新源。Host 适配器使用原有模型选择器，目录发布会刷新已打开的输入框。首次原生启动通过可写 profile 设置尚未选择模型的初始状态，保留用户后续保存的模型选择。目录把已保存默认模型列到另一个端点下时，默认选择随之移过去并清除推理等级。会话已选的模型不再列出时，发送前需重新选择模型。打包本身不包含这些接入。发布、真实凭证和生产调用属于独立操作。

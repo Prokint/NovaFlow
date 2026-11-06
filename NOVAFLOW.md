@@ -6,7 +6,7 @@
 
 应用名称、原生菜单、账号页、首页、提示文案、内部模块与打包程序统一为 NovaFlow。桌面、侧栏、首页、浏览器与安装器图标从 `design/brand/novaflow-symbol-transparent.png` 生成；可运行 `node customizations/novaflow/prepare-logo.mjs` 后重新执行桌面文档中的 Linux 和托盘渲染命令。新安装默认使用 `~/.novaflow` 与 Electron 的 `novaflow` 用户数据目录；已有安装继续读取原目录与设置文件，不搬移、改写或清除账号和会话。旧会话的模型路由通过兼容层调用，新选择保存为 NovaFlow 路由。原 DeepSeek Harness 的 `~/.dsh` 和系统中的 `dsh` 命令不需要修改。与旧版共用数据时，切换前先退出另一份应用。
 
-源码的更新检查和打包更新配置指向 `Prokint/NovaFlow`。发布工作流、更新解析器与安装器统一使用 `v*` 标签和 `novaflow-*` 文件名，应用标识为 `com.novaflow.desktop`。私有仓库没有匿名可读的 Release 时不会提供更新。
+源码的更新检查和打包更新配置指向自建更新源 `https://updates.lanjiaotrade.com/`（静态 HTTPS 目录，发布工作流通过受限 rsync 账号上传）。GitHub Releases 继续作为源码与安装包归档，但应用不再从 GitHub 检查更新。发布工作流、更新解析器与安装器统一使用 `v*` 标签和 `novaflow-*` 文件名，应用标识为 `com.novaflow.desktop`。
 
 ## 开发
 

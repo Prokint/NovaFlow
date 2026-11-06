@@ -36,8 +36,8 @@
   en: 4cd8a8da6977928d
   zh: 9f624855a2edac37
 /novaflow-desktop/package/release-versions:
-  en: bab72aad49b5e4b2
-  zh: 8fe84650ba6732fb
+  en: 727c4aa66777e584
+  zh: 46823dfb99179afd
 /novaflow-desktop/package/local-official-bundles-from-a-loopback-registry:
   en: 253122e77e5712a1
   zh: d35d043b3f13535f
@@ -45,8 +45,8 @@
   en: 8cb7b1711f0ecf41
   zh: ac4305f34ff02870
 /novaflow-desktop/package/release-workflow:
-  en: ced9f83ecf3cde7c
-  zh: ea78c45574c1879f
+  en: 73819f95e9c4792d
+  zh: 4b42d70ae5384c90
 /novaflow-desktop/package/unsigned-installers:
   en: 5a41023694093aaf
   zh: 477a8090bd93fe28
@@ -63,11 +63,11 @@
   en: 255df8d556f8f04f
   zh: 41c31176a9d2c2eb
 /novaflow-desktop/package/desktop-runtime-preparation:
-  en: 51ece8ec288e51d6
-  zh: e2ab911d9e78d95f
+  en: 40e09d2e47a52926
+  zh: 92da9b3cc682f825
 /novaflow-desktop/updates:
-  en: 9f60a07e2db20301
-  zh: d5227b196d66cad3
+  en: d64b2577e3392c6d
+  zh: 4e79b16deba07782
 /novaflow-desktop/updates/local-updater-qualification:
   en: 175659592f726b94
   zh: eb838c58b855b21d
@@ -81,5 +81,5 @@
   en: bb7feac673841834
   zh: 1be909404d2814ee
 /novaflow-desktop/linux-packages:
-  en: b2da89fd27ff0bf2
-  zh: d617883dc7db8b60
+  en: 4ed6dcc54a5780b2
+  zh: 3825033d448a1a1d

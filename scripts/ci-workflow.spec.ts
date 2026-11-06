@@ -1244,11 +1244,12 @@ describe('NovaFlow desktop release workflow', () => {
     expect(runs('release')).not.toContain('novaflow-desktop-mac-x64')
   })
 
-  it('grants write access only to the job that creates the release, without repository secrets', () => {
+  it('grants write access only to the job that publishes the release and uses only the feed deploy secret', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' })
     expect(workflowJob(workflow, 'release').permissions).toEqual({ contents: 'write', actions: 'read' })
     for (const name of ['prepare', 'package']) expect(workflowJob(workflow, name)).not.toHaveProperty('permissions')
-    expect(JSON.stringify(workflow)).not.toContain('secrets.')
+    expect(JSON.stringify(workflow)).toContain('secrets.NOVAFLOW_UPDATE_DEPLOY_KEY')
+    expect(JSON.stringify(workflow).replaceAll('secrets.NOVAFLOW_UPDATE_DEPLOY_KEY', '')).not.toContain('secrets.')
   })
 
   it('runs Windows packaging commands under native PowerShell', () => {
@@ -1259,10 +1260,15 @@ describe('NovaFlow desktop release workflow', () => {
     expect(runs('package')).toContain('"TMPDIR=$env:RUNNER_TEMP" >> $env:GITHUB_ENV')
   })
 
-  it('publishes collected installers, update metadata, and checksums with the changelog notes', () => {
+  it('publishes collected installers, update metadata, checksums, and the static feed with the changelog notes', () => {
     const release = runs('release')
     expect(release).toContain('collect-release-assets.mjs --version "$VERSION"')
+    expect(release).toContain('--release-notes dist/release-notes.md')
     expect(release).toContain('desktop-release-notes.mjs notes --version "$VERSION"')
+    expect(release).toContain('publish-update-feed.mjs --source dist/release')
+    expect(release).toContain('--remote "novaflow-publish@103.236.67.115:/"')
+    expect(release).toContain('ssh-keyscan -t ed25519 103.236.67.115')
+    expect(release).toContain('SHA256:gyPYnj4hsxSRq78f+qFOkE/XNy0WovKERwTb19MMWAc')
     expect(release).toContain('if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi')
     expect(release).toContain('gh release create "$TAG" dist/release/*')
     expect(release).toContain('gh release upload "$TAG" dist/release/*')
@@ -1276,6 +1282,10 @@ describe('NovaFlow desktop release workflow', () => {
     }
     expect(release).toContain('--notes-file dist/release-notes.md')
     expect(workflowJob(workflow, 'release').needs).toEqual(['prepare', 'package'])
+    // Old installs read GitHub; publish that archive before the cross-border feed upload so migration survives a slow or failed upload.
+    const names = steps('release').map(step => typeof step.name === 'string' ? step.name : '')
+    expect(names.indexOf('Create the GitHub Release')).toBeLessThan(names.indexOf('Install update feed deploy key'))
+    expect(names.indexOf('Install update feed deploy key')).toBeLessThan(names.indexOf('Publish update feed'))
   })
 })
 

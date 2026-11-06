@@ -47,7 +47,7 @@ describe('macOS afterPack', () => {
     const config = createElectronBuilderConfig(UNSIGNED, 'darwin', 'arm64')
     execute.mockImplementationOnce(async () => {
       // Signing seals Contents/Resources, so the configuration must already exist.
-      expect(await readFile(join(resources, 'app-update.yml'), 'utf8')).toContain('owner: Prokint')
+      expect(await readFile(join(resources, 'app-update.yml'), 'utf8')).toContain('url: https://updates.lanjiaotrade.com/')
       return { stdout: '', stderr: '' }
     })
     await config.afterPack(context() as never)
@@ -58,7 +58,7 @@ describe('macOS afterPack', () => {
   })
 
   it('keeps the configuration electron-builder already wrote for DMG and ZIP targets', async () => {
-    const written = 'owner: Prokint\nrepo: NovaFlow\nprovider: github\nreleaseType: release\nupdaterCacheDirName: novaflow-updater\n'
+    const written = 'provider: generic\nurl: https://updates.lanjiaotrade.com/\nupdaterCacheDirName: novaflow-updater\n'
     await writeFile(join(resources, 'app-update.yml'), written)
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     await createElectronBuilderConfig(UNSIGNED, 'darwin', 'arm64').afterPack(context() as never)
@@ -69,14 +69,14 @@ describe('macOS afterPack', () => {
   it('writes the configuration into a signed directory build without applying an ad-hoc signature', async () => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     await createElectronBuilderConfig(SIGNED, 'darwin', 'arm64').afterPack(context() as never)
-    expect(await readFile(join(resources, 'app-update.yml'), 'utf8')).toContain('provider: github')
+    expect(await readFile(join(resources, 'app-update.yml'), 'utf8')).toContain('provider: generic')
     expect(execute).not.toHaveBeenCalled()
   })
 
   it('refuses to sign an App whose updater configuration names another feed', async () => {
-    await writeFile(join(resources, 'app-update.yml'), 'provider: generic\nurl: https://updates.example.com\nupdaterCacheDirName: x\n')
+    await writeFile(join(resources, 'app-update.yml'), 'provider: generic\nurl: https://updates.example.com/\nupdaterCacheDirName: x\n')
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
-    await expect(createElectronBuilderConfig(UNSIGNED, 'darwin', 'arm64').afterPack(context() as never)).rejects.toThrow(/provider to github/u)
+    await expect(createElectronBuilderConfig(UNSIGNED, 'darwin', 'arm64').afterPack(context() as never)).rejects.toThrow(/url to https:\/\/updates\.lanjiaotrade\.com\//u)
     expect(execute).not.toHaveBeenCalled()
   })
 })

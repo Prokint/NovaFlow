@@ -974,7 +974,7 @@ describe('desktop main startup', () => {
   /** Give the packaged build an in-app update source, as a Windows or AppImage release carries. */
   function withInAppUpdateSource(): void {
     const resources = mkdtempSync(join(tmpdir(), 'novaflow-update-source-'))
-    writeFileSync(join(resources, 'app-update.yml'), 'provider: github\nowner: Prokint\nrepo: NovaFlow\n')
+    writeFileSync(join(resources, 'app-update.yml'), 'provider: generic\nurl: https://updates.lanjiaotrade.com/\n')
     onTestFinished(() => { rmSync(resources, { recursive: true, force: true }) })
     vi.stubGlobal('process', { ...process, resourcesPath: resources })
   }
@@ -1479,19 +1479,19 @@ describe('desktop main startup', () => {
     }))
   })
 
-  it('announces the latest public GitHub release with its notes when the build cannot update in place', async () => {
+  it('announces the latest feed release with its notes when the build cannot update in place', async () => {
     const fetchRelease = harness.netFetch
     await readyForUpdate()
     const check = applicationMenuItems().find(item => item.label === en.checkUpdatesMenu)?.click as () => void
-    const page = 'https://github.com/Prokint/NovaFlow/releases/tag/novaflow-v99.0.0'
-    fetchRelease.mockResolvedValueOnce(Response.json({ tag_name: 'novaflow-v99.0.0', html_url: page,
-      body: '## 99.0.0\n- 新功能\n<!-- novaflow:install-notes -->\n安装说明' }))
+    const page = 'https://updates.lanjiaotrade.com/'
+    fetchRelease.mockResolvedValueOnce(Response.json({ version: '99.0.0', pageUrl: page,
+      notes: '## 99.0.0\n- 新功能\n<!-- novaflow:install-notes -->\n安装说明' }))
     harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
     check()
     await vi.waitFor(() => { expect(harness.openExternal).toHaveBeenCalledWith(page) })
     expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
       message: en.updateAvailable.replace('{version}', '99.0.0'), buttons: [en.updateOpenDownloadPage], releaseNotes: '99.0.0\n• 新功能' }))
-    expect(fetchRelease).toHaveBeenLastCalledWith('https://api.github.com/repos/Prokint/NovaFlow/releases/latest', expect.anything())
+    expect(fetchRelease).toHaveBeenLastCalledWith('https://updates.lanjiaotrade.com/release.json', expect.anything())
     expect(harness.updateDownload).not.toHaveBeenCalled()
 
     fetchRelease.mockResolvedValueOnce(new Response('Not Found', { status: 404 }))
@@ -1561,11 +1561,11 @@ describe('desktop main startup', () => {
     await readyForUpdate()
     harness.updateState = { phase: 'available', version: '1.0.1' }
     harness.netFetch.mockResolvedValueOnce(Response.json({
-      tag_name: 'v1.0.1', html_url: 'https://github.com/Prokint/NovaFlow/releases/tag/v1.0.1',
-      body: '## 1.0.1\n- **修复**登录问题\n<!-- novaflow:install-notes -->\n安装说明' }))
+      version: '1.0.1', pageUrl: 'https://updates.lanjiaotrade.com/',
+      notes: '## 1.0.1\n- **修复**登录问题\n<!-- novaflow:install-notes -->\n安装说明' }))
     harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 1 })
     await invoke(DESKTOP_IPC.updatesOpen, 'app')
-    expect(harness.netFetch).toHaveBeenCalledWith('https://api.github.com/repos/Prokint/NovaFlow/releases/tags/v1.0.1', expect.anything())
+    expect(harness.netFetch).toHaveBeenCalledWith('https://updates.lanjiaotrade.com/release.json', expect.anything())
     expect(harness.dialog.showMessageBox.mock.calls.at(-1)?.at(-1)).toMatchObject({ releaseNotes: '1.0.1\n• 修复登录问题' })
     expect(harness.updateDownload).not.toHaveBeenCalled()
   })

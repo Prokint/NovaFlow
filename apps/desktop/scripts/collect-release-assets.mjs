@@ -1,10 +1,11 @@
 /**
- * Gather one NovaFlow version's installers and update files into a GitHub Release directory.
+ * Gather one NovaFlow version's installers and update files into a release directory.
  *
  * Inputs are electron-builder output directories, or earlier collections, from separate runners.
  * Same-named macOS metadata from the arm64 and x64 runners is merged into one `latest-mac.yml`.
  * Every metadata file is verified against the collected installers before `SHA256SUMS` is written.
- * Usage: `node collect-release-assets.mjs --version <version> --output <directory> <input>...`.
+ * When release notes are supplied, `release.json` is written for the static update feed's download page.
+ * Usage: `node collect-release-assets.mjs --version <version> --output <directory> [--release-notes <file>] [--page-url <url>] <input>...`.
  */
 
 import { createHash } from 'node:crypto'
@@ -12,7 +13,7 @@ import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { mergeDesktopUpdateMetadata, verifyDesktopUpdateMetadata } from './desktop-update-feed.mjs'
+import { DESKTOP_RELEASE_FILE, DESKTOP_UPDATE_PAGE_URL, mergeDesktopUpdateMetadata, verifyDesktopUpdateMetadata } from './desktop-update-feed.mjs'
 
 /** Checksum listing written beside the collected assets. */
 export const DESKTOP_RELEASE_CHECKSUMS = 'SHA256SUMS'
@@ -30,12 +31,22 @@ async function sha256(path) {
   return hash.digest('hex')
 }
 
+function httpsUrl(value, label) {
+  let url
+  try { url = new URL(value) }
+  catch { throw new Error(`desktop release: ${label} must be an HTTPS URL`) }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
+    throw new Error(`desktop release: ${label} must be an HTTPS URL`)
+  }
+  return url.href
+}
+
 /**
  * Collect, merge, verify, and checksum one version's release assets.
- * @param {{ version: string, inputs: readonly string[], output: string }} request - Version, input directories, and the empty or new output directory.
+ * @param {{ version: string, inputs: readonly string[], output: string, releaseNotes?: string, pageUrl?: string }} request - Version, input directories, the empty output directory, and optional download-page notes.
  * @returns {Promise<string[]>} Collected asset names, sorted, ending with `SHA256SUMS`.
  */
-export async function collectDesktopReleaseAssets({ version, inputs, output }) {
+export async function collectDesktopReleaseAssets({ version, inputs, output, releaseNotes, pageUrl }) {
   const installer = new RegExp(`^novaflow-${escape(version)}-(?:win|mac|linux)-[^/\\\\]+\\.(?:exe|dmg|zip|AppImage|deb)(?:\\.blockmap)?$`, 'u')
   const sourceArchive = new RegExp(`^novaflow-${escape(version)}-source\\.(?:zip|tar\\.gz)$`, 'u')
   await mkdir(output, { recursive: true })
@@ -64,6 +75,11 @@ export async function collectDesktopReleaseAssets({ version, inputs, output }) {
     await writeFile(join(output, filename), unique.length === 1 ? unique[0] : mergeDesktopUpdateMetadata(unique))
     await verifyDesktopUpdateMetadata({ directory: output, filename, version, platform: METADATA_PLATFORM[filename] ?? 'linux' })
   }
+  if (releaseNotes !== undefined) {
+    const page = httpsUrl(pageUrl ?? DESKTOP_UPDATE_PAGE_URL, 'download page URL')
+    const feed = { version, pageUrl: page, notes: releaseNotes }
+    await writeFile(join(output, DESKTOP_RELEASE_FILE), `${JSON.stringify(feed, null, 2)}\n`)
+  }
   const assets = (await readdir(output)).sort()
   for (const name of assets) {
     if (!(await stat(join(output, name))).isFile()) throw new Error(`desktop release: ${name} is not a file`)
@@ -76,12 +92,16 @@ export async function collectDesktopReleaseAssets({ version, inputs, output }) {
 async function main(argv) {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
     version: { type: 'string' }, output: { type: 'string' },
+    'release-notes': { type: 'string' }, 'page-url': { type: 'string' },
   } })
   if (!values.version || !values.output || positionals.length === 0) {
     throw new Error('desktop release: expected --version <version> --output <directory> <input>...')
   }
+  const releaseNotes = values['release-notes'] === undefined ? undefined : await readFile(resolve(values['release-notes']), 'utf8')
   const assets = await collectDesktopReleaseAssets({
     version: values.version, output: resolve(values.output), inputs: positionals.map(input => resolve(input)),
+    ...(releaseNotes === undefined ? {} : { releaseNotes }),
+    ...(values['page-url'] === undefined ? {} : { pageUrl: values['page-url'] }),
   })
   process.stdout.write(`${assets.join('\n')}\n`)
 }

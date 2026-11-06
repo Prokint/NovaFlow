@@ -233,7 +233,7 @@ jobs:
     needs: [prepare, package]
     if: ${{ always() && needs.prepare.result == 'success' && (needs.package.result == 'success' || (inputs.reuse_run_id && needs.package.result == 'skipped')) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: write
       actions: read
@@ -293,12 +293,22 @@ jobs:
           mkdir -p dist/source
           git archive --format=zip --prefix="NovaFlow-$TAG/" --output="dist/source/novaflow-$VERSION-source.zip" HEAD
 
-      # Verifies every update file
-      # against the installers it names, and writes SHA256SUMS.
+      - name: Write release notes
+        run: >-
+          node apps/desktop/scripts/desktop-release-notes.mjs notes --version "$VERSION"
+          --changelog CHANGELOG.md --output dist/release-notes.md
+
+      - name: State supported desktop platforms
+        run: |
+          printf '\n\nSupported desktop platforms: Windows x64 and macOS Apple Silicon (arm64). Intel Macs are not supported.\n' >> dist/release-notes.md
+
+      # Verifies every update file against the installers it names, writes SHA256SUMS,
+      # and writes release.json for the feed's download page.
       - name: Collect release assets
         run: >-
           node apps/desktop/scripts/collect-release-assets.mjs --version "$VERSION"
-          --output dist/release dist/inputs/novaflow-desktop-win-x64 dist/inputs/novaflow-desktop-mac-arm64 dist/source
+          --output dist/release --release-notes dist/release-notes.md
+          dist/inputs/novaflow-desktop-win-x64 dist/inputs/novaflow-desktop-mac-arm64 dist/source
 
       - name: Require source, EXE and Apple Silicon DMG installer
         shell: bash
@@ -309,15 +319,8 @@ jobs:
             test -s "dist/release/$file"
           done
 
-      - name: Write release notes
-        run: >-
-          node apps/desktop/scripts/desktop-release-notes.mjs notes --version "$VERSION"
-          --changelog CHANGELOG.md --output dist/release-notes.md
-
-      - name: State supported desktop platforms
-        run: |
-          printf '\n\nSupported desktop platforms: Windows x64 and macOS Apple Silicon (arm64). Intel Macs are not supported.\n' >> dist/release-notes.md
-
+      # Create the GitHub Release first: old installs still read GitHub, so they can migrate even if the
+      # cross-border feed upload is slow or fails. The release keeps the complete asset archive either way.
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -338,3 +341,28 @@ jobs:
           latest=()
           if [ "$PRERELEASE" = false ]; then latest+=(--latest); fi
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${latest[@]}"
+
+      # The private key is a repository secret; the host key fingerprint is public and pinned above the upload.
+      - name: Install update feed deploy key
+        env:
+          NOVAFLOW_UPDATE_DEPLOY_KEY: ${{ secrets.NOVAFLOW_UPDATE_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$NOVAFLOW_UPDATE_DEPLOY_KEY"
+          install -m 700 -d "$RUNNER_TEMP/novaflow-update"
+          printf '%s\n' "$NOVAFLOW_UPDATE_DEPLOY_KEY" > "$RUNNER_TEMP/novaflow-update/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/novaflow-update/id_ed25519"
+          ssh-keyscan -t ed25519 103.236.67.115 > "$RUNNER_TEMP/novaflow-update/known_hosts" 2>/dev/null
+          test "$(ssh-keygen -lf "$RUNNER_TEMP/novaflow-update/known_hosts" | head -1 | awk '{print $2}')" \
+            = "SHA256:gyPYnj4hsxSRq78f+qFOkE/XNy0WovKERwTb19MMWAc" \
+            || { echo '::error::update feed host key does not match the pinned fingerprint'; exit 1; }
+
+      # Binaries upload first and metadata last, so a manifest never references a missing installer.
+      - name: Publish update feed
+        shell: bash
+        run: >-
+          node apps/desktop/scripts/publish-update-feed.mjs --source dist/release
+          --remote "novaflow-publish@103.236.67.115:/"
+          --ssh-key "$RUNNER_TEMP/novaflow-update/id_ed25519"
+          --known-hosts "$RUNNER_TEMP/novaflow-update/known_hosts"

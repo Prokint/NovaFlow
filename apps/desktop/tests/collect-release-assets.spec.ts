@@ -81,6 +81,26 @@ describe('release asset collection', () => {
     expect(sums).toContain(`${createHash('sha256').update('exe').digest('hex')}  novaflow-0.1.0-win-x64-unsigned.exe`)
   })
 
+  it('writes the feed release document when release notes are supplied', async () => {
+    const notes = '## 0.1.0\n- one\n<!-- novaflow:install-notes -->\n## 安装\nxattr'
+    const output = join(root, 'release')
+    const assets = await collectDesktopReleaseAssets({ version: '0.1.0', inputs: await releaseInputs(), output,
+      releaseNotes: notes, pageUrl: 'https://updates.lanjiaotrade.com/' })
+    expect(assets).toContain('release.json')
+    expect(JSON.parse(await readFile(join(output, 'release.json'), 'utf8'))).toEqual({
+      version: '0.1.0', pageUrl: 'https://updates.lanjiaotrade.com/', notes,
+    })
+    const document = await readFile(join(output, 'release.json'))
+    expect(await readFile(join(output, 'SHA256SUMS'), 'utf8'))
+      .toContain(`${createHash('sha256').update(document).digest('hex')}  release.json`)
+    const defaults = join(root, 'defaults')
+    await collectDesktopReleaseAssets({ version: '0.1.0', inputs: await releaseInputs(), output: defaults, releaseNotes: notes })
+    const defaultsFeed = JSON.parse(await readFile(join(defaults, 'release.json'), 'utf8')) as { pageUrl: string }
+    expect(defaultsFeed.pageUrl).toBe('https://updates.lanjiaotrade.com/')
+    await expect(collectDesktopReleaseAssets({ version: '0.1.0', inputs: await releaseInputs(), output: join(root, 'insecure'),
+      releaseNotes: notes, pageUrl: 'http://updates.lanjiaotrade.com/' })).rejects.toThrow(/must be an HTTPS URL/u)
+  })
+
   it('accepts its own earlier collection as input, as the release job receives per-runner collections', async () => {
     const inputs = await releaseInputs()
     const perRunner = await Promise.all(inputs.map(async (input, index) => {

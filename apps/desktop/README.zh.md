@@ -184,7 +184,7 @@ pnpm --dir apps/desktop run package:linux:x64 --build-version 0.1.0-test.1
 
 打包以及手动 macOS 签名检查从 `apps/desktop/.env.windows`、`.env.macos` 或 `.env.linux` 读取发布配置，由目标平台选择。复制对应的 [Windows 模板](.env.windows.example)、[macOS 模板](.env.macos.example) 或 [Linux 模板](.env.linux.example)，填写本机配置；Git 忽略这些本地文件，安装产物也不包含它们。发布字段只从所选来源读取，不回退到系统或 shell 中的同名变量；`PATH`、代理和构建工具环境仍保留。CI 改为设置 `DSH_DESKTOP_PACKAGE_SETTINGS=environment`：打包随后从自身环境读取同一组允许的字段，并在目标 dotenv 文件同时存在时拒绝运行，确保每个发布字段只有一个来源。构建版本是命令参数而非发布字段。文件使用 UTF-8，支持 BOM；相对证书、SignTool、Apple API Key 和钥匙串路径以 `apps/desktop` 为基准，变量值不做 shell 展开，包含 `#` 或空格的密码需要引号。
 
-每条打包命令在构建与下载前检查应用 ID（必须不同于 DeepSeek Harness 的 `com.deepseek.harness`）和该模式需要的签名配置，随后探测本次运行要用的外部工具：归档读取工具，以及 Windows 目标的安装器编译器。macOS 检查身份、Team ID、一套完整公证凭据、`CSC_LINK` 指定的可读本地 p12 文件、显式配置的 `CSC_KEY_PASSWORD`，以及引用的 API Key 和钥匙串文件；Windows 检查公开代码签名证书、SignTool 文件、容器名称和 PIN 格式。仅准备资源的构建以及显式未签名的 Windows 与 macOS 构建不要求签名凭据。配置检查不验证 PIN 是否正确、Token 是否登录、钥匙串是否解锁或 Apple 是否接受凭据；实际签名与公证负责这些检查。更新源固定为本仓库的 GitHub Releases，不需要任何设置或凭据，打包始终传入 `--publish never`。生成安装包后，打包要求已打包的 `app-update.yml` 指向该更新源，并要求 `latest` 元数据文件列出的安装包大小与 SHA-512 一致且附带其 blockmap；签名构建随后写入列出这些文件的发布完成记录。单独运行相同检查：
+每条打包命令在构建与下载前检查应用 ID（必须不同于 DeepSeek Harness 的 `com.deepseek.harness`）和该模式需要的签名配置，随后探测本次运行要用的外部工具：归档读取工具，以及 Windows 目标的安装器编译器。macOS 检查身份、Team ID、一套完整公证凭据、`CSC_LINK` 指定的可读本地 p12 文件、显式配置的 `CSC_KEY_PASSWORD`，以及引用的 API Key 和钥匙串文件；Windows 检查公开代码签名证书、SignTool 文件、容器名称和 PIN 格式。仅准备资源的构建以及显式未签名的 Windows 与 macOS 构建不要求签名凭据。配置检查不验证 PIN 是否正确、Token 是否登录、钥匙串是否解锁或 Apple 是否接受凭据；实际签名与公证负责这些检查。更新源固定为静态 HTTPS 目录 `https://updates.lanjiaotrade.com/`，不需要任何设置或凭据，打包始终传入 `--publish never`。生成安装包后，打包要求已打包的 `app-update.yml` 指向该更新源，并要求 `latest` 元数据文件列出的安装包大小与 SHA-512 一致且附带其 blockmap；签名构建随后写入列出这些文件的发布完成记录。单独运行相同检查：
 
 ```sh
 pnpm --dir apps/desktop run check:package
@@ -261,7 +261,7 @@ Windows 安装器在启动时和选定目标目录后检查应用是否正在运
 
 手动运行时可填写 `reuse_run_id`，复用已有 Windows 和 Apple Silicon 产物而不重新构建。流程检出现有发布标签，并在下载附件前确认被复用的运行属于本工作流且对应同一个源码提交。
 
-Release 正文依次为对应的 CHANGELOG 小节、一行 `<!-- novaflow:install-notes -->`，以及未签名构建的安装说明。应用把该标记之前的文字作为更新日志显示，因此小节内容不得包含该标记。打包从不发布：electron-builder 始终以 `--publish never` 运行，只有发布任务拥有 `contents: write`。安装包通过 electron-builder 为 `github` provider（`Prokint/NovaFlow`，发布类型 `release`）嵌入的 `app-update.yml` 读取更新，使用固定的 `latest` 通道文件；GitHub 不会把预发布版本报告为最新发布。
+Release 正文依次为对应的 CHANGELOG 小节、一行 `<!-- novaflow:install-notes -->`，以及未签名构建的安装说明。应用把该标记之前的文字作为更新日志显示，因此小节内容不得包含该标记。打包从不发布：electron-builder 始终以 `--publish never` 运行，只有发布任务拥有 `contents: write`。安装包通过 electron-builder 为 `generic` provider（`https://updates.lanjiaotrade.com/`）嵌入的 `app-update.yml` 读取更新，使用固定的 `latest` 通道文件。发布任务先用受限 rsync 账号把整理好的文件上传到该更新源，再创建 GitHub Release；`release.json` 为无法原地安装的构建提供版本、下载页和更新日志。
 
 ### 未签名安装包
 
@@ -389,13 +389,13 @@ Desktop 依赖 overrides 在补丁策略模块中单独声明，不从补丁版�
 
 每条打包命令都会构建仓库，打包以 dsh 和私有 Desktop Host 为根的第一方生产依赖闭包，并准备目标专用的 Electron 分发包和包含共享 pnpm CLI 的 primary-runtime。`prepare:dsh` 在构建时安装一次生产依赖图，准备物化包供 electron-builder 归档到 `app.asar/dsh`，移除包管理器元数据，并生成包含共享包版本和最终文件哈希的 `desktop-runtime.json`。macOS 签名构建先签名并验证原生文件，再生成清单；electron-builder 不对已签名的此目录重复进行嵌套签名。资源映射明确包含默认根目录过滤器会忽略的 `dsh/node_modules`；准备完成的运行时清单在原生签名后检查。原生可执行文件及库解包到 ASAR 旁；Python、独立 Node 和 pnpm 保留在外部 runtime 资源中。Windows 打包逐项检查准备好的 PE，确认其 ASAR 条目已标记为解包，且磁盘副本字节一致；未签名构建也执行此检查。Builder glob 规则用单字符通配符匹配 PE 文件名中的花括号，因此同目录中名称匹配的文件也可能被解包。准备好的运行时 smoke 沿用已验证的目标描述符，不使用构建宿主的架构。签名安装包、公证、已安装应用升级和各目标原生模块的验收需要发布环境。
 
-electron-builder 只为 DMG 和 ZIP 目标写入 `app-update.yml`，因此 macOS 目录构建会在签名前自行写入同一份 GitHub Releases 配置，每个 macOS 构建都会校验该文件。签名安装包流程从 ZIP 产物流移入 `novaflow-<version>-mac-<arch>.dmg`、`.zip`、`.zip.blockmap` 和 `latest-mac.yml`；未签名构建的同名文件带有 `-unsigned` 后缀。
+electron-builder 只为 DMG 和 ZIP 目标写入 `app-update.yml`，因此 macOS 目录构建会在签名前自行写入同一份静态更新源配置，每个 macOS 构建都会校验该文件。签名安装包流程从 ZIP 产物流移入 `novaflow-<version>-mac-<arch>.dmg`、`.zip`、`.zip.blockmap` 和 `latest-mac.yml`；未签名构建的同名文件带有 `-unsigned` 后缀。
 
 未压缩产物包含 Electron、物化后的 dsh 生产依赖树、pnpm，以及壳应用。安装包大小与文件系统占用不同；发布验收需要测量两者，以及 profile 插件存储和首次启动耗时。此布局用更多应用内文件换取消除用户机器上的核心包安装过程。
 
 ## 更新
 
-NovaFlow 从本仓库公开的 GitHub Releases 检查更新，每次提示都会显示更新日志，即对应的 CHANGELOG 小节；未经用户确认不会下载或安装任何内容，也不存在强制更新策略。在 Windows 和 AppImage 中，用户先确认下载，再确认安装与重启。没有 Developer ID 签名的 macOS 构建和 deb 安装无法替换自身，弹窗会显示更新日志并打开 Release 页面；签名的 macOS 构建可以原地安装。[账号模块参考](novaflow/README.zh.md)负责检查时机与弹窗；以下段落说明共用的更新器机制。
+NovaFlow 从静态更新源 `https://updates.lanjiaotrade.com/` 检查更新，每次提示都会显示更新日志，即对应的 CHANGELOG 小节；未经用户确认不会下载或安装任何内容，也不存在强制更新策略。在 Windows 和 AppImage 中，用户先确认下载，再确认安装与重启。没有 Developer ID 签名的 macOS 构建和 deb 安装无法替换自身，弹窗会显示更新日志并打开下载页；签名的 macOS 构建可以原地安装。[账号模块参考](novaflow/README.zh.md)负责检查时机与弹窗；以下段落说明共用的更新器机制。
 
 Windows 下载完成后的更新确认说明应用会在安装期间关闭、完成后自动打开，并提示期间不要重复启动。安装器携带 `--updated` 启动应用并打开工作区时，壳会将主窗口前置并聚焦一次，不启用永久置顶。普通启动和其他平台不执行此前置步骤。
 
@@ -452,7 +452,7 @@ Linux 通道读取 `.env.linux`（复制[模板](.env.linux.example)），或在
 
 AppImage 和 deb 启动时不添加禁用沙箱的参数。AppImage 使用应用自有 AppRun，组装后验证其解包字节，且启动器拒绝以 root 运行。应用以普通用户身份运行。主机没有可用 Chromium 沙箱支持时，验收应当失败；不要通过以 root 运行应用或禁用沙箱绕过问题。构建产物时，现有打包冒烟序列检查原生 Node/Python 载荷、可执行位、ASAR 解包库和 Host。
 
-Linux 安装包通过 `latest-linux.yml` 从同一 GitHub Releases 更新源读取更新，该文件列出 AppImage 与 deb 及其 SHA-512；AppImage 内嵌自己的 blockmap。只有运行中的 AppImage 会原地安装更新；deb 安装显示更新日志并打开 Release 页面。两种格式都不带发布者签名，因此摘要能发现损坏的下载，但不能验证发布者身份。
+Linux 安装包通过 `latest-linux.yml` 从同一静态更新源读取更新，该文件列出 AppImage 与 deb 及其 SHA-512；AppImage 内嵌自己的 blockmap。只有运行中的 AppImage 会原地安装更新；deb 安装显示更新日志并打开下载页。两种格式都不带发布者签名，因此摘要能发现损坏的下载，但不能验证发布者身份。
 
 在 Linux 上，图片附件通过 sharp 的 WebAssembly 构建（`@img/sharp-wasm32`）处理，而不是原生 libvips。Electron 的 Linux 二进制链接系统 glib，原生 libvips 自带的 glib 与之冲突：在系统 glib 较新的主机上（已在 CachyOS 上观察到），sharp 处理图片时 Electron 崩溃（[electron/electron#46323](https://github.com/electron/electron/issues/46323)）。工作区的 `packageExtensions` 把 WebAssembly 构建链接到 sharp 旁，桌面运行时把 sharp 固定在同一版本。Linux 安装包不含原生 sharp 和 libvips 包；在 Linux 的 Electron 中，Host 和 `dsh` 命令拒绝解析这些包，因此未打包启动同样使用 WebAssembly 构建。已打包运行时冒烟检查会断言 sharp 在各平台加载的构建。WebAssembly 构建处理图片比原生构建慢。
 

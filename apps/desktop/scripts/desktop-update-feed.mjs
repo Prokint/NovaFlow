@@ -1,4 +1,4 @@
-/** Name the GitHub Releases update feed and verify the update files electron-builder writes for it. */
+/** Name the self-hosted update feed and verify the update files electron-builder writes for it. */
 
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -7,14 +7,25 @@ import { join } from 'node:path'
 import { dump, load } from 'js-yaml'
 
 /**
- * electron-builder publish entry for this repository's GitHub Releases.
- * Packaging always passes `--publish never`; the release workflow uploads the files.
+ * Public HTTPS directory that serves the NovaFlow update feed.
+ * `electron-updater` reads `latest*.yml` from this directory, and builds that cannot install an update
+ * in place open the same origin's download page.
+ */
+export const DESKTOP_UPDATE_FEED_URL = 'https://updates.lanjiaotrade.com/'
+
+/** Download page shown by builds that cannot install updates in place. */
+export const DESKTOP_UPDATE_PAGE_URL = 'https://updates.lanjiaotrade.com/'
+
+/** Feed document listing the newest release for builds that only open the download page. */
+export const DESKTOP_RELEASE_FILE = 'release.json'
+
+/**
+ * electron-builder publish entry for the static update feed.
+ * Packaging always passes `--publish never`; the release workflow uploads the files with rsync.
  */
 export const DESKTOP_UPDATE_PUBLISH = Object.freeze({
-  provider: 'github',
-  owner: 'Prokint',
-  repo: 'NovaFlow',
-  releaseType: 'release',
+  provider: 'generic',
+  url: DESKTOP_UPDATE_FEED_URL,
 })
 
 /** Updater configuration filename inside the packaged resources directory. */
@@ -68,7 +79,7 @@ export async function writeDesktopAppUpdateConfig(resourcesDir, updaterCacheDirN
 }
 
 /**
- * Verify that a packaged application reads this repository's GitHub Releases.
+ * Verify that a packaged application reads the static update feed.
  * @param {string} resourcesDir - Packaged resources directory.
  * @returns {Promise<Record<string, unknown>>} The parsed configuration.
  */

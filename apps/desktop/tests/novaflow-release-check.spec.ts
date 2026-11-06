@@ -3,19 +3,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
-  checkNovaFlowRelease, compareVersions, fetchNovaFlowReleaseNotes, NOVAFLOW_LATEST_RELEASE_API, NOVAFLOW_RELEASES_URL,
+  checkNovaFlowRelease, compareVersions, fetchNovaFlowReleaseNotes, NOVAFLOW_RELEASE_FILE, NOVAFLOW_UPDATE_FEED_URL,
   parseRelease, ReleaseNoticeState, releaseNotesText,
 } from '../src/novaflow/release-check.ts'
 
-const release = (tag: string, body = '') => ({ tag_name: tag, html_url: `${NOVAFLOW_RELEASES_URL}/tag/${tag}`, body })
+const feedRelease = (version: string, notes = '') => ({ version, pageUrl: 'https://updates.lanjiaotrade.com/', notes })
+const releaseUrl = new URL(NOVAFLOW_RELEASE_FILE, NOVAFLOW_UPDATE_FEED_URL).href
 
 describe('NovaFlow release check', () => {
-  it('uses the renamed repository for release checks and release-page validation', () => {
-    expect(NOVAFLOW_RELEASES_URL).toBe('https://github.com/Prokint/NovaFlow/releases')
-    expect(NOVAFLOW_LATEST_RELEASE_API).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/latest')
-    expect(parseRelease({ tag_name: 'v0.0.2', html_url: 'https://github.com/Prokint/NovaFlow/releases/tag/v0.0.2', body: '' }))
-      .toMatchObject({ version: '0.0.2' })
+  it('reads the feed served from the update host', () => {
+    expect(NOVAFLOW_UPDATE_FEED_URL).toBe('https://updates.lanjiaotrade.com/')
+    expect(NOVAFLOW_RELEASE_FILE).toBe('release.json')
+    expect(releaseUrl).toBe('https://updates.lanjiaotrade.com/release.json')
+    expect(parseRelease(feedRelease('0.0.2'))).toMatchObject({ version: '0.0.2', url: 'https://updates.lanjiaotrade.com/' })
   })
+
   it('orders versions by SemVer precedence', () => {
     expect(compareVersions('0.2.0', '0.1.9')).toBe(1)
     expect(compareVersions('0.1.0', '0.1.0-beta.2')).toBe(1)
@@ -25,27 +27,31 @@ describe('NovaFlow release check', () => {
     expect(() => compareVersions('1.0', '1.0.0')).toThrow('invalid version')
   })
 
-  it('accepts this repository with v tags and legacy novaflow-v tags', () => {
-    expect(parseRelease(release('v0.0.1', '- one'))).toEqual({ version: '0.0.1', url: `${NOVAFLOW_RELEASES_URL}/tag/v0.0.1`, notes: '• one' })
-    expect(parseRelease(release('novaflow-v0.2.0', '- one'))).toEqual({ version: '0.2.0', url: `${NOVAFLOW_RELEASES_URL}/tag/novaflow-v0.2.0`, notes: '• one' })
-    expect(() => parseRelease(release('dsh-v0.2.1-alpha.1'))).toThrow('unexpected release tag')
-    expect(() => parseRelease({ ...release('novaflow-v0.2.0'), html_url: 'https://evil.example/releases/x' })).toThrow('unexpected release page')
+  it('accepts one feed release document and rejects other payloads', () => {
+    expect(parseRelease({ version: '0.0.1', pageUrl: 'https://updates.lanjiaotrade.com/', notes: '- one' }))
+      .toEqual({ version: '0.0.1', url: 'https://updates.lanjiaotrade.com/', notes: '• one' })
+    expect(parseRelease({ version: '0.2.0', pageUrl: 'https://updates.lanjiaotrade.com/' }))
+      .toEqual({ version: '0.2.0', url: 'https://updates.lanjiaotrade.com/', notes: '' })
+    expect(() => parseRelease({ version: '0.2.0', pageUrl: 'http://updates.lanjiaotrade.com/' })).toThrow('unexpected release page')
+    expect(() => parseRelease({ version: '0.2.0', pageUrl: 'https://user:secret@updates.lanjiaotrade.com/' })).toThrow('unexpected release page')
+    expect(() => parseRelease({ version: '0.2.0', pageUrl: 'https://updates.lanjiaotrade.com/', notes: 1 })).toThrow('unexpected release notes')
+    expect(() => parseRelease({ version: 'v0.2.0', pageUrl: 'https://updates.lanjiaotrade.com/' })).toThrow('unexpected version')
     expect(() => parseRelease(null)).toThrow('invalid response')
   })
 
-  it('reports a newer stable release, the current build, and a repository without releases', async () => {
+  it('reports a newer release, the current build, and a feed without a release document', async () => {
     const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(release('novaflow-v0.2.0')))
-      .mockResolvedValueOnce(Response.json(release('novaflow-v0.1.0')))
+      .mockResolvedValueOnce(Response.json(feedRelease('0.2.0')))
+      .mockResolvedValueOnce(Response.json(feedRelease('0.1.0')))
       .mockResolvedValueOnce(new Response('Not Found', { status: 404 }))
-      .mockResolvedValueOnce(new Response('rate limited', { status: 403 }))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
     const signal = new AbortController().signal
     await expect(checkNovaFlowRelease('0.1.0', fetcher, signal))
-      .resolves.toEqual({ status: 'newer', version: '0.2.0', url: `${NOVAFLOW_RELEASES_URL}/tag/novaflow-v0.2.0`, notes: '' })
+      .resolves.toEqual({ status: 'newer', version: '0.2.0', url: 'https://updates.lanjiaotrade.com/', notes: '' })
     await expect(checkNovaFlowRelease('0.1.0', fetcher, signal)).resolves.toEqual({ status: 'current', version: '0.1.0' })
     await expect(checkNovaFlowRelease('0.1.0', fetcher, signal)).resolves.toEqual({ status: 'current', version: '0.1.0' })
-    await expect(checkNovaFlowRelease('0.1.0', fetcher, signal)).rejects.toThrow('GitHub answered 403')
-    expect(fetcher.mock.calls[0]?.[0]).toBe(NOVAFLOW_LATEST_RELEASE_API)
+    await expect(checkNovaFlowRelease('0.1.0', fetcher, signal)).rejects.toThrow('feed answered 503')
+    expect(fetcher.mock.calls[0]?.[0]).toBe(releaseUrl)
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error', signal })
   })
 
@@ -59,25 +65,18 @@ describe('NovaFlow release check', () => {
 
   it('reads the notes of the offered release only', async () => {
     const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(release('novaflow-v0.2.0', '- 修复')))
-      .mockResolvedValueOnce(Response.json(release('novaflow-v0.3.0', '- 其他')))
+      .mockResolvedValueOnce(Response.json(feedRelease('0.2.0', '- 修复')))
+      .mockResolvedValueOnce(Response.json(feedRelease('0.3.0', '- 其他')))
     const signal = new AbortController().signal
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).resolves.toBe('• 修复')
-    expect(fetcher.mock.calls[0]?.[0]).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/tags/v0.2.0')
+    expect(fetcher.mock.calls[0]?.[0]).toBe(releaseUrl)
     await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).rejects.toThrow('another release')
     await expect(fetchNovaFlowReleaseNotes('../x', fetcher, signal)).rejects.toThrow('invalid version')
   })
 
-  it('falls back to a legacy tag only when the v tag is absent', async () => {
-    const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(Response.json(release('novaflow-v0.2.0', '- legacy')))
-      .mockResolvedValueOnce(new Response(null, { status: 403 }))
-    const signal = new AbortController().signal
-    await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).resolves.toBe('• legacy')
-    expect(fetcher.mock.calls[1]?.[0]).toBe('https://api.github.com/repos/Prokint/NovaFlow/releases/tags/novaflow-v0.2.0')
-    await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, signal)).rejects.toThrow('GitHub answered 403')
-    expect(fetcher).toHaveBeenCalledTimes(3)
+  it('reports feed failures instead of notes', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('offline', { status: 502 }))
+    await expect(fetchNovaFlowReleaseNotes('0.2.0', fetcher, new AbortController().signal)).rejects.toThrow('feed answered 502')
   })
 
   it('remembers only the release postponed from an automatic prompt', async () => {

@@ -1,9 +1,16 @@
-/** electron-builder publish entry for this repository's GitHub Releases. */
+/** Public HTTPS directory that serves the self-hosted update feed. */
+export const DESKTOP_UPDATE_FEED_URL: 'https://updates.lanjiaotrade.com/'
+
+/** Download page shown by builds that cannot install updates in place. */
+export const DESKTOP_UPDATE_PAGE_URL: 'https://updates.lanjiaotrade.com/'
+
+/** Feed document listing the newest release for builds that only open the download page. */
+export const DESKTOP_RELEASE_FILE: 'release.json'
+
+/** electron-builder publish entry for the static update feed. */
 export const DESKTOP_UPDATE_PUBLISH: {
-  readonly provider: 'github'
-  readonly owner: 'Prokint'
-  readonly repo: 'NovaFlow'
-  readonly releaseType: 'release'
+  readonly provider: 'generic'
+  readonly url: 'https://updates.lanjiaotrade.com/'
 }
 
 /** Updater configuration filename inside the packaged resources directory. */
@@ -49,7 +56,7 @@ export function desktopBlockmapExtensions(platform: NodeJS.Platform): readonly s
 export function writeDesktopAppUpdateConfig(resourcesDir: string, updaterCacheDirName: string): Promise<void>
 
 /**
- * Verify that a packaged application reads this repository's GitHub Releases.
+ * Verify that a packaged application reads the static update feed.
  * @param resourcesDir - Packaged resources directory.
  * @returns The parsed configuration.
  */

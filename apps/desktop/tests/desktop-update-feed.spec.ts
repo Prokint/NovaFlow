@@ -43,16 +43,21 @@ describe('desktop update feed', () => {
     expect(desktopBlockmapExtensions('linux')).toEqual([])
   })
 
-  it('writes and verifies the packaged updater configuration for this repository', async () => {
+  it('writes and verifies the packaged updater configuration for the static feed', async () => {
     await writeDesktopAppUpdateConfig(directory, 'novaflow-updater')
     expect(load(await readFile(join(directory, 'app-update.yml'), 'utf8'))).toEqual({ ...DESKTOP_UPDATE_PUBLISH, updaterCacheDirName: 'novaflow-updater' })
-    await expect(verifyDesktopAppUpdateConfig(directory)).resolves.toMatchObject({ provider: 'github', owner: 'Prokint' })
-    await writeFile(join(directory, 'app-update.yml'), dump({ ...DESKTOP_UPDATE_PUBLISH, repo: 'other', updaterCacheDirName: 'x' }))
-    await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/must set repo to NovaFlow/u)
+    await expect(verifyDesktopAppUpdateConfig(directory)).resolves.toMatchObject({ provider: 'generic', url: 'https://updates.lanjiaotrade.com/' })
+    await writeFile(join(directory, 'app-update.yml'), dump({ ...DESKTOP_UPDATE_PUBLISH, url: 'https://evil.example/', updaterCacheDirName: 'x' }))
+    await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/must set url to https:\/\/updates\.lanjiaotrade\.com\//u)
     await writeFile(join(directory, 'app-update.yml'), dump({ ...DESKTOP_UPDATE_PUBLISH }))
     await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/updaterCacheDirName/u)
     await rm(join(directory, 'app-update.yml'))
     await expect(verifyDesktopAppUpdateConfig(directory)).rejects.toThrow(/cannot read/u)
+  })
+
+  it('keeps the packaged feed URL aligned with the app release check', async () => {
+    const { NOVAFLOW_UPDATE_FEED_URL } = await import('../src/novaflow/release-check.ts')
+    expect(DESKTOP_UPDATE_PUBLISH).toEqual({ provider: 'generic', url: NOVAFLOW_UPDATE_FEED_URL })
   })
 
   it('returns the metadata, installers, and required blockmaps when every reference matches', async () => {

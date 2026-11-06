@@ -1,24 +1,22 @@
-/** Read the latest public NovaFlow desktop release; the app only points users at it and never installs anything. */
+/** Read the newest release from the self-hosted update feed; builds that cannot install in place open its download page. */
 
 import { readFileSync, writeFileSync } from 'node:fs'
 
-/** Public release page users download installers from. */
-export const NOVAFLOW_RELEASES_URL = 'https://github.com/Prokint/NovaFlow/releases'
+/** Public HTTPS directory that serves the update feed and installers. */
+export const NOVAFLOW_UPDATE_FEED_URL = 'https://updates.lanjiaotrade.com/'
 
-/** GitHub API endpoint for the latest stable (non-prerelease, non-draft) release. */
-export const NOVAFLOW_LATEST_RELEASE_API = 'https://api.github.com/repos/Prokint/NovaFlow/releases/latest'
+/** Feed document with the newest version, its download page, and release notes. */
+export const NOVAFLOW_RELEASE_FILE = 'release.json'
 
-/** Release-body marker before the installation instructions the release workflow appends for the download page. */
+/** Release-body marker before the installation instructions appended for the download page. */
 export const RELEASE_INSTALL_NOTES_MARKER = '<!-- novaflow:install-notes -->'
 
-/** Longest changelog excerpt shown in a native dialog; the release page carries the rest. */
+/** Longest changelog excerpt shown in a native dialog; the download page carries the rest. */
 const MAX_NOTES_CHARS = 4000
 
-const TAG_PREFIX = 'v'
-const LEGACY_TAG_PREFIX = 'novaflow-v'
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/u
 
-/** Outcome of comparing the running version with the latest public release. */
+/** Outcome of comparing the running version with the newest feed release. */
 export type NovaFlowReleaseCheck =
   | { readonly status: 'newer'; readonly version: string; readonly url: string; readonly notes: string }
   | { readonly status: 'current'; readonly version: string }
@@ -71,9 +69,9 @@ export function compareVersions(left: string, right: string): number {
 }
 
 /**
- * Turn a GitHub release body (Markdown) into plain text for a native dialog; nothing is rendered as markup.
+ * Turn release notes (Markdown) into plain text for a native dialog; nothing is rendered as markup.
  * Installation instructions after {@link RELEASE_INSTALL_NOTES_MARKER} belong to the download page and are dropped.
- * @param body - Release body as GitHub returns it.
+ * @param body - Release notes as the feed stores them.
  * @returns Readable notes, possibly empty, capped at a dialog-sized excerpt.
  */
 export function releaseNotesText(body: string): string {
@@ -93,42 +91,60 @@ export function releaseNotesText(body: string): string {
 }
 
 /**
- * Validate one GitHub release payload; accept this repository's `v<semver>` and legacy `novaflow-v<semver>` tags.
+ * Validate one `release.json` feed document.
  * @param value - Parsed JSON body.
- * @returns The release version, its page, and its notes as plain text.
- * @throws for any other shape, tag, or page origin.
+ * @returns The release version, its HTTPS download page, and its notes as plain text.
+ * @throws for any other shape, an invalid version, or a non-HTTPS page.
  */
 export function parseRelease(value: unknown): { version: string; url: string; notes: string } {
   if (typeof value !== 'object' || value === null) throw new Error('novaflow release: invalid response')
-  const tag: unknown = Reflect.get(value, 'tag_name')
-  const page: unknown = Reflect.get(value, 'html_url')
-  const body: unknown = Reflect.get(value, 'body')
-  const prefix = typeof tag === 'string' && tag.startsWith(LEGACY_TAG_PREFIX) ? LEGACY_TAG_PREFIX : TAG_PREFIX
-  if (typeof tag !== 'string' || !tag.startsWith(prefix) || parseVersion(tag.slice(prefix.length)) === undefined) {
-    throw new Error('novaflow release: unexpected release tag')
+  const version: unknown = Reflect.get(value, 'version')
+  const pageUrl: unknown = Reflect.get(value, 'pageUrl')
+  const notes: unknown = Reflect.get(value, 'notes')
+  if (typeof version !== 'string' || parseVersion(version) === undefined) throw new Error('novaflow release: unexpected version')
+  if (typeof pageUrl !== 'string') throw new Error('novaflow release: unexpected release page')
+  let page: URL
+  try {
+    page = new URL(pageUrl)
+  } catch (_pageError) {
+    throw new Error('novaflow release: unexpected release page')
   }
-  if (typeof page !== 'string' || !page.startsWith(`${NOVAFLOW_RELEASES_URL}/`)) throw new Error('novaflow release: unexpected release page')
-  return { version: tag.slice(prefix.length), url: page, notes: typeof body === 'string' ? releaseNotesText(body) : '' }
+  if (page.protocol !== 'https:' || page.username !== '' || page.password !== '') {
+    throw new Error('novaflow release: unexpected release page')
+  }
+  if (notes !== undefined && typeof notes !== 'string') throw new Error('novaflow release: unexpected release notes')
+  return { version, url: page.href, notes: notes === undefined ? '' : releaseNotesText(notes) }
 }
 
-const GITHUB_HEADERS = { accept: 'application/vnd.github+json', 'user-agent': 'NovaFlow-Desktop', 'x-github-api-version': '2022-11-28' }
+const FEED_HEADERS = { accept: 'application/json', 'user-agent': 'NovaFlow-Desktop' }
+
+function releaseUrl(): string {
+  return new URL(NOVAFLOW_RELEASE_FILE, NOVAFLOW_UPDATE_FEED_URL).href
+}
+
+async function fetchRelease(
+  fetcher: (url: string, init: RequestInit) => Promise<Response>,
+  signal: AbortSignal,
+): Promise<Response> {
+  return fetcher(releaseUrl(), { headers: FEED_HEADERS, redirect: 'error', signal })
+}
 
 /**
- * Ask GitHub for the latest stable release and compare it with the running version.
+ * Ask the update feed for the newest release and compare it with the running version.
  * @param currentVersion - The running application's semantic version.
  * @param fetcher - Network fetch; the main process passes Electron's `net.fetch` so system proxies apply.
  * @param signal - Cancellation and timeout.
- * @returns Whether a newer public release exists, with its notes.
+ * @returns Whether a newer release exists, with its notes and download page.
  */
 export async function checkNovaFlowRelease(
   currentVersion: string,
   fetcher: (url: string, init: RequestInit) => Promise<Response>,
   signal: AbortSignal,
 ): Promise<NovaFlowReleaseCheck> {
-  const response = await fetcher(NOVAFLOW_LATEST_RELEASE_API, { headers: GITHUB_HEADERS, redirect: 'error', signal })
-  // No published stable release yet: the running build is the newest one available.
+  const response = await fetchRelease(fetcher, signal)
+  // Nothing published to a feed that exists but has no release yet: the running build is the newest one available.
   if (response.status === 404) return { status: 'current', version: currentVersion }
-  if (!response.ok) throw new Error(`novaflow release: GitHub answered ${String(response.status)}`)
+  if (!response.ok) throw new Error(`novaflow release: feed answered ${String(response.status)}`)
   const latest = parseRelease(await response.json())
   return compareVersions(latest.version, currentVersion) > 0
     ? { status: 'newer', ...latest }
@@ -136,12 +152,12 @@ export async function checkNovaFlowRelease(
 }
 
 /**
- * Read the notes of one published release, for the in-app update confirmation.
- * @param version - Release version without the tag prefix.
+ * Read the notes of the newest published release, for the in-app update confirmation.
+ * @param version - Version shown in the download confirmation.
  * @param fetcher - Network fetch.
  * @param signal - Cancellation and timeout.
  * @returns Plain-text notes; empty when the release has none.
- * @throws when the release cannot be read or does not belong to this repository.
+ * @throws when the feed cannot be read or the notes belong to another release.
  */
 export async function fetchNovaFlowReleaseNotes(
   version: string,
@@ -149,13 +165,8 @@ export async function fetchNovaFlowReleaseNotes(
   signal: AbortSignal,
 ): Promise<string> {
   if (parseVersion(version) === undefined) throw new Error(`novaflow release: invalid version ${JSON.stringify(version)}`)
-  const url = `https://api.github.com/repos/Prokint/NovaFlow/releases/tags/${TAG_PREFIX}${version}`
-  let response = await fetcher(url, { headers: GITHUB_HEADERS, redirect: 'error', signal })
-  if (response.status === 404) {
-    response = await fetcher(`https://api.github.com/repos/Prokint/NovaFlow/releases/tags/${LEGACY_TAG_PREFIX}${version}`,
-      { headers: GITHUB_HEADERS, redirect: 'error', signal })
-  }
-  if (!response.ok) throw new Error(`novaflow release: GitHub answered ${String(response.status)}`)
+  const response = await fetchRelease(fetcher, signal)
+  if (!response.ok) throw new Error(`novaflow release: feed answered ${String(response.status)}`)
   const release = parseRelease(await response.json())
   if (release.version !== version) throw new Error('novaflow release: notes belong to another release')
   return release.notes

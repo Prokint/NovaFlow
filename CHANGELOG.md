@@ -2,6 +2,20 @@
 
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
+## 0.2.3
+
+### 变更
+
+- 更新源从 GitHub Releases 切换为自建静态更新源 `https://updates.lanjiaotrade.com/`：Windows 与 AppImage 继续应用内更新，未签名 macOS 与 deb 改为打开自建下载页。
+- 发布流程在构建后把安装包、`latest*.yml`、`release.json` 与 `SHA256SUMS` 上传到自建源；GitHub Release 继续保留为源码与安装包归档。
+- 更新提示中的更新日志改从自建源的 `release.json` 读取，不再请求 GitHub API。
+
+### 升级说明
+
+- Windows 用户可从 v0.2.2 通过原 GitHub 更新源升级到本版；安装后后续检查使用自建更新源。
+- 未签名 macOS 与 deb 仍需手动下载安装；更新弹窗会打开自建下载页。
+- 自建源公开只读，更新包完整性由 `latest*.yml` 中的 SHA-512 校验。
+
 ## 0.2.2
 
 ### 变更
