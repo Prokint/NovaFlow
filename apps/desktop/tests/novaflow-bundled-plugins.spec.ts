@@ -4,7 +4,13 @@ import { join, resolve } from 'node:path'
 import { expect, it, onTestFinished } from 'vitest'
 import { loadProfileDirectory } from '@deepseek-ai/dsh-app-boot'
 import { exposeNovaFlowBundledPlugins, stageNovaFlowBundledPlugins } from '../scripts/novaflow-bundled-plugins.ts'
-import { NOVAFLOW_BUNDLED_PLUGINS, NOVAFLOW_BUNDLED_PLUGINS_FILE, readNovaFlowBundledPlugins } from '../src/novaflow/bundled-plugins.ts'
+import {
+  migrateNovaFlowBundledPlugins,
+  NOVAFLOW_BUNDLED_PLUGINS,
+  NOVAFLOW_BUNDLED_PLUGINS_FILE,
+  NOVAFLOW_COMPAT_PLUGINS,
+  readNovaFlowBundledPlugins,
+} from '../src/novaflow/bundled-plugins.ts'
 import { createPluginProfile } from '../src/project-manager.ts'
 
 const sources = resolve(import.meta.dirname, '../third-party')
@@ -21,7 +27,7 @@ function fixture() {
   return root
 }
 
-it('stages every reviewed bundle and its dependency manifest without running plugin code', () => {
+it('stages every reviewed bundle and compatibility package without running plugin code', () => {
   const root = fixture()
   stageNovaFlowBundledPlugins(sources, root)
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as TestManifest
@@ -29,7 +35,7 @@ it('stages every reviewed bundle and its dependency manifest without running plu
     'dsh-douyin-comments': 'file:./third-party/dsh-douyin-comments',
     'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer',
     'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer' })
-  for (const plugin of NOVAFLOW_BUNDLED_PLUGINS) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const staged = join(root, 'third-party', plugin.name)
     expect(JSON.parse(readFileSync(join(staged, 'package.json'), 'utf8'))).toMatchObject(plugin)
     expect(readFileSync(join(staged, 'cordis.patch.yml'), 'utf8')).toContain(plugin.name)
@@ -42,8 +48,17 @@ it('stages every reviewed bundle and its dependency manifest without running plu
       expect(notice).toContain('monagisa/douyin-ai-collector')
     }
   }
-  expect(JSON.parse(readFileSync(join(root, 'third-party/dsh-douyin-comments/package.json'), 'utf8')))
-    .toHaveProperty('dependencies.playwright-core', '^1.63.0')
+  const douyin = JSON.parse(readFileSync(join(root, 'third-party/dsh-douyin-comments/package.json'), 'utf8')) as {
+    version: string
+    dependencies: Record<string, string>
+    exports: Record<string, string>
+  }
+  expect(douyin).toHaveProperty('version', '0.8.6')
+  expect(douyin).toHaveProperty('dependencies.playwright-core', '^1.63.0')
+  expect(douyin.exports['./viewer']).toBe('./viewer.mjs')
+  expect(readFileSync(join(root, 'third-party/dsh-douyin-comments/NOTICE.txt'), 'utf8')).toContain('novaflow')
+  expect(readFileSync(join(root, 'third-party/dsh-douyin-comments/core.enc'), 'utf8')).toContain('DYC-CORE-1')
+  expect(readFileSync(join(root, 'third-party/dsh-douyin-comments/extension.enc'), 'utf8')).toContain('DYC-EXT-1')
 })
 
 it('exposes shipped bundles through the installation and preserves a user disabling one on a later launch', () => {
@@ -52,26 +67,52 @@ it('exposes shipped bundles through the installation and preserves a user disabl
   const anchor = join(runtime, 'node_modules/@deepseek-ai/dsh/package.json')
   mkdirSync(resolve(anchor, '..'), { recursive: true })
   writeFileSync(anchor, JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.3', dependencies: {} }))
-  for (const plugin of NOVAFLOW_BUNDLED_PLUGINS) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     cpSync(join(sources, plugin.name), join(runtime, 'node_modules', plugin.name), { recursive: true })
   }
-  expect(exposeNovaFlowBundledPlugins(runtime)).toEqual(Object.fromEntries(NOVAFLOW_BUNDLED_PLUGINS.map(p => [p.name, p.version])))
+  const expected = Object.fromEntries([...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS].map(p => [p.name, p.version]))
+  expect(exposeNovaFlowBundledPlugins(runtime)).toEqual(expected)
   const names = readNovaFlowBundledPlugins(runtime)
+  expect(names).toEqual(NOVAFLOW_BUNDLED_PLUGINS.map(plugin => plugin.name))
   const profile = join(root, 'profile')
   createPluginProfile(profile, names)
   const loaded = loadProfileDirectory('NovaFlow', profile, anchor)
   expect(loaded.layers.map(layer => layer.packageName)).toEqual(expect.arrayContaining([...names]))
   const filename = join(profile, 'package.json')
   const manifest = JSON.parse(readFileSync(filename, 'utf8')) as TestManifest
-  manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((name: string) => name !== 'dsh-comment-viewer')
+  manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((name: string) => name !== 'dsh-skill-explorer')
   writeFileSync(filename, JSON.stringify(manifest))
   const before = readFileSync(filename, 'utf8')
   createPluginProfile(profile, names)
   expect(readFileSync(filename, 'utf8')).toBe(before)
   const active = loadProfileDirectory('NovaFlow', profile, anchor).layers.map(layer => layer.packageName)
-  expect(active).not.toContain('dsh-comment-viewer')
+  expect(active).not.toContain('dsh-skill-explorer')
   expect(active).toContain('dsh-douyin-comments')
+  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-skill-explorer', '0.1.0')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-comment-viewer', '0.2.16')
+})
+
+it('drops the legacy standalone viewer bundle when the merged collector bundle is enabled', () => {
+  const root = fixture()
+  const profile = join(root, 'profile')
+  mkdirSync(profile)
+  const filename = join(profile, 'package.json')
+  writeFileSync(filename, JSON.stringify({
+    name: 'profile', dsh: { profile: { bundles: [
+      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app',
+      'dsh-douyin-comments', 'dsh-comment-viewer', 'dsh-skill-explorer',
+    ] } },
+  }))
+  migrateNovaFlowBundledPlugins(profile)
+  expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
+    '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments', 'dsh-skill-explorer',
+  ])
+  // A profile that only enabled the old viewer keeps it.
+  writeFileSync(filename, JSON.stringify({
+    name: 'profile', dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-comment-viewer'] } },
+  }))
+  migrateNovaFlowBundledPlugins(profile)
+  expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', ['@deepseek-ai/dsh-base', 'dsh-comment-viewer'])
 })
 
 it('leaves older runtimes unchanged and rejects an invalid shipped catalog or changed pinned source', () => {

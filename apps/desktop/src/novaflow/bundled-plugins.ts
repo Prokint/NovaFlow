@@ -1,16 +1,46 @@
 /** Third-party bundles shipped in NovaFlow, independently switchable in each profile. */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Reviewed upstream package identities carried by the desktop installer. */
+/** Reviewed upstream package identities enabled for new accounts. */
 export const NOVAFLOW_BUNDLED_PLUGINS = [
-  { name: 'dsh-douyin-comments', version: '0.5.62' },
-  { name: 'dsh-comment-viewer', version: '0.2.16' },
+  { name: 'dsh-douyin-comments', version: '0.8.6' },
   { name: 'dsh-skill-explorer', version: '0.1.0' },
+] as const
+
+/** Installed only so profiles created before the merged Douyin bundle still load their old bundles. */
+export const NOVAFLOW_COMPAT_PLUGINS = [
+  { name: 'dsh-comment-viewer', version: '0.2.16' },
 ] as const
 
 /** Immutable runtime catalog; absence identifies older builds without shipped third-party bundles. */
 export const NOVAFLOW_BUNDLED_PLUGINS_FILE = 'novaflow-plugins.json'
+
+/** Old standalone viewer bundle replaced by the merged viewer inside dsh-douyin-comments. */
+const LEGACY_VIEWER_BUNDLE = 'dsh-comment-viewer'
+
+/** Bundle that contains the merged collector and viewer. */
+const MERGED_DOUYIN_BUNDLE = 'dsh-douyin-comments'
+
+/**
+ * Drop the standalone viewer bundle from a profile whose collector bundle already
+ * carries the merged viewer. Existing profiles keep every other activation choice.
+ * @param profileDirectory - Profile whose package.json carries the bundle list.
+ */
+export function migrateNovaFlowBundledPlugins(profileDirectory: string): void {
+  const filename = join(profileDirectory, 'package.json')
+  if (!existsSync(filename)) return
+  let value: unknown
+  try { value = JSON.parse(readFileSync(filename, 'utf8')) } catch { return }
+  if (typeof value !== 'object' || value === null || !('dsh' in value)
+    || typeof value.dsh !== 'object' || value.dsh === null || !('profile' in value.dsh)
+    || typeof value.dsh.profile !== 'object' || value.dsh.profile === null || !('bundles' in value.dsh.profile)
+    || !Array.isArray(value.dsh.profile.bundles)) return
+  const bundles = value.dsh.profile.bundles
+  if (!bundles.includes(MERGED_DOUYIN_BUNDLE) || !bundles.includes(LEGACY_VIEWER_BUNDLE)) return
+  value.dsh.profile.bundles = bundles.filter(name => name !== LEGACY_VIEWER_BUNDLE)
+  writeFileSync(filename, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
+}
 
 /**
  * Read the shipped catalog without importing third-party code.

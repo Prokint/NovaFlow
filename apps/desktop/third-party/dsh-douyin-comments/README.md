@@ -1,7 +1,75 @@
 # dsh-douyin-comments
 
-DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`。
-（插件版本 0.5.62；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.55`。）
+DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
+（插件版本 0.8.6；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.55`。）
+
+**0.8.6 变更**（2026-11-06）：**修「筛选框会变大变小」**——采集页「收藏客户」工具条在筛选时会跳动。
+- 原因：`#favCount` 计数胶囊原本放在工具条里、宽度随文字变（`4 位` → `2 / 4 位` 宽了约 17px），而工具条是 `flex-wrap: wrap`；总宽度一变就整行换行，搜索框的宽度随之在 181px / 242px 之间来回跳，工具条高度也在 32px / 66px 之间跳。
+- 改法：把计数胶囊移到卡片标题行（`<h2>收藏客户</h2>` 右边，`.fav-title` 里），工具条里只剩「搜索框（flex）+ 属地 118px 固定宽」，并改成 `flex-wrap: nowrap` ⇒ 筛选前后搜索框宽度、工具条高度恒定。词云页各筛选下拉本来就是 `width: 100%`，实测（1180/860/430 三档、切换视频/排序/收藏弹层）宽度均不变，未受影响。
+- 自检：`verify-tool` 263/263、`verify-merged` 28/28、`verify-client` / `verify-encrypted` / `verify-console` / `verify-shop-accounts` 全过、`node --check` 全过；playwright 实测收藏 4 位客户时：筛选前 `search=180.95 / toolbarH=32`，选「四川」后 `search=180.95 / toolbarH=32`（改前是 242 / 66），计数文字变长不再挤动布局。
+- **注意**：只改前端（`app/index.html`、`app/styles.css`、`package.json` 版本、README），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.5 变更**（2026-11-06）：**收藏客户可以按地域筛选**（采集页与词云页各一处）。
+- 采集页「收藏客户」卡片：搜索框旁新增「属地」下拉 `#favRegion`，只列收藏客户里出现过的属地（按人数降序，标签带计数如 `四川（2）`）；与搜索框**组合生效**，计数胶囊显示「命中 / 总数 位」。导出 CSV 现在导出的是**当前筛选结果**（没有筛选时即全部），文件名不变。
+- 词云页「收藏客户 N」弹层：顶部原来只有一个「已收藏客户」chip，现在改成「全部（N）+ 各地域（N）」chip 行，点 chip 只看该属地的收藏客户；`#groupSub` 显示 `命中 / 总数 位 · 属地`。
+- 数据来源不变（仍是 `favorites.json` 里记的 `region`，即评论 `ip_label`；没有属地的记为「未知属地」）。
+- 自检：`verify-tool` 263/263（新增「采集页收藏可按属地筛选」「词云弹层 chip 按属地筛选」两项）、`verify-merged` 28/28、`verify-client` / `verify-encrypted` / `verify-console` / `verify-shop-accounts` 全过、`node --check` 全过；playwright 用临时 `favorites.json`（4 位客户分布在四川/广东/未知）实测：采集页下拉 3 个属地项、选「四川」后列表剩 2 行且计数 `2 / 4 位`；词云弹层 chip 选「四川」后同样只剩 2 行。
+- **注意**：只改前端（`app/`、`viewer/`、`package.json` 版本、README），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.4 变更**（2026-11-06）：**界面文案精简**——原来采集页 / 词云页有成段的说明文字、空态解释、逐行路径，看着占版面又杂乱。
+- **规则**：正文只留一行短句；长解释、失败原因、完整路径一律挪到 `title` 悬浮提示（鼠标停上去才看到），不再铺在页面上。空态文案统一成「还没有数据 / 还没有导出文件 / 还没有收藏的客户」这类一句。
+- **采集页**（`app/`）：删掉「开始后会在本机启动一个有头 Chromium…」整段说明（挪到 `#start` 按钮 `title`）、导出记录卡片说明、「数据文件路径」一行；`#outDir` 只显示 `…\最后两段`（完整路径进 `title`）；结果区不再逐行列出 CSV/JSON/词云路径（完整路径挂在三个下载链接的 `title` 上），只保留样本 / 运行日志 / 失败现场；shop-accounts 的提示与失败原因缩成一行（「这个抖店号还需要在 douyin.com 登录过」等），原始长文案进 `title`；收藏卡片那行说明直接删掉（收藏文件路径挂到搜索框 `title`）。`.hint` 字号收到 11.5px、上边距 8px，并删掉不再使用的 `.path-muted`。
+- **词云页**（`viewer/`）：空态从「载入插件或扩展导出的 `douyin-comments-*.json` / `.csv`，也可以直接选整个导出目录…」缩成「打开导出的 `.json` / `.csv`」（完整说明进 `title`），「数据只在本机浏览器里处理，不上传任何服务器」缩成「本机处理，不上传服务器」。
+- **自检**：`verify-tool` 261/261、`verify-merged` 28/28、`verify-client` / `verify-encrypted` / `verify-console` / `verify-shop-accounts` 全过、`node --check` 全过；playwright 截图核对深/浅 × 宽/窄确认版面干净、无 JS 报错。
+- **注意**：只改前端（`app/`、`viewer/index.html`、`package.json` 版本、README），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.3 变更**（2026-11-06）：**采集页新增「收藏客户」卡片**——收藏不再只能在词云页里看。
+- 数据同源：卡片读的是词云那侧的服务端接口 `/viewer/api/favorites`（文件 `$DSH_HOME/douyin-collector/favorites.json`，按账号隔离），所以两边永远一致；收藏动作仍然在「评论词云」评论表里点 ★ 完成，采集页负责**汇总 / 搜索 / 移除 / 导出**。
+- 卡片内容：全部收藏客户按最近收藏时间倒序；每行是头像占位 + 昵称 + 抖音号/uid + 属地 + 「收藏于 时间」+ 标签/备注 + 「主页」链接（`https://www.douyin.com/user/<sec_uid>`，没有 sec_uid 时退回 uniqueId）+ 「移除」按钮。
+- 工具条：搜索框（昵称 / 抖音号 / uid / 属地 / 标签 / 备注 全字段模糊匹配）+ 计数胶囊（`N 位`，搜索时显示 `命中 / 总数`）+「刷新」+「导出 CSV」（UTF-8 BOM，列：昵称, 抖音号, uid, sec_uid, 属地, 标签, 首次收藏, 最近收藏, 备注, 主页）。
+- 空态文案会引导「去评论词云子页点 ☆ 收藏目标客户」；数据文件路径以等宽小字显示在说明下方。
+- 自检：`verify-tool.mjs` **261/261**（新增 2 项「采集页有收藏客户卡片」「采集页通过 viewer/api 取收藏」）、`verify-merged` 28/28、`verify-client` / `verify-encrypted` / `verify-console` 全过、`node --check` 全过；playwright 截图核对深/浅 × 宽/窄四种状态（窄屏 430 下每行改为「上信息下按钮」两段式）。
+- **注意**：只改前端（`app/index.html`、`app/app.js`、`app/styles.css`、`package.json`、`README.md`），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.2 变更**（2026-11-06）：**地域分布面板收窄 + 深浅主题改成可手动切换**。
+- **地域分布**：原来 `.region-panel` 只有 `margin-top`、没有左右留白，整块面板横向拉满到屏幕边缘（看起来像溢出到屏幕外）。现在改成 `margin: 14px var(--pad-x) 0`，与 KPI / 词云 / 评论表同一条左右边界；内部 `.region-dist` 从「一条条拉满整宽」改成**紧凑多列网格** `repeat(auto-fill, minmax(272px, 1fr))`（1180 宽是 3 列、860 宽 2 列、≤700 单列），每行改成 `名称(52px) + 细进度条(6px, flex) + 数量` 的三段式，行高 31px，12 个地域在宽屏下只占 4 行，不再一条占满整屏。
+- **深浅主题切换**：采集页（`app/`）和词云页（`viewer/`）顶栏都新增了一个太阳/月亮按钮 `#btnTheme`。优先级：**手动选择（`localStorage['dsh.douyin.theme']`）> `?theme=`（DSH 传进来的）> 系统偏好**；切换会同时更新 `data-theme` 与 `theme-color`，两页共用同一个 key，并通过 `storage` 事件互相同步；词云页里切换会重渲染表格/头像/地域，词云词色本身走 CSS 变量即时生效。按钮图标由 CSS（`[data-theme="light"] .theme-btn .t-sun { display:none }`）自动切换，不额外占 JS 状态。
+- **自检**：`verify-tool` 仍 **259/259**、`verify-merged` 28/28、`verify-client` 全过、`verify-encrypted` 全过、`verify-shop-accounts` 22/22、`verify-console` 全过、`node --check` 全过；另用 playwright-core 实测：1180/860/430 三种宽度下 `#regionPanel` 与 `#kpis` / `.table-panel` 的 left/right 完全对齐（28/26/16px），`documentElement.scrollWidth == innerWidth`（无横向溢出）；深色下点主题按钮 → 变浅色且写盘 `light`，刷新页面（仍带 `?theme=dark`）保持 `light`。
+- **注意**：本轮只改前端资源（`app/`、`viewer/`、`package.json` 版本），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.1 变更**（2026-11-06）：**统一「抖音评论」两页的视觉**——采集控制台（`app/`）与评论词云（`viewer/`）现在共用同一套 design tokens 和同一套控件规格，并完整支持**深色 / 浅色**两套主题（跟随 DSH；独立打开时跟随系统偏好）。
+- **tokens**：`--bg/--surface/--surface-2/--surface-3`、`--line/--line-soft/--line-strong`、`--ink/--text/--muted/--meta`、`--accent(#e0a94a)/--accent-dim/--accent-soft/--accent-line/--on-ink`、语义色 `--pos/--neg/--info/--warn`、几何 `--r:10px / --r-ctl:7px / --r-pill:999px`。深色为默认 `:root`，浅色是 `[data-theme="light"]` 覆盖（浅色下强调色改 `#b45309`、`--on-ink` 改 `#fff`，主按钮仍是「反白实心」但不会变成白字压在浅底上）。
+- **统一规则**：单一强调色只落在数据/选中态/链接/进度上；卡片圆角 10、控件 7、胶囊 999；无渐变、不堆阴影；控件统一 32px 高 + `1px var(--line)` 边框 + `3px var(--accent-soft)` 焦点环；数字一律等宽（`--mono` + `tabular-nums`）。采集页重写了 `app/styles.css`（顶栏、卡片、表单、统计四格用 inset 线切分、3px 实色进度条、日志面板、导出列表、toast）；词云页在 `viewer/styles.css` 里加了一段 v0.8.1 覆盖层（按钮/输入/表格线/徽章/头像/健康度/词云色阶/骨架屏/浮层滚动条全部 token 化，并修掉深色专用的 `rgba(255,255,255,*)`）。
+- **浅色主题的真实问题修了两处**：① 词云词色原来是硬编码 `#c2c2c7 / #8e8e94`，在白底上几乎看不见 ⇒ 改成 `var(--cloud-mid) / var(--cloud-low)`（浅色下 `#5b6472 / #8b94a3`），强调词改 `var(--accent)`；② 头像底色原来是深色 hsl ⇒ 浅色下换淡底深字。
+- **右侧面板 tab**：`client/client.js` 新增 `dshPalette(theme)` + `useDshTheme()`（`MutationObserver` 监听 `documentElement` 的 `data-theme/theme/class` + `matchMedia` + `window focus` 兜底），面板顶栏从「两个色块按钮」改为 surface 底 + 1px 下边框，tab 激活态是**2px 琥珀下划线 + ink 文字**，两个 iframe 背景统一取 `p.bg`，DSH 里切主题时面板即时跟着换。
+- **自检**：`verify-tool.mjs` 从 257 增到 **259 项**（原「支持深色主题」断言改成双主题 token 断言 + 新增「两页共用 tokens」「面板 tab 色板 + 跟随主题」两项）；`verify-merged.mjs` 28/28、`verify-client.mjs` 全过、`verify-encrypted.mjs` 全过、`node --check` 全过；另外用 playwright-core 对 7 个页面状态（控制台/词云 × 深色/浅色 × 宽屏/窄屏 + 表格/地域/分组弹层）逐张截图核对了观感。
+- **注意**：本轮只改前端资源（`app/`、`viewer/`、`client/client.js`、`package.json` 版本），`src-core/` 未动，**不需要重跑 `node build-encrypted.mjs`**；安装副本仍需手动同步后重启 DSH / NovaFlow 生效。
+
+**0.8.0 变更**（2026-11-05）：**兼容 `dsh-plugin-shop-accounts`**——采集时可以直接选 shop-accounts 里某个已登录的抖音账号，**Chrome 与 ego 两种浏览器后端都支持**；选中的账号登录态复用给我们的采集浏览器，采集浏览器档案按账号隔离。
+- **做法（cookie 桥接，不是复用窗口）**：shop-accounts 启动的浏览器**不会加载我们的采集扩展**（它的 `launchBrowser` 参数里没有 `--load-extension`），而 ego 的登录态是 Chromium 127+ App-Bound 加密、复制档案读不到 —— 所以只把那个账号的**登录 cookie**读出来，注入到我们自己的带扩展 Chromium。cookie 来源：Chrome 后端 → 该账号已在用（`runtime.json` 有端口）就直接走 CDP 读，没开就用同一档案起无头 Chrome 读完关掉；ego 后端 → ego 没开着走 `egoOfflineCookies`（同一 User Data 起无头实例读 `Profile N`），开着走 `egoProbe` 临时 TaskSpace。读 cookie 只读、不关闭用户正在用的窗口。
+- **账号隔离**：采集 Chrome profile 从 `DEFAULTS.profile` 改成 `<home>/profiles/<账号 id 过滤后>`；启动状态（`launch-state`）里记 `account`，下次请求如果账号不一样就关掉旧窗口重开，避免两个账号的登录态串在一起。
+- **用法**：工具参数新增 `account`（传账号 id / 名字 / 名字片段，如 `account:"抖店"`；不传=仍用本插件自己的登录态），返回里有 `account`；控制台页面新增「采集账号（shop-accounts）」下拉（记住上次选择）；新接口 `GET /plugins/dsh-douyin-comments/api/accounts` 返回可用账号（平台/卖家买家/后端/是否可读/ego 状态）。
+- **覆盖检查（本机实测的重要边界）**：本机 `抖店`（抖音卖家）账号的 ego 档案里**只有抖店后台（jinritemai / bytedance）登录，一个 `douyin.com` 的 cookie 都没有** —— 这种账号拿来采抖音评论会被登录闸门拦下。插件现在会在读 cookie 后做覆盖度检查并直接给明确错误（`account_no_douyin_login`：列出现有 cookie 域，提示「请在 shop-accounts 里用该账号打开 https://www.douyin.com 登录，或改用抖音买家号」），而不是含糊地报「未登录」；控制台选中抖店卖家号时也会显示这条提示。ego 的 `pickCookie` 只保留部分字段，Chrome CDP 的 cookie 更全，两种来源都过 `cookiesForPlaywright` 归一（丢掉 size/priority/session、`sameSite` 归一到 `None/Strict/Lax`、`expires` 取整）。
+- **自检**：新增 `verify-shop-accounts.mjs` 22 项（数据目录 / 插件根定位 / 清单只列抖音 / includeAll / resolve 按 id·名字·片段·空值 / 找不到与平台不符的中文报错 / cookie 域名表 / `cookiesForPlaywright` 过滤与归一 / 账号目录名过滤 / cookie 覆盖度分类）；`verify-merged.mjs` 增至 **28 项**（新增 `/api/accounts` 4 项：200、只列抖音、不列拼多多、字段齐全 + ego 状态）；`verify-encrypted.mjs`、`verify-tool.mjs`、`verify-client.mjs`、`node --check` 全过。
+- **注意**：profile 里的 `file:` 依赖是**复制**不是软链（hoisted pnpm），改源码后要手动同步装好的 `node_modules/dsh-douyin-comments`（本次同步了 `C:\Users\mo\.dsh\profiles\desktop` 与 NovaFlow 的 `86aa8d…` profile），然后退出重开 DSH / NovaFlow 生效。
+
+**0.7.0 变更**（2026-11-04）：面向 **NovaFlow**（二开的 DSH Desktop）适配，并加三块功能：**采集核心 AES 加密**、**评论按地域筛选 / 一键按地域区分客户**、**收藏目标客户（本机按账号隔离）**。
+- **数据与账号隔离**：插件所有本机数据（Chrome profile、cookies、导出 JSON、`last-out.json`、收藏、解密缓存）都落在 `$DOUYIN_HOME`，未设置时取 `$DSH_HOME/douyin-collector`，再退回 `~/.dsh/douyin-collector`。NovaFlow / DSH Desktop 给 Host 子进程注入 `DSH_HOME=~/.novaflow/accounts/<账号 key>`（见 `F:\Software\Novaflow\resources\app.asar` 解出的 `lib/main.js` 15211-15213），所以**同一台电脑切 NovaFlow 账号即自动隔离**；独立 DSH 仍用 `~/.dsh`。
+- **加密**：`collector.mjs` 现在是「加密加载器」，真实实现移到 `src-core/collector.src.mjs`，由 `build-encrypted.mjs` 压成 `core.enc`（**AES-256-GCM 认证加密**，密钥用 scrypt 从拆散/混淆的种子派生；载荷带 magic/版本/算法校验、GCM tag 校验与明文 sha256 校验，任何一步失败直接抛错）。运行期解密到 `<home>/runtime/<载荷哈希前16位>/collector.mjs` 再 `import`（按载荷哈希做缓存，换载荷自动失效并清理旧缓存）；内置扩展（`extension/`）同样加密进 `extension.enc`，解密密钥由加载器派生并通过 `globalThis` 传给核心模块、运行期物化到缓存目录后交给 Playwright 的 `--load-extension`。对 export 契约（`collectDouyinComments / DEFAULTS / resolveOutDir / sessionWorkspaceCwd`）零改动，`index.js`、`console.mjs`、词云服务端都不用知道加密存在。改了 `src-core/` 或 `extension/` 之后必须 `node build-encrypted.mjs` 重建。
+- **地域筛选 / 一键区分地域客户**：词云分析台侧栏新增「属地」下拉（来自评论 `ip_label`，按省/地区），评论表可筛某地域；新增「地域分布」面板（前 12 地域条形 + 评论数/用户数），点条形 = 只看该地域。`[按地域分组看客户]` 打开分组弹层：按地域聚合用户（昵称、抖音号、uid、sec_uid、评论数、获赞、代表评论，按获赞降序，每区最多列 200 人），可 `[收藏本区全部]`；`[导出分组 CSV]` 导出「地域 | 昵称 | 抖音号 | uid | sec_uid | 评论数 | 获赞 | 最近评论时间 | 是否已收藏 | 代表评论」（UTF-8 BOM）。
+- **收藏目标客户**：评论表每个用户旁有 ☆/★，分组弹层里也能收藏；侧栏有「只看已收藏客户」和「收藏客户 N」入口（弹层里看全部已收藏、可取消）。收藏存 `<home>/favorites.json`（`{version:1, users:{uid:{uid,secUid,nickname,uniqueId,region,profileUrl,tags,note,firstSavedAt,savedAt}}}`，原子写 tmp+rename），服务端接口 `GET/POST /plugins/dsh-douyin-comments/viewer/api/favorites`（GET 支持 `?uid=` 单查，POST 支持 `user` / `users[]` / `favorites[]` 批量 upsert + `note`）与 `POST …/api/favorites/remove`（`uid` 或 `uids[]`）；自包含词云 HTML（file://）里没有服务端，收藏按钮会提示「请在插件面板里打开」。
+- **NovaFlow 额度（本轮未做扣费）**：NovaFlow 的账号额度是 New API 后端按**中继推理请求的 token** 扣（客户端只有 `GET /api/desktop/v1/balance` 等只读接口，没有任何本地扣费端点，实测 `/api/desktop/v1/*` 全部 404）。所以采集/分析这类纯本地动作**无法经由现有客户端接口扣额度**，本轮按用户决定先不扣，只做其余功能；后续要扣需要服务端新增计费端点（或走一次中继推理），属后端改动。
+- **自检**：`verify-merged.mjs` 23 项（单 prefix / 路由 / 静态页 / 越界拒绝 / 无模型 409 / 收藏接口：空列表 / 单个 / 批量（含无 uid 失败）/ 单查 / 删除 / 批量删除 / 落盘路径在 `$DSH_HOME` 下），`verify-client.mjs` 24 项（单入口 + 面板两子页 + 采集完自动切词云），`verify-tool.mjs` **257/257**（v0.7.0 起源码护栏改读 `src-core/collector.src.mjs`，版本断言改成「扩展源 / 扩展安装后 / MCP 三处一致」——插件包版本独立），`verify-encrypted.mjs` 全部通过（载荷结构 / 逐字节还原 / 四主导出 / 运行期缓存 / 篡改检测 / 扩展解密安装与不重装）。`node --check` 全过。
+- **打包**：`package.json` 的 `files` **不含** `src-core/` 与明文 `extension/`（只发 `core.enc` + `extension.enc`），避免打包把加密源码又带出去；本地开发目录仍保留它们，改完跑 `node build-encrypted.mjs` 重建。装好的插件包没有明文源，故也不能在包内重建。
+- **安装**：NovaFlow 账号 profile（`~/.novaflow/accounts/<key>/profiles/desktop`）的依赖已改为 `file:D:/dycopy/dsh-douyin-comments` 并在该 profile 跑 `pnpm install`（hoisted，装进 `node_modules/dsh-douyin-comments`）；改完须退出并重开 NovaFlow 生效。
+
+**0.6.0 变更**（2026-11-04）：**合并 `dsh-comment-viewer`（评论词云）到本插件，并且整合到同一个界面**——左侧只有一个入口「抖音评论」，点开是同一个面板，面板顶部两个小 tab「采集 / 评论词云」；采集完成后自动切到词云子页并展开面板。
+- 界面：左侧单个入口「抖音评论」(order 23)；右侧栏 tab 类型 `id/kind = douyin-comments-console`（`keepMounted: true`）。不再有独立的「评论词云」入口/面板，采集页与词云页是同一面板的两个子页（两个 iframe 交替显示，状态都保留）。
+- 服务端：词云服务端并入 `viewer.mjs`（`VIEWER_PREFIX = /plugins/dsh-douyin-comments/viewer`，静态页在包内 `viewer/`）；控制台与词云**共用一个 webServer prefix**（`/plugins/dsh-douyin-comments`），由 `index.js` 里的组合 handler 按路径分发（以 `VIEWER_PREFIX` 开头的走词云，其余走控制台），不依赖宿主对互含前缀的匹配优先级。
+- 自动打开：新增 `GET /viewer/api/latest`（返回允许目录里 mtime 最新的 `douyin-comments-*.json`，与 `/api/list` 首项一致）；`client.js` 每 3 秒轮询它，发现最新导出换了文件 → `setPanelMode('viewer')` 切子页 + `bumpViewerGeneration()` 让词云 iframe 重载 + `ctx.sidebarRight.openTab('douyin-comments-console', {revealIfOpened:true})` 展开右侧栏；工具调用与控制台两条采集路径都会落盘，所以两条路径都能自动切换。
+- 词云页：iframe 带 `?embed=1&latest=1&gen=<n>`，app 侧对 `latest=1` 做**一次性强制最新**（`localStorage['cw.latestGen']` 记住已强制过的 gen，不覆盖用户上次选的旧记录）；`aiApiPath()` 的挂载判断改成通用 ``/^\/plugins\/[^/]+\/(app|viewer)(\/|$)/``。
+- 迁移：DSH desktop profile 的 `dsh.profile.bundles` 与 dependencies 里已移除 `dsh-comment-viewer`（同 id 的 tab 类型二次注册会抛错）；旧源码目录 `D:\dycopy\dsh-comment-viewer` 保留未删。
+- 自检：`verify-merged.mjs`（单 prefix / 路由 / 静态页 / 越界拒绝 / 无模型 409 共 15 项）与 `verify-client.mjs`（单入口 + 面板两个子 tab + 采集完成自动切词云 + 卸载清理共 24 项），全部通过。
 
 **0.5.62 变更**（2026-10-31）：合并 `feat/dsh-web-console` —— DSH Web 界面左侧「抖音采集」入口，点开是插件自带控制台（粘贴链接 → 开始/取消 → 看进度日志 → 下载 CSV/JSON/词云），采集仍跑在有头 Chromium 里。合并时修了 4 处：① 工具默认写会话工作区、控制台写全局目录导致「导出记录」看不到工具产物 ⇒ 工具每跑一次记 `last-out.json`，控制台据此收录；② 进度条原来用 `topSeen/max`（默认 80000）几乎恒为 0% ⇒ 改按页面回报的 `total` 计算，完成即 100%；③ 下载接口只放 `douyin-comments-*` / `douyin-wordcloud-*` 导出文件（其余 403）；④ 控制台支持深色主题（由 `client.js` 读 DSH 主题后经 `?theme=` 传入）。新增 `verify-console.mjs`（12 项）与 8 条契约断言。
 

@@ -3,14 +3,46 @@
   "use strict";
 
   var API_BASE = new URL("../api/", location.href);
+  // v0.8.3：收藏客户接口挂在词云那侧的 prefix 下（/plugins/<包名>/viewer/api/...）。
+  var FAV_API_BASE = new URL("../viewer/api/", location.href);
   var $ = function (id) { return document.getElementById(id); };
 
-  // v0.5.62：跟随 DSH 主题（由 client.js 通过 ?theme=dark|light 传进来；独立打开时用系统偏好）。
-  (function initTheme() {
+  // v0.8.2：深 / 浅主题可手动切换（localStorage 记住，优先于 ?theme=，其次跟随系统偏好）。
+  // 与词云子页共用同一个 key，切换后另一个 iframe 通过 storage 事件同步。
+  (function themeBoot() {
+    var KEY = "dsh.douyin.theme";
     var asked = "";
     try { asked = new URLSearchParams(location.search).get("theme") || ""; } catch (e) { /* ignore */ }
-    var dark = asked ? asked === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    var stored = "";
+    try { stored = localStorage.getItem(KEY) || ""; } catch (e) { stored = ""; }
+    var apply = function (mode) {
+      var dark = mode !== "light";
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      // v0.8.1：同步浏览器地址栏/移动端状态栏底色，避免浅色主题下还是深色条
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", dark ? "#0b0b0c" : "#f5f6f8");
+    };
+    var current = function () { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; };
+    var mode = stored || asked || ((window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
+    apply(mode);
+    window.__douyinTheme = {
+      key: KEY,
+      get: current,
+      set: function (m) { var v = m === "light" ? "light" : "dark"; try { localStorage.setItem(KEY, v); } catch (e) { /* ignore */ } apply(v); return v; },
+      toggle: function () { var next = current() === "light" ? "dark" : "light"; try { localStorage.setItem(KEY, next); } catch (e) { /* ignore */ } apply(next); return next; },
+    };
+    window.addEventListener("storage", function (e) {
+      if (e.key === KEY && e.newValue) apply(e.newValue === "light" ? "light" : "dark");
+    });
+  })();
+
+  (function themeButton() {
+    var btn = $("btnTheme");
+    if (!btn || !window.__douyinTheme) return;
+    btn.addEventListener("click", function () {
+      var mode = window.__douyinTheme.toggle();
+      toast(mode === "light" ? "已切换到浅色主题" : "已切换到深色主题");
+    });
   })();
 
   var state = {
@@ -21,11 +53,11 @@
     exportsTimer: 0,
   };
 
-  function api(path, options) {
+  function requestJson(base, path, options) {
     var opts = options || {};
     var headers = Object.assign({}, opts.headers || {});
     if (opts.body && !headers["content-type"]) headers["content-type"] = "application/json";
-    return fetch(new URL(path, API_BASE), Object.assign({}, opts, { headers: headers }))
+    return fetch(new URL(path, base), Object.assign({}, opts, { headers: headers }))
       .then(function (res) {
         return res.text().then(function (text) {
           var data = null;
@@ -39,6 +71,14 @@
           return data;
         });
       });
+  }
+
+  function api(path, options) {
+    return requestJson(API_BASE, path, options);
+  }
+
+  function favApi(path, options) {
+    return requestJson(FAV_API_BASE, path, options);
   }
 
   function toast(message, isError) {
@@ -72,6 +112,15 @@
     var s = sec % 60;
     if (m < 60) return m + "m " + s + "s";
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+
+  /** 长路径只留最后两段，完整路径放进 title（避免顶栏一行被撑很长）。 */
+  function shortPath(value) {
+    var text = String(value || "").trim();
+    if (!text) return "—";
+    var parts = text.split(/[\\/]+/).filter(Boolean);
+    if (parts.length <= 2) return parts.join("\\");
+    return "…\\" + parts.slice(-2).join("\\");
   }
 
   function phaseLabel(phase) {
@@ -197,6 +246,7 @@
       head.textContent =
         "采集完成：" + r.count + " 条" +
         (r.title ? "（" + r.title + "）" : "") +
+        (r.account ? "（账号：" + r.account + "）" : "") +
         " · 视频 " + (r.videoId || "—") +
         " · 用时 " + (r.durationSec ? r.durationSec + "s" : "—") +
         " · 顶层 " + (r.lanes || job.options.lanes || "—") + " 路";
@@ -211,16 +261,17 @@
     if (r && r.ok) {
       var actions = document.createElement("div");
       actions.className = "result-actions";
-      var addLink = function (label, href, blank) {
+      var addLink = function (label, href, blank, title) {
         var a = document.createElement("a");
         a.textContent = label;
         a.href = href;
+        if (title) a.title = title;
         if (blank) { a.target = "_blank"; a.rel = "noopener"; }
         actions.appendChild(a);
       };
-      if (r.csvPath) addLink("下载 CSV", downloadUrl(r.csvPath));
-      if (r.jsonPath) addLink("下载 JSON", downloadUrl(r.jsonPath));
-      if (r.htmlPath) addLink("打开词云 HTML", downloadUrl(r.htmlPath, true), true);
+      if (r.csvPath) addLink("下载 CSV", downloadUrl(r.csvPath), false, r.csvPath);
+      if (r.jsonPath) addLink("下载 JSON", downloadUrl(r.jsonPath), false, r.jsonPath);
+      if (r.htmlPath) addLink("打开词云 HTML", downloadUrl(r.htmlPath, true), true, r.htmlPath);
       if (actions.childNodes.length) body.appendChild(actions);
 
       if (r.sample && r.sample.length) {
@@ -229,9 +280,6 @@
         sample.textContent = "样本：" + r.sample.slice(0, 5).join(" / ");
         body.appendChild(sample);
       }
-      if (r.csvPath) body.appendChild(addText("div", "path", "CSV：" + r.csvPath));
-      if (r.jsonPath) body.appendChild(addText("div", "path", "JSON：" + r.jsonPath));
-      if (r.htmlPath) body.appendChild(addText("div", "path", "词云：" + r.htmlPath));
     }
 
     if (r && r.logPath) body.appendChild(addText("div", "path", "运行日志：" + r.logPath));
@@ -312,12 +360,17 @@
     var lanes = Number($("lanes").value);
     var timeoutMin = Number($("timeout").value);
     var waitLogin = Number($("waitLogin").value);
+    var account = $("account") ? $("account").value : "";
     var body = {
       url: url,
       replies: $("replies").checked,
       clearBefore: $("clearBefore").checked,
       cloud: $("cloud").checked,
     };
+    if (account) {
+      body.account = account;
+      try { localStorage.setItem("douyin.account.v1", account); } catch (e) { /* ignore */ }
+    }
     if (max > 0) body.max = max;
     if (lanes > 0) body.lanes = lanes;
     if (timeoutMin > 0) body.timeoutMs = Math.round(timeoutMin * 60000);
@@ -373,7 +426,7 @@
         clearNode(box);
         var files = (data && data.files) || [];
         if (!files.length) {
-          box.appendChild(addText("div", "empty", "还没有导出文件。完成一次采集后会出现在这里。"));
+          box.appendChild(addText("div", "empty", "还没有导出文件"));
           return;
         }
         files.forEach(function (file) {
@@ -394,7 +447,9 @@
       .catch(function (err) {
         var box = $("exports");
         clearNode(box);
-        box.appendChild(addText("div", "empty", "读取导出记录失败：" + err.message));
+        var row = addText("div", "empty", "读取导出记录失败，点「刷新」重试");
+        row.title = err.message;
+        box.appendChild(row);
       });
   }
 
@@ -408,7 +463,9 @@
         $("waitLogin").value = d.waitLoginSec == null ? 180 : d.waitLoginSec;
         $("clearBefore").checked = d.clearBefore === true;
         $("version").textContent = "v" + (data.version || "—");
-        $("outDir").textContent = "输出：" + (data.outDir || "—");
+        var out = $("outDir");
+        out.textContent = data.outDir ? "输出：" + shortPath(data.outDir) : "";
+        out.title = data.outDir || "";
       })
       .catch(function (err) {
         toast("读取配置失败（使用默认值）：" + err.message, true);
@@ -419,10 +476,327 @@
       });
   }
 
+  function loadAccounts() {
+    var select = $("account");
+    var hint = $("accountHint");
+    var saved = "";
+    try { saved = localStorage.getItem("douyin.account.v1") || ""; } catch (e) { saved = ""; }
+    api("accounts")
+      .then(function (data) {
+        clearNode(select);
+        select.appendChild(optionItem("", "不指定（用本插件自己的登录态）"));
+        var list = (data && data.accounts) || [];
+        var accountHints = {};   // v0.8.0：抖店卖家号通常没有 douyin.com 登录，选中时提示一下
+        list.forEach(function (a) {
+          var label = a.name + "（" + a.platformLabel + " " + a.accountTypeLabel + "，" + (a.backendLabel || a.backend) + "）";
+          var opt = optionItem(a.id, label);
+          if (!a.readable) opt.disabled = true;
+          if (a.hint) accountHints[a.id] = a.hint;
+          select.appendChild(opt);
+        });
+        if (saved) {
+          var found = false;
+          for (var i = 0; i < select.options.length; i++) if (select.options[i].value === saved) found = true;
+          if (found) select.value = saved;
+        }
+        var showAccountHint = function () {
+          var picked = accountHints[select.value];
+          if (picked) {
+            hint.hidden = false;
+            hint.textContent = "这个抖店号还需要在 douyin.com 登录过";
+            hint.title = picked;
+          } else if (!list.length) {
+            hint.hidden = false;
+            hint.textContent = "shop-accounts 里没有抖音账号，可先用本插件登录态";
+            hint.title = "在 shop-accounts 里加一个抖音账号并登录后，就能在这里选它来采集";
+          } else {
+            hint.hidden = true;
+            hint.textContent = "";
+            hint.title = "";
+          }
+        };
+        if (!select.dataset.hintBound) {
+          select.dataset.hintBound = "1";
+          select.addEventListener("change", showAccountHint);
+        }
+        if (data && data.ok === false) {
+          hint.hidden = false;
+          hint.textContent = "shop-accounts 未就绪";
+          hint.title = String((data && data.error) || "");
+        } else {
+          showAccountHint();
+        }
+      })
+      .catch(function (err) {
+        hint.hidden = false;
+        hint.textContent = "读取 shop-accounts 失败";
+        hint.title = err.message;
+      });
+  }
+
+  function optionItem(value, label) {
+    var opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    return opt;
+  }
+
+  /* ===================== v0.8.3：收藏客户（采集页也能看 / 管） =====================
+   * 数据由服务端管理（`$DSH_HOME/douyin-collector/favorites.json`，按账号隔离；见词云那侧
+   * 的 `/viewer/api/favorites`）。这里只做「列表 / 搜索 / 移除 / 导出 CSV」——收藏动作仍然在
+   * 评论词云的评论表 ★ 上完成，采集页负责汇总查看与清理。
+   */
+  var favState = { list: [], loaded: false, failed: false, error: "", region: "" };
+
+  function fmtStamp(ms) {
+    var d = new Date(Number(ms) || 0);
+    if (!d || isNaN(d.getTime())) return "";
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function initialsOf(name) {
+    var text = String(name || "").trim();
+    if (!text) return "★";
+    return text.slice(0, 2);
+  }
+
+  function favProfileHref(user) {
+    if (!user) return "";
+    if (user.profileUrl) return String(user.profileUrl);
+    if (user.secUid) return "https://www.douyin.com/user/" + encodeURIComponent(user.secUid);
+    if (user.uniqueId) return "https://www.douyin.com/user/" + encodeURIComponent(user.uniqueId);
+    return "";
+  }
+
+  function favRegionOf(user) {
+    return String((user && user.region) || "").trim() || "未知属地";
+  }
+
+  function favMatches(user, keyword) {
+    if (!keyword) return true;
+    var hay = [
+      user.nickname,
+      user.uniqueId,
+      user.uid,
+      user.region,
+      user.note,
+      (user.tags || []).join(" "),
+    ].join(" ").toLowerCase();
+    return hay.indexOf(keyword) >= 0;
+  }
+
+  /** v0.8.5：当前搜索 + 属地筛选后的收藏客户列表。 */
+  function favFiltered() {
+    var keyword = "";
+    var search = $("favSearch");
+    if (search) keyword = String(search.value || "").trim().toLowerCase();
+    var region = String(favState.region || "").trim();
+    return (favState.list || []).filter(function (user) {
+      if (region && favRegionOf(user) !== region) return false;
+      return favMatches(user, keyword);
+    });
+  }
+
+  /** v0.8.5：属地下拉：只列收藏里出现过的属地，按人数降序；保留当前选择。 */
+  function fillFavRegion() {
+    var select = $("favRegion");
+    if (!select) return;
+    var counts = new Map();
+    (favState.list || []).forEach(function (user) {
+      var region = favRegionOf(user);
+      counts.set(region, (counts.get(region) || 0) + 1);
+    });
+    var picked = String(favState.region || "");
+    var rows = Array.from(counts.entries()).sort(function (a, b) { return b[1] - a[1] || a[0].localeCompare(b[0], "zh"); });
+    clearNode(select);
+    var all = document.createElement("option");
+    all.value = "";
+    all.textContent = "全部属地";
+    select.appendChild(all);
+    rows.forEach(function (row) {
+      var opt = document.createElement("option");
+      opt.value = row[0];
+      opt.textContent = row[0] + "（" + row[1] + "）";
+      select.appendChild(opt);
+    });
+    if (picked && !counts.has(picked)) picked = "";
+    favState.region = picked;
+    select.value = picked;
+    select.disabled = !rows.length;
+  }
+
+  function renderFavorites() {
+    var box = $("favs");
+    if (!box) return;
+    clearNode(box);
+
+    var all = favState.list || [];
+    var shown = favFiltered();
+    var filtering = !!(String(favState.region || "").trim()) || (function () {
+      var search = $("favSearch");
+      return !!(search && String(search.value || "").trim());
+    })();
+
+    var countEl = $("favCount");
+    if (countEl) {
+      countEl.textContent = filtering ? shown.length + " / " + all.length + " 位" : all.length + " 位";
+      countEl.className = "badge " + (all.length ? "done" : "idle");
+    }
+
+    if (favState.failed) {
+      var failedRow = addText("div", "empty", "读取失败，点「刷新」重试");
+      if (favState.error) failedRow.title = favState.error;
+      box.appendChild(failedRow);
+      return;
+    }
+    if (!all.length) {
+      box.appendChild(addText("div", "empty", favState.loaded ? "还没有收藏的客户" : "加载中…"));
+      return;
+    }
+    if (!shown.length) {
+      box.appendChild(addText("div", "empty", "没有符合筛选条件的收藏客户"));
+      return;
+    }
+
+    shown.forEach(function (user) {
+      var row = document.createElement("div");
+      row.className = "fav-row";
+
+      var avatar = document.createElement("span");
+      avatar.className = "fav-avatar";
+      avatar.textContent = initialsOf(user.nickname);
+      row.appendChild(avatar);
+
+      var main = document.createElement("div");
+      main.className = "fav-main";
+      var nameLine = document.createElement("div");
+      nameLine.className = "fav-name-line";
+      nameLine.appendChild(addText("span", "fav-name", user.nickname || "（无昵称）"));
+      if (user.uniqueId) nameLine.appendChild(addText("span", "fav-uid", "抖音号 " + user.uniqueId));
+      else if (user.uid) nameLine.appendChild(addText("span", "fav-uid", "uid " + user.uid));
+      main.appendChild(nameLine);
+
+      var metaParts = [];
+      if (user.region) metaParts.push(user.region);
+      if (user.savedAt) metaParts.push("收藏于 " + fmtStamp(user.savedAt));
+      if (user.note) metaParts.push(user.note);
+      if (user.tags && user.tags.length) metaParts.push(user.tags.join(" / "));
+      main.appendChild(addText("div", "fav-meta", metaParts.join(" · ") || "—"));
+      row.appendChild(main);
+
+      var actions = document.createElement("div");
+      actions.className = "fav-actions";
+      var href = favProfileHref(user);
+      if (href) {
+        var link = document.createElement("a");
+        link.className = "btn small ghost";
+        link.textContent = "主页";
+        link.href = href;
+        link.target = "_blank";
+        link.rel = "noopener";
+        actions.appendChild(link);
+      }
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn small ghost danger";
+      remove.textContent = "移除";
+      remove.addEventListener("click", function () { removeFavorite(user); });
+      actions.appendChild(remove);
+      row.appendChild(actions);
+
+      box.appendChild(row);
+    });
+  }
+
+  function loadFavorites() {
+    favApi("favorites")
+      .then(function (data) {
+        favState.list = (data && data.favorites) || [];
+        favState.loaded = true;
+        favState.failed = false;
+        favState.error = "";
+        var searchEl = $("favSearch");
+        if (searchEl) searchEl.title = data && data.file ? "收藏文件：" + data.file : "";
+        fillFavRegion();
+        renderFavorites();
+      })
+      .catch(function (err) {
+        favState.loaded = true;
+        favState.failed = true;
+        favState.error = err.message;
+        fillFavRegion();
+        renderFavorites();
+        toast("读取收藏客户失败：" + err.message, true);
+      });
+  }
+
+  function removeFavorite(user) {
+    if (!user || !user.uid) return;
+    favApi("favorites/remove", { method: "POST", body: JSON.stringify({ uid: user.uid }) })
+      .then(function () {
+        favState.list = (favState.list || []).filter(function (item) { return item.uid !== user.uid; });
+        fillFavRegion();
+        renderFavorites();
+        toast("已取消收藏「" + (user.nickname || user.uid) + "」");
+      })
+      .catch(function (err) {
+        toast("取消收藏失败：" + err.message, true);
+      });
+  }
+
+  function exportFavoritesCsv() {
+    var list = favFiltered();
+    if (!list.length) {
+      toast(favState.list && favState.list.length ? "当前筛选没有收藏客户可导出" : "还没有收藏的客户可导出", true);
+      return;
+    }
+    var quote = function (value) {
+      var text = String(value == null ? "" : value);
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    var header = ["昵称", "抖音号", "uid", "sec_uid", "属地", "标签", "首次收藏", "最近收藏", "备注", "主页"];
+    var rows = list.map(function (user) {
+      return [
+        user.nickname || "",
+        user.uniqueId || "",
+        user.uid || "",
+        user.secUid || "",
+        user.region || "",
+        (user.tags || []).join(" / "),
+        fmtStamp(user.firstSavedAt),
+        fmtStamp(user.savedAt),
+        user.note || "",
+        favProfileHref(user),
+      ].map(quote).join(",");
+    });
+    var csv = "\ufeff" + header.map(quote).join(",") + "\r\n" + rows.join("\r\n") + "\r\n";
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var d = new Date();
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    var stamp = "" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes());
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "收藏客户-" + stamp + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    toast("已导出 " + list.length + " 位收藏客户");
+  }
+
   function bind() {
     $("start").addEventListener("click", startCollection);
     $("cancel").addEventListener("click", cancelCollection);
     $("refreshExports").addEventListener("click", refreshExports);
+    $("refreshFavs").addEventListener("click", loadFavorites);
+    $("exportFavs").addEventListener("click", exportFavoritesCsv);
+    $("favSearch").addEventListener("input", renderFavorites);
+    $("favRegion").addEventListener("change", function () {
+      favState.region = $("favRegion").value || "";
+      renderFavorites();
+    });
     $("url").addEventListener("keydown", function (event) {
       if (event.key === "Enter") startCollection();
     });
@@ -430,5 +804,7 @@
 
   bind();
   loadConfig();
+  loadAccounts();
   refreshExports();
+  loadFavorites();
 })();

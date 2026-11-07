@@ -14,7 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { collectDouyinComments, DEFAULTS, resolveOutDir, sessionWorkspaceCwd } from './collector.mjs';
-import { registerConsole, rememberOutDir } from './console.mjs';
+import { CONSOLE_PREFIX, createConsole, rememberOutDir } from './console.mjs';
+import { VIEWER_PREFIX, createViewerHandler } from './viewer.mjs';
 
 /** Loader 稳定标识（同时也是 cordis.patch.yml 里 id 的来源）。 */
 export const name = 'dsh-douyin-comments';
@@ -261,6 +262,10 @@ export function apply(ctx, config = {}) {
         required: true,
         description: '抖音视频链接（https://www.douyin.com/video/<id>、带 modal_id 的浮层链接，或直接给 15~25 位 aweme id）。',
       },
+      account: {
+        type: 'string',
+        description: 'v0.8.0：用 shop-accounts 插件里某个已登录的抖音账号来采集（传账号 id 或名字，大小写/片段都行；不传 = 用本插件自己 profile 的登录态）。会读出该账号浏览器（Chrome 或 ego 后端）里的 cookie 注入采集浏览器；账号不存在时直接报错并列出可用账号。',
+      },
       max: { type: 'integer', description: '本次「一级评论」目标条数：到量就停止顶层扫描、继续把二级回复补完（不传 = 用插件设置里的值，出厂默认 80000）；实际条数通常多于它。' },
       lanes: { type: 'integer', description: '顶层列表路数（默认 3，错峰多路；1 = 单路）。0.5.13 起真正生效：每路错开 200ms 出发，扩展若发现两路拿到同一页会自动降回单路。' },
       replies: { type: 'boolean', description: '是否等二级回复补采（默认 true；false 时只采一级评论，更快）。' },
@@ -291,6 +296,7 @@ export function apply(ctx, config = {}) {
           durationSec: { type: 'number', required: true },
           extensionVersion: { type: 'string', required: true, description: '安装进浏览器的扩展版本' },
           extensionInstalled: { type: 'boolean', required: true, description: '本次是否重新安装了扩展' },
+          account: { type: 'string', required: true, description: 'v0.8.0：本次使用的 shop-accounts 账号名（没用账号时为空串）' },
           sample: { type: 'array', required: true, items: { type: 'string' }, description: '前 5 条预览' },
           logPath: { type: 'string', required: true, description: '本次运行日志文件路径（每次调用都写，含全过程与收工原因；排查时先看它）' },
           snapshotDir: { type: 'string', required: true, description: '失败现场目录（截图/页面 HTML/状态 JSON/日志副本）；成功且采完时为空串' },
@@ -316,6 +322,7 @@ export function apply(ctx, config = {}) {
         }
         const head = `已采集 ${value.count} 条公开评论`
           + (value.title ? `（${value.title}）` : '')
+          + (value.account ? `（账号：${value.account}）` : '')
           + ` — videoId=${value.videoId}，用时 ${value.durationSec}s，顶层列表 ${value.lanes} 路，扩展 v${value.extensionVersion}`
           + (value.extensionInstalled ? '（本次自动安装）' : '');
         const lines = [head, `CSV：${value.csvPath}`, `JSON：${value.jsonPath}`];
@@ -382,6 +389,7 @@ export function apply(ctx, config = {}) {
       try {
         res = await collectDouyinComments({
           url,
+          account: String(args.account || '').trim(),
           max: maxUsed,
           lanes: lanesUsed,
           replies: args.replies,
@@ -420,6 +428,7 @@ export function apply(ctx, config = {}) {
         durationSec: Number(res.durationSec) || 0,
         extensionVersion: String(ext.version || ''),
         extensionInstalled: ext.copied === true,
+        account: res.account && res.account.name ? String(res.account.name) : '',
         sample: Array.isArray(res.sample) ? res.sample.map((s) => String(s)) : [],
         logPath: String(res.logPath || ''),
         snapshotDir: String(res.snapshotDir || ''),
@@ -430,17 +439,35 @@ export function apply(ctx, config = {}) {
   // 插件卸载时精确注销这个工具。
   if (typeof ctx.effect === 'function') ctx.effect(() => () => dispose());
 
-  // DSH Web 控制台：只在有 webServer 的宿主里挂载；headless / 纯工具模式没有这个服务，
-  // 嵌套 inject 不会执行，原来的 douyin_comments 工具完全不受影响。
+  // DSH Web 控制台 + 评论词云（v0.6.0 合并后一起挂载）：只在有 webServer 的宿主里挂；
+  // headless / 纯工具模式没有这个服务，嵌套 inject 不会执行，原来的 douyin_comments 工具完全不受影响。
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (scoped) => {
-      registerConsole(scoped, {
+      // 控制台与评论词云共用一个 webServer prefix（CONSOLE_PREFIX = /plugins/dsh-douyin-comments）：
+      // 词云的接口与静态页都挂在它下面的 /viewer 路径，由这里统一分发。这样不依赖宿主对
+      // 「两个互含前缀」的匹配优先级（/plugins/dsh-douyin-comments 与 .../viewer 谁先匹配）。
+      const consoleApi = createConsole({
         collect: collectDouyinComments,
         getSettings: () => readSettings(),
         getOutDir: () => DEFAULTS.outDir,
       });
+      // rootCtx 作为兜底：llm / agentDefaultModel 这类可选服务如果在 webServer 作用域里取不到，
+      // 就从插件根 ctx 再试一次（AI 解读靠它）。
+      const viewerHandler = createViewerHandler(scoped, ctx);
+      const handler = (req, res) => {
+        let pathname = '';
+        try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch { pathname = ''; }
+        if (pathname === VIEWER_PREFIX || pathname.startsWith(VIEWER_PREFIX + '/')) {
+          return viewerHandler(req, res);
+        }
+        return consoleApi.handler(req, res);
+      };
+      const install = () => scoped.webServer.register({ kind: 'prefix', path: CONSOLE_PREFIX, handler });
+      if (typeof scoped.effect === 'function') scoped.effect(install);
+      else install();
       if (scoped.logger && typeof scoped.logger.info === 'function') {
-        scoped.logger.info('[douyin] Web 控制台已挂载：/plugins/dsh-douyin-comments/app/');
+        scoped.logger.info('[douyin] Web 控制台已挂载：' + CONSOLE_PREFIX + '/app/');
+        scoped.logger.info('[douyin] 评论词云已挂载：' + VIEWER_PREFIX + '/（采集完成后客户端会自动打开）');
       }
     });
   }

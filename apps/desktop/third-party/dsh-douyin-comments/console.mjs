@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectDouyinComments, DEFAULTS } from './collector.mjs';
+import { listShopAccounts } from './shop-accounts-bridge.mjs';
 
 export const CONSOLE_PREFIX = '/plugins/dsh-douyin-comments';
 
@@ -88,13 +89,21 @@ function readJson(req) {
 }
 
 /**
+ * 采集器数据根目录（NovaFlow / DSH Desktop 会按账号注入 DSH_HOME，
+ * collector.mjs 的 DEFAULTS.home 因此也已随账号隔离；这里只做统一出口）。
+ */
+export function collectorHome() {
+  return DEFAULTS.home || path.join(os.homedir(), '.dsh', 'douyin-collector');
+}
+
+/**
  * v0.5.62：记住「工具这次把产物写到哪了」。
  *
  * 工具调用默认写**当前会话工作区**（`<cwd>/douyin-comments`），而控制台没有会话上下文，
  * 只能写全局目录。两边目录不同 → 控制台「导出记录」看不到工具采的文件。
  * 所以工具每跑一次就把 outDir 记到 `<home>/last-out.json`，控制台据此把它也当成可读根。
  */
-const LAST_OUT_FILE = path.join(DEFAULTS.home || path.join(os.homedir(), '.dsh', 'douyin-collector'), 'last-out.json');
+const LAST_OUT_FILE = path.join(collectorHome(), 'last-out.json');
 
 export function rememberOutDir(dir) {
   const abs = String(dir || '').trim();
@@ -105,7 +114,7 @@ export function rememberOutDir(dir) {
   } catch { /* 记不住也不影响采集 */ }
 }
 
-function lastOutDir() {
+export function lastOutDir() {
   try {
     const raw = JSON.parse(fs.readFileSync(LAST_OUT_FILE, 'utf8'));
     const dir = raw && typeof raw.outDir === 'string' ? raw.outDir.trim() : '';
@@ -267,6 +276,7 @@ function normalizeInput(raw, settings, outDir) {
 
   return {
     url,
+    account: String(body.account || '').trim(),
     max,
     lanes,
     timeoutMs,
@@ -421,6 +431,12 @@ export function createConsole(options = {}) {
         return sendJson(res, 200, { ok: true, version, outDir: String(getOutDir() || '') });
       }
 
+      if (pathname === `${CONSOLE_PREFIX}/api/accounts` && (req.method === 'GET' || req.method === 'HEAD')) {
+        // v0.8.0：shop-accounts 账号清单（默认只列抖音账号）；不可用时 ok:false + error，UI 显示提示
+        const data = await listShopAccounts({ platform: 'douyin' });
+        return sendJson(res, 200, Object.assign({ ok: true, platform: 'douyin' }, data));
+      }
+
       if (pathname === `${CONSOLE_PREFIX}/api/config`) {
         const settings = getSettings() || {};
         return sendJson(res, 200, {
@@ -528,4 +544,4 @@ export function registerConsole(ctx, options = {}) {
   return api;
 }
 
-export default { CONSOLE_PREFIX, createConsole, registerConsole, rememberOutDir };
+export default { CONSOLE_PREFIX, createConsole, registerConsole, rememberOutDir, lastOutDir };
