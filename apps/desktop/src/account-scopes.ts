@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { initProfile } from '@deepseek-ai/dsh-app-boot'
 import { PROFILE_TEMPLATES } from '@deepseek-ai/dsh-official-bundles'
+import { migrateNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
 import type { NovaFlowDesktopSnapshot } from './novaflow/runtime.ts'
 
 /** Authenticated identity, never a username, group, or credential. */
@@ -124,12 +125,16 @@ export class DesktopAccountScopes {
    * @param seedProfile - Last authenticated account's stopped profile; omission or signed-out targets inherit no plugins.
    */
   async prepare(scope: DesktopAccountScope, seedProfile?: string): Promise<void> {
-    if (scope.legacy) return
+    if (scope.legacy) {
+      migrateNovaFlowBundledPlugins(scope.profile)
+      return
+    }
     if (existsSync(scope.home)) {
       if ((await lstat(scope.home)).isSymbolicLink()) throw new Error('NovaFlow account isolation: account directory is a link')
       const marker: unknown = JSON.parse(await readFile(join(scope.home, 'novaflow-scope.json'), 'utf8'))
       if (typeof marker !== 'object' || marker === null || !('version' in marker) || marker.version !== 1
         || !('key' in marker) || marker.key !== scope.key) throw new Error('NovaFlow account isolation: invalid account directory')
+      migrateNovaFlowBundledPlugins(scope.profile)
       return
     }
     const parent = join(this.options.home, 'accounts')

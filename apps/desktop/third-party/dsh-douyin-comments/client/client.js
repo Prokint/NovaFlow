@@ -207,8 +207,70 @@ window.__ModuleLoader__.load({
       return 'light';
     }
 
+    /** v0.8.1：右侧面板与两个 iframe 共用的一套色板（跟网页里的 design tokens 对齐） */
+    function dshPalette(theme) {
+      if (theme === 'dark') {
+        return {
+          bg: '#0b0b0c',
+          surface: '#131315',
+          surface2: '#17171a',
+          line: '#27272b',
+          ink: '#f4f4f5',
+          muted: '#a3a3a8',
+          accent: '#e0a94a',
+        };
+      }
+      return {
+        bg: '#f5f6f8',
+        surface: '#ffffff',
+        surface2: '#f7f9fb',
+        line: '#e3e7ee',
+        ink: '#12161d',
+        muted: '#6b7280',
+        accent: '#b45309',
+      };
+    }
+
+    /** DSH 主题变化（设置里切换 / 跟随系统变化）时让面板重渲染 */
+    function useDshTheme() {
+      var pair = React.useState(dshTheme());
+      var setTheme = pair[1];
+      React.useEffect(function () {
+        var sync = function () { setTheme(dshTheme()); };
+        var media = null;
+        try {
+          media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+        } catch (e) { media = null; }
+        var onMedia = function () { sync(); };
+        if (media) {
+          if (media.addEventListener) media.addEventListener('change', onMedia);
+          else if (media.addListener) media.addListener(onMedia);
+        }
+        var observer = null;
+        try {
+          observer = new MutationObserver(sync);
+          observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme', 'theme', 'class'],
+          });
+        } catch (e) { observer = null; }
+        window.addEventListener('focus', sync);
+        sync();
+        return function () {
+          if (media) {
+            if (media.removeEventListener) media.removeEventListener('change', onMedia);
+            else if (media.removeListener) media.removeListener(onMedia);
+          }
+          if (observer) { try { observer.disconnect(); } catch (e) { /* 忽略 */ } }
+          window.removeEventListener('focus', sync);
+        };
+      }, []);
+      return pair[0];
+    }
+
     function ConsolePage() {
-      var theme = dshTheme();
+      var theme = useDshTheme();
+      var p = dshPalette(theme);
       return h('iframe', {
         src: CONSOLE_PATH + '/?embed=1&theme=' + theme,
         title: '抖音评论采集',
@@ -220,7 +282,7 @@ window.__ModuleLoader__.load({
           minHeight: 0,
           flex: 1,
           border: 0,
-          background: theme === 'dark' ? '#0b0b0c' : '#ffffff',
+          background: p.bg,
           colorScheme: theme,
         },
       });
@@ -245,6 +307,227 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /** ---- v0.6.0：评论词云（原 dsh-comment-viewer 合并进来） ----------------------------
+     * 「整合到一块」：只保留一个入口 / 一个右侧面板，面板内部用两个小 tab 切换
+     * 「采集」与「评论词云」。采集完成后自动切到词云子页并展开面板：
+     * 客户端每 3 秒轮询 /viewer/api/latest，发现「最新导出」换了新的文件路径，就
+     * setPanelMode('viewer') + bumpViewerGeneration()（词云 iframe 因为 src 带 gen 而重载，
+     * 并带 latest=1 载入刚采的那份）+ ctx.sidebarRight.openTab() 把面板展开。
+     */
+    var VIEWER_PATH = '/plugins/dsh-douyin-comments/viewer';
+    var VIEWER_POLL_MS = 3000;
+
+    var viewerGeneration = 0;
+    try {
+      // 计数持久化：gen 在「刷新页面/重启 DSH」后必须继续递增，否则词云页那边
+      // localStorage 里的 cw.latestGen 会误判成「同一个 gen」，采集完就不会自动换成最新导出。
+      viewerGeneration = Number(localStorage.getItem('cw.viewerGen')) || 0;
+    } catch (e) { viewerGeneration = 0; }
+    var viewerSubscribers = new Set();
+    function bumpViewerGeneration() {
+      viewerGeneration += 1;
+      try { localStorage.setItem('cw.viewerGen', String(viewerGeneration)); } catch (e) { /* 隐私模式：仅本次会话有效 */ }
+      viewerSubscribers.forEach(function (fn) {
+        try { fn(viewerGeneration); } catch (e) { /* 单个订阅出错不影响其它 */ }
+      });
+    }
+    function useViewerGeneration() {
+      var pair = React.useState(viewerGeneration);
+      var setGen = pair[1];
+      React.useEffect(function () {
+        var fn = function (g) { setGen(g); };
+        viewerSubscribers.add(fn);
+        setGen(viewerGeneration);
+        return function () { viewerSubscribers.delete(fn); };
+      }, []);
+      return pair[0];
+    }
+
+    function ViewerPage() {
+      var gen = useViewerGeneration();
+      var theme = useDshTheme();
+      var p = dshPalette(theme);
+      return h('iframe', {
+        src: VIEWER_PATH + '/?embed=1&latest=1&gen=' + gen + '&theme=' + theme,
+        title: '评论词云',
+        allow: 'clipboard-read; clipboard-write',
+        style: {
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          minHeight: 0,
+          flex: 1,
+          border: 0,
+          background: p.bg,
+          colorScheme: theme,
+        },
+      });
+    }
+
+    /** 面板子页状态：console = 采集控制台，viewer = 评论词云（同一面板内切换） */
+    var panelMode = 'console';
+    var panelModeSubscribers = new Set();
+    function setPanelMode(mode) {
+      if (mode !== 'console' && mode !== 'viewer') return;
+      if (mode === panelMode) return;
+      panelMode = mode;
+      panelModeSubscribers.forEach(function (fn) {
+        try { fn(panelMode); } catch (e) { /* 单个订阅出错不影响其它 */ }
+      });
+    }
+    function usePanelMode() {
+      var pair = React.useState(panelMode);
+      var setMode = pair[1];
+      React.useEffect(function () {
+        var fn = function (m) { setMode(m); };
+        panelModeSubscribers.add(fn);
+        setMode(panelMode);
+        return function () { panelModeSubscribers.delete(fn); };
+      }, []);
+      return pair[0];
+    }
+
+    /** v0.8.1：面板顶部子页 tab —— 下划线式（激活 = 2px 琥珀线 + ink 文字），不再用色块 */
+    function panelTabStyle(active, p) {
+      return {
+        appearance: 'none',
+        border: 0,
+        borderBottom: '2px solid ' + (active ? p.accent : 'transparent'),
+        background: 'transparent',
+        color: active ? p.ink : p.muted,
+        font: 'inherit',
+        fontSize: '12.5px',
+        fontWeight: active ? 600 : 500,
+        lineHeight: 1,
+        padding: '9px 10px 7px',
+        marginBottom: '-1px',
+        cursor: 'pointer',
+        transition: 'color .15s ease, border-color .15s ease',
+      };
+    }
+
+    /** 合并后的唯一面板：顶部「采集 / 评论词云」两个 tab，下面两个 iframe 交替显示。 */
+    function DouyinPanel() {
+      var mode = usePanelMode();
+      var theme = useDshTheme();
+      var p = dshPalette(theme);
+      var paneStyle = function (active) {
+        return { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, display: active ? 'block' : 'none' };
+      };
+      return h('div', {
+        style: {
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          minHeight: 0,
+          background: p.bg,
+          colorScheme: theme,
+        },
+      }, [
+        h('div', {
+          key: 'bar',
+          style: {
+            display: 'flex',
+            alignItems: 'stretch',
+            gap: '2px',
+            padding: '0 10px',
+            flex: '0 0 auto',
+            background: p.surface,
+            borderBottom: '1px solid ' + p.line,
+          },
+        }, [
+          h('button', {
+            key: 'console',
+            type: 'button',
+            onClick: function () { setPanelMode('console'); },
+            style: panelTabStyle(mode === 'console', p),
+          }, '采集'),
+          h('button', {
+            key: 'viewer',
+            type: 'button',
+            onClick: function () { setPanelMode('viewer'); },
+            style: panelTabStyle(mode === 'viewer', p),
+          }, '评论词云'),
+        ]),
+        h('div', { key: 'body', style: { position: 'relative', flex: 1, minHeight: 0, background: p.bg } }, [
+          h('div', { key: 'console-pane', style: paneStyle(mode === 'console') }, h(ConsolePage, { key: 'console' })),
+          h('div', { key: 'viewer-pane', style: paneStyle(mode === 'viewer') }, h(ViewerPage, { key: 'viewer' })),
+        ]),
+      ]);
+    }
+
+    function ViewerIcon() {
+      return h(
+        'svg',
+        {
+          width: 20,
+          height: 20,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.6,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': true,
+        },
+        h('circle', { cx: 8, cy: 9, r: 3.4 }),
+        h('circle', { cx: 15.5, cy: 7.5, r: 2.4 }),
+        h('circle', { cx: 12.5, cy: 14.5, r: 4.2 }),
+        h('circle', { cx: 18, cy: 15, r: 1.8 }),
+      );
+    }
+
+    /** 展开右侧栏的「抖音评论」面板（拿不到导航控制器就静默降级：左侧入口仍然能手动打开） */
+    function openPanelTab(ctx) {
+      var nav = null;
+      try { nav = ctx.sidebarRight; } catch (e) { nav = null; }
+      if (!nav && typeof ctx.get === 'function') {
+        try { nav = ctx.get('sidebarRight'); } catch (e2) { nav = null; }
+      }
+      if (nav && typeof nav.openTab === 'function') {
+        try { nav.openTab(CONSOLE_ID, { revealIfOpened: true }); return true; } catch (e3) {
+          try { console.warn('[douyin] 打开面板失败：' + ((e3 && e3.message) || e3)); } catch (e4) { /* ignore */ }
+        }
+      }
+      return false;
+    }
+
+    function startViewerWatcher(ctx) {
+      var lastPath = null;
+      var primed = false;
+      var stopped = false;
+      function poll() {
+        if (stopped) return;
+        fetch(VIEWER_PATH + '/api/latest', { cache: 'no-store' }).then(function (r) {
+          return r.ok ? r.json() : null;
+        }).then(function (data) {
+          var file = data && data.file;
+          if (!file || !file.path) return;
+          if (!primed) { primed = true; lastPath = String(file.path); return; }
+          if (String(file.path) === lastPath) return;
+          lastPath = String(file.path);
+          setPanelMode('viewer');
+          bumpViewerGeneration();
+          openPanelTab(ctx);
+        }).catch(function () { /* 服务端还没挂上 / 网络抖动：下一轮再试 */ });
+      }
+      poll();
+      var timer = setInterval(poll, VIEWER_POLL_MS);
+      // 后台标签页的定时器会被浏览器节流（可能拖到 1 分钟一次）：回到页面时补一次
+      try { document.addEventListener('visibilitychange', poll); } catch (e) { /* ignore */ }
+      try { window.addEventListener('focus', poll); } catch (e2) { /* ignore */ }
+      if (typeof ctx.effect === 'function') {
+        ctx.effect(function () {
+          return function () {
+            stopped = true;
+            clearInterval(timer);
+            try { document.removeEventListener('visibilitychange', poll); } catch (e) { /* ignore */ }
+            try { window.removeEventListener('focus', poll); } catch (e2) { /* ignore */ }
+          };
+        });
+      }
+    }
+
     exports.name = PACKAGE;
     /** 只用 slots；configForms / sidebarRightTabs 用嵌套 inject 拿，缺了也不至于让整个插件不挂载 */
     exports.inject = ['slots'];
@@ -260,35 +543,49 @@ window.__ModuleLoader__.load({
       });
 
       // 主区域 + 侧栏入口：和 dsh-comment-viewer 同一个 slot 模式。
+      //
+      // v0.5.63 修复「装好了但界面上什么都没变」：原来把 `sidebar.panellist`（左侧那条
+      // 「抖音采集」）注册在 `ctx.inject(['sidebarRightTabs'])` 的回调**里面**。不同 DSH 版本的
+      // sidebarRightTabs 注册协议并不相同（老版本是 guide 面板，新版本是资源预览类型
+      // `{id, kind, patterns, priority, canOpen, title}`），一旦 `register` 抛错，整个回调中断，
+      // 后面那条左侧入口就永远注册不上 —— 表现就是「服务端挂载成功、界面上什么都没有」。
+      // 现在左侧入口独立注册（只依赖 slots），右侧标签尽力而为、失败不影响入口。
       ctx.slots.inject('main', function () {
-        return ctx.slots.register({ name: 'main', key: CONSOLE_ID }, ConsolePage);
+        return ctx.slots.register({ name: 'main', key: CONSOLE_ID }, DouyinPanel);
       });
-      ctx.inject(['sidebarRightTabs'], function (scoped) {
-        scoped.effect(function () {
-          return scoped.sidebarRightTabs.register({
-            id: CONSOLE_ID,
-            kind: CONSOLE_ID,
-            title: function () { return '抖音采集'; },
-            keepMounted: true,
-            guide: [{
-              id: 'douyin-collect',
-              order: 42,
-              title: function () { return '抖音采集'; },
-              description: function () { return '输入视频链接，在 DSH 里开始/取消采集并下载结果'; },
-              icon: ConsoleIcon,
-            }],
-          });
-        });
-        scoped.slots.inject('sidebar.right.pane.tab', function () {
-          return scoped.slots.register({ name: 'sidebar.right.pane.tab', key: CONSOLE_ID }, ConsolePage);
-        });
-        scoped.slots.inject('sidebar.panellist', function () {
-          return scoped.slots.register(
-            { name: 'sidebar.panellist', id: CONSOLE_ID, order: 23, label: function () { return '抖音采集'; } },
-            ConsoleIcon,
-          );
-        });
+      ctx.slots.inject('sidebar.right.pane.tab', function () {
+        return ctx.slots.register({ name: 'sidebar.right.pane.tab', key: CONSOLE_ID }, DouyinPanel);
       });
+      ctx.slots.inject('sidebar.panellist', function () {
+        return ctx.slots.register(
+          { name: 'sidebar.panellist', id: CONSOLE_ID, order: 23, label: function () { return '抖音评论'; } },
+          ConsoleIcon,
+        );
+      });
+      // 右侧栏 tab 类型：注册失败只影响「采集完自动展开」，左侧入口照样能点（DSH 各版本协议不同）
+      try {
+        ctx.inject(['sidebarRightTabs'], function (scoped) {
+          try {
+            scoped.sidebarRightTabs.register({
+              id: CONSOLE_ID,
+              kind: CONSOLE_ID,
+              title: function () { return '抖音评论'; },
+              keepMounted: true,
+              guide: [
+                {
+                  id: CONSOLE_ID,
+                  order: 23,
+                  title: function () { return '抖音评论'; },
+                  description: function () { return '采集 + 交互词云 + 评论表（采集完成自动切到词云）'; },
+                  icon: ConsoleIcon,
+                },
+              ],
+            });
+          } catch (e3) { /* 同名 id 已注册：忽略 */ }
+        });
+      } catch (e4) { /* sidebarRightTabs 服务不可用 */ }
+      // 采集完成检测（工具调用与控制台两条路径都会落盘新 JSON，这里只看磁盘上最新那份）
+      startViewerWatcher(ctx);
     };
     return module.exports;
   },

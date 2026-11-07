@@ -4,15 +4,18 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.5.62",
+      "version": "0.8.6",
       "upstreamPath": "dsh-douyin-comments",
-      "declaredLicense": null
+      "declaredLicense": null,
+      "branch": "novaflow",
+      "commit": "60d5b847e7cab279400c8f462f037f1643289351"
     },
     {
       "name": "dsh-comment-viewer",
       "version": "0.2.16",
       "upstreamPath": "dsh-comment-viewer",
-      "declaredLicense": "MIT"
+      "declaredLicense": "MIT",
+      "compatibilityOnly": true
     },
     {
       "name": "dsh-skill-explorer",
@@ -28,6 +31,8 @@
     "Preserve upstream README as UPSTREAM-README.txt for third-party attribution.",
     "Add distribution notices.",
     "Use a white comment-viewer palette and iframe.",
-    "dsh-skill-explorer is a Prokint-maintained fork: renamed, rebuilt as a standalone package, and stripped of anonymous install telemetry."
+    "dsh-skill-explorer is a Prokint-maintained fork: renamed, rebuilt as a standalone package, and stripped of anonymous install telemetry.",
+    "dsh-douyin-comments 0.8.6 comes from the private novaflow branch and merges the former dsh-comment-viewer into one panel.",
+    "dsh-comment-viewer 0.2.16 is retained only as a compatibility package for profiles created before the merge; new profiles do not enable it."
   ]
 }

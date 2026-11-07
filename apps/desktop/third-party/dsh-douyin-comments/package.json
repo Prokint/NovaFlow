@@ -1,31 +1,40 @@
 {
   "name": "dsh-douyin-comments",
-  "version": "0.5.62",
-  "description": "DeepSeek Harness tool plugin: collect Douyin video comments with a bundled Chrome extension (registers the douyin_comments tool)",
+  "version": "0.8.6",
+  "description": "DeepSeek Harness / NovaFlow plugin: collect Douyin video comments with a bundled Chrome extension (douyin_comments tool) + the merged comment wordcloud viewer (interactive wordcloud + comment table + AI digest + region filter + favorite customers (also listed / searchable / exportable on the collector page) + shop-accounts account reuse (Chrome/ego) + AES-encrypted collector + unified UI (shared design tokens, dark/light, manual theme switch, compact region distribution, terse one-line copy with details moved to tooltips)) that opens automatically after a collection",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./collector": "./collector.mjs",
     "./console": "./console.mjs",
+    "./viewer": "./viewer.mjs",
     "./client": "./client/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "index.js",
+    "shop-accounts-bridge.mjs",
     "collector.mjs",
+    "core.enc",
+    "extension.enc",
     "console.mjs",
+    "viewer.mjs",
     "app",
+    "viewer",
     "client",
     "cordis.patch.yml",
-    "UPSTREAM-README.txt",
-    "extension",
+    "README.md",
     "NOTICE.txt"
   ],
   "scripts": {
     "sync-ext": "node sync-extension.mjs",
+    "build-encrypted": "node build-encrypted.mjs",
     "verify": "node verify-tool.mjs",
-    "verify-console": "node verify-console.mjs"
+    "verify-console": "node verify-console.mjs",
+    "verify-encrypted": "node verify-encrypted.mjs",
+    "verify-merged": "node verify-merged.mjs",
+    "verify-client": "node verify-client.mjs"
   },
   "dsh": {
     "manifestVersion": 1,

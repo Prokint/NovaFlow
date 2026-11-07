@@ -90,7 +90,7 @@ it('copies installed plugin payloads without activation, old settings, credentia
 
 it('enables shipped bundles for a new authenticated account while inherited user plugins and signed-out profiles stay disabled', async () => {
   const { options, legacy } = await fixture()
-  const bundledPlugins = ['dsh-douyin-comments', 'dsh-comment-viewer', 'dsh-skill-explorer']
+  const bundledPlugins = ['dsh-douyin-comments', 'dsh-skill-explorer']
   const scopes = new DesktopAccountScopes({ ...options, bundledPlugins })
   const account = scopes.resolve(b)
   await scopes.prepare(account, legacy)
@@ -106,7 +106,7 @@ it('enables shipped bundles for a new authenticated account while inherited user
   await writeFile(filename, JSON.stringify(manifest))
   await scopes.prepare(account, legacy)
   expect(JSON.parse(await readFile(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles',
-    ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments', 'dsh-comment-viewer'])
+    ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments'])
   const signedOut = scopes.resolve(null)
   await scopes.prepare(signedOut, legacy)
   expect(JSON.parse(await readFile(join(signedOut.profile, 'package.json'), 'utf8')))
