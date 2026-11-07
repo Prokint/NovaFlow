@@ -1,0 +1,17 @@
+NovaFlow Skill Explorer (dsh-skill-explorer)
+=============================================
+
+This package is a modified fork of the dsh-skill-explorer package from
+https://github.com/zhu1090093659/dsh-web.
+
+Upstream copyright (c) 2026 zhu1090093659. The upstream package is licensed
+under the BSD 3-Clause License; see LICENSE.
+
+Modifications Copyright 2026 Prokint. Changes include:
+  - renamed the package from @linxin666/dsh-client-ui-skill-explorer to
+    dsh-skill-explorer;
+  - removed the anonymous install heartbeat and all dsh-market.com telemetry;
+  - adapted the package for NovaFlow's bundled-plugin distribution.
+
+Files under shared/ are derived from the dsh-web repository root, which is
+licensed under the Apache License, Version 2.0; see LICENSES/Apache-2.0.txt.

@@ -13,11 +13,21 @@
       "version": "0.2.16",
       "upstreamPath": "dsh-comment-viewer",
       "declaredLicense": "MIT"
+    },
+    {
+      "name": "dsh-skill-explorer",
+      "version": "0.1.0",
+      "upstreamPath": "packages/dsh-skill-explorer",
+      "declaredLicense": "BSD-3-Clause",
+      "repository": "https://github.com/Prokint/novaflow-skill-explorer",
+      "upstreamRepository": "https://github.com/zhu1090093659/dsh-web",
+      "upstreamCommit": "d9058cd0f635c91413962ffc43b1b0f728e20a12"
     }
   ],
   "localChanges": [
     "Preserve upstream README as UPSTREAM-README.txt for third-party attribution.",
     "Add distribution notices.",
-    "Use a white comment-viewer palette and iframe."
+    "Use a white comment-viewer palette and iframe.",
+    "dsh-skill-explorer is a Prokint-maintained fork: renamed, rebuilt as a standalone package, and stripped of anonymous install telemetry."
   ]
 }

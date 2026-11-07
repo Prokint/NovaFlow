@@ -21,18 +21,26 @@ function fixture() {
   return root
 }
 
-it('stages both reviewed bundles and their dependency manifests without running plugin code', () => {
+it('stages every reviewed bundle and its dependency manifest without running plugin code', () => {
   const root = fixture()
   stageNovaFlowBundledPlugins(sources, root)
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as TestManifest
   expect(manifest.dependencies).toEqual({ 'existing-core': 'file:./core.tgz',
     'dsh-douyin-comments': 'file:./third-party/dsh-douyin-comments',
-    'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer' })
+    'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer',
+    'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer' })
   for (const plugin of NOVAFLOW_BUNDLED_PLUGINS) {
     const staged = join(root, 'third-party', plugin.name)
     expect(JSON.parse(readFileSync(join(staged, 'package.json'), 'utf8'))).toMatchObject(plugin)
     expect(readFileSync(join(staged, 'cordis.patch.yml'), 'utf8')).toContain(plugin.name)
-    expect(readFileSync(join(staged, 'NOTICE.txt'), 'utf8')).toContain('monagisa/douyin-ai-collector')
+    const notice = readFileSync(join(staged, 'NOTICE.txt'), 'utf8')
+    if (plugin.name === 'dsh-skill-explorer') {
+      expect(notice).toContain('zhu1090093659/dsh-web')
+      expect(notice).toContain('telemetry')
+      expect(readFileSync(join(staged, 'lib/client.js'), 'utf8')).not.toMatch(/dsh-market\.com|reportDailyHeartbeat|telemetry-visitor/)
+    } else {
+      expect(notice).toContain('monagisa/douyin-ai-collector')
+    }
   }
   expect(JSON.parse(readFileSync(join(root, 'third-party/dsh-douyin-comments/package.json'), 'utf8')))
     .toHaveProperty('dependencies.playwright-core', '^1.63.0')

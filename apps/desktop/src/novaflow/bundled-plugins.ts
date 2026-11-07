@@ -6,6 +6,7 @@ import { join } from 'node:path'
 export const NOVAFLOW_BUNDLED_PLUGINS = [
   { name: 'dsh-douyin-comments', version: '0.5.62' },
   { name: 'dsh-comment-viewer', version: '0.2.16' },
+  { name: 'dsh-skill-explorer', version: '0.1.0' },
 ] as const
 
 /** Immutable runtime catalog; absence identifies older builds without shipped third-party bundles. */
