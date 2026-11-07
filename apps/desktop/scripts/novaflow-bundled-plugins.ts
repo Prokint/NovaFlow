@@ -1,7 +1,7 @@
 /** Materialize reviewed third-party plugins through the desktop production dependency install. */
 import { cpSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { NOVAFLOW_BUNDLED_PLUGINS, NOVAFLOW_BUNDLED_PLUGINS_FILE, NOVAFLOW_COMPAT_PLUGINS } from '../src/novaflow/bundled-plugins.ts'
+import { NOVAFLOW_BUNDLED_PLUGINS, NOVAFLOW_BUNDLED_PLUGINS_FILE, NOVAFLOW_COMPAT_PLUGINS, NOVAFLOW_OPTIONAL_PLUGINS } from '../src/novaflow/bundled-plugins.ts'
 
 function addDependencies(filename: string, dependencies: Readonly<Record<string, string>>): void {
   const manifest = JSON.parse(readFileSync(filename, 'utf8')) as { dependencies?: Record<string, string> }
@@ -16,7 +16,7 @@ function addDependencies(filename: string, dependencies: Readonly<Record<string,
  */
 export function stageNovaFlowBundledPlugins(sourceDirectory: string, projectDirectory: string): void {
   const dependencies: Record<string, string> = {}
-  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const source = join(sourceDirectory, plugin.name)
     const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown }
     if (manifest.name !== plugin.name || manifest.version !== plugin.version) {
@@ -35,7 +35,7 @@ export function stageNovaFlowBundledPlugins(sourceDirectory: string, projectDire
  */
 export function exposeNovaFlowBundledPlugins(runtimeDirectory: string): Record<string, string> {
   const dependencies: Record<string, string> = {}
-  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const manifest = JSON.parse(readFileSync(join(runtimeDirectory, 'node_modules', plugin.name, 'package.json'), 'utf8')) as {
       name?: unknown
       version?: unknown

@@ -25,7 +25,7 @@ import {
   getDshRuntimeVersion, ResolutionRestartRequired,
   assertBundlePlatform, UnsupportedBundlePlatformError,
 } from '@deepseek-ai/dsh-app-boot'
-import { OPTIONAL_BUNDLES, OFFICIAL_ON_DEMAND_CATALOG, PROTECTED_PLUGINS } from '@deepseek-ai/dsh-official-bundles'
+import { NOVAFLOW_OPTIONAL_BUNDLES, OPTIONAL_BUNDLES, OFFICIAL_ON_DEMAND_CATALOG, PROTECTED_PLUGINS } from '@deepseek-ai/dsh-official-bundles'
 import type {} from '@deepseek-ai/dsh-hmr'
 import type { ProfileContext, ProfileManifest } from '@deepseek-ai/dsh-app-boot'
 import { bundleManifest, readProfileRegistry, registryArguments, runProfilePnpm, saveManifest, viewProfilePackage } from './operations.ts'
@@ -504,7 +504,7 @@ export class PluginManager extends TypertRemoteService {
     const runtimeVersion = getDshRuntimeVersion()
     for (const name of names) {
       const installed = dependencies.includes(name)
-      const optional = OPTIONAL_BUNDLES.includes(name)
+      const optional = OPTIONAL_BUNDLES.includes(name) || NOVAFLOW_OPTIONAL_BUNDLES.includes(name)
       const enabled = selected.includes(name)
       const shipped = Object.hasOwn(installation.dependencies ?? {}, name)
       const offered = catalog.get(name)

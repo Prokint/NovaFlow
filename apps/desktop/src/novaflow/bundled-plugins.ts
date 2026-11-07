@@ -2,10 +2,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Reviewed upstream package identities enabled for new accounts. */
+/** Built-in bundles enabled for every account, without a plugin-page switch. */
 export const NOVAFLOW_BUNDLED_PLUGINS = [
-  { name: 'dsh-douyin-comments', version: '0.8.6' },
   { name: 'dsh-skill-explorer', version: '0.1.0' },
+] as const
+
+/** Shipped bundles installed with NovaFlow but switched off until the user enables them. */
+export const NOVAFLOW_OPTIONAL_PLUGINS = [
+  { name: 'dsh-douyin-comments', version: '0.8.6' },
 ] as const
 
 /** Installed only so profiles created before the merged Douyin bundle still load their old bundles. */
@@ -23,8 +27,9 @@ const LEGACY_VIEWER_BUNDLE = 'dsh-comment-viewer'
 const MERGED_DOUYIN_BUNDLE = 'dsh-douyin-comments'
 
 /**
- * Drop the standalone viewer bundle from a profile whose collector bundle already
- * carries the merged viewer. Existing profiles keep every other activation choice.
+ * Bring an existing profile onto the current shipped defaults: built-in bundles are always
+ * enabled, while a merged Douyin bundle removes the redundant standalone viewer. The optional
+ * Douyin bundle is deliberately not selected here; the plugin page owns that choice.
  * @param profileDirectory - Profile whose package.json carries the bundle list.
  */
 export function migrateNovaFlowBundledPlugins(profileDirectory: string): void {
@@ -37,15 +42,24 @@ export function migrateNovaFlowBundledPlugins(profileDirectory: string): void {
     || typeof value.dsh.profile !== 'object' || value.dsh.profile === null || !('bundles' in value.dsh.profile)
     || !Array.isArray(value.dsh.profile.bundles)) return
   const bundles = value.dsh.profile.bundles
-  if (!bundles.includes(MERGED_DOUYIN_BUNDLE) || !bundles.includes(LEGACY_VIEWER_BUNDLE)) return
-  value.dsh.profile.bundles = bundles.filter(name => name !== LEGACY_VIEWER_BUNDLE)
-  writeFileSync(filename, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
+  let changed = false
+  for (const plugin of NOVAFLOW_BUNDLED_PLUGINS) {
+    if (!bundles.includes(plugin.name)) {
+      bundles.push(plugin.name)
+      changed = true
+    }
+  }
+  if (bundles.includes(MERGED_DOUYIN_BUNDLE) && bundles.includes(LEGACY_VIEWER_BUNDLE)) {
+    value.dsh.profile.bundles = bundles.filter(name => name !== LEGACY_VIEWER_BUNDLE)
+    changed = true
+  }
+  if (changed) writeFileSync(filename, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
 }
 
 /**
  * Read the shipped catalog without importing third-party code.
  * @param runtimeDirectory - Verified desktop runtime directory.
- * @returns Initial bundle names, or an empty list for builds without the catalog.
+ * @returns Built-in bundle names, or an empty list for builds without the catalog.
  * @throws When an existing catalog does not identify the reviewed packages.
  */
 export function readNovaFlowBundledPlugins(runtimeDirectory: string): readonly string[] {

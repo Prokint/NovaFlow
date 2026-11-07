@@ -8,7 +8,8 @@
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "novaflow",
-      "commit": "60d5b847e7cab279400c8f462f037f1643289351"
+      "commit": "60d5b847e7cab279400c8f462f037f1643289351",
+      "optional": true
     },
     {
       "name": "dsh-comment-viewer",
