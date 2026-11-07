@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it, onTestFinished } from 'vitest'
 import { loadProfileDirectory } from '@deepseek-ai/dsh-app-boot'
+import { NOVAFLOW_OPTIONAL_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
 import { exposeNovaFlowBundledPlugins, stageNovaFlowBundledPlugins } from '../scripts/novaflow-bundled-plugins.ts'
 import {
   migrateNovaFlowBundledPlugins,
   NOVAFLOW_BUNDLED_PLUGINS,
   NOVAFLOW_BUNDLED_PLUGINS_FILE,
   NOVAFLOW_COMPAT_PLUGINS,
+  NOVAFLOW_OPTIONAL_PLUGINS,
   readNovaFlowBundledPlugins,
 } from '../src/novaflow/bundled-plugins.ts'
 import { createPluginProfile } from '../src/project-manager.ts'
@@ -27,6 +29,11 @@ function fixture() {
   return root
 }
 
+it('registers the optional Douyin bundle and keeps the built-in Skill Center out of the optional list', () => {
+  expect(NOVAFLOW_OPTIONAL_BUNDLES).toContain('dsh-douyin-comments')
+  expect(NOVAFLOW_OPTIONAL_BUNDLES).not.toContain('dsh-skill-explorer')
+})
+
 it('stages every reviewed bundle and compatibility package without running plugin code', () => {
   const root = fixture()
   stageNovaFlowBundledPlugins(sources, root)
@@ -35,7 +42,7 @@ it('stages every reviewed bundle and compatibility package without running plugi
     'dsh-douyin-comments': 'file:./third-party/dsh-douyin-comments',
     'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer',
     'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer' })
-  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const staged = join(root, 'third-party', plugin.name)
     expect(JSON.parse(readFileSync(join(staged, 'package.json'), 'utf8'))).toMatchObject(plugin)
     expect(readFileSync(join(staged, 'cordis.patch.yml'), 'utf8')).toContain(plugin.name)
@@ -67,13 +74,16 @@ it('exposes shipped bundles through the installation and preserves a user disabl
   const anchor = join(runtime, 'node_modules/@deepseek-ai/dsh/package.json')
   mkdirSync(resolve(anchor, '..'), { recursive: true })
   writeFileSync(anchor, JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.3', dependencies: {} }))
-  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+  for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     cpSync(join(sources, plugin.name), join(runtime, 'node_modules', plugin.name), { recursive: true })
   }
-  const expected = Object.fromEntries([...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS].map(p => [p.name, p.version]))
+  const expected = Object.fromEntries([
+    ...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS,
+  ].map(p => [p.name, p.version]))
   expect(exposeNovaFlowBundledPlugins(runtime)).toEqual(expected)
   const names = readNovaFlowBundledPlugins(runtime)
   expect(names).toEqual(NOVAFLOW_BUNDLED_PLUGINS.map(plugin => plugin.name))
+  expect(names).not.toContain('dsh-douyin-comments')
   const profile = join(root, 'profile')
   createPluginProfile(profile, names)
   const loaded = loadProfileDirectory('NovaFlow', profile, anchor)
@@ -87,12 +97,13 @@ it('exposes shipped bundles through the installation and preserves a user disabl
   expect(readFileSync(filename, 'utf8')).toBe(before)
   const active = loadProfileDirectory('NovaFlow', profile, anchor).layers.map(layer => layer.packageName)
   expect(active).not.toContain('dsh-skill-explorer')
-  expect(active).toContain('dsh-douyin-comments')
+  expect(active).not.toContain('dsh-douyin-comments')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-skill-explorer', '0.1.0')
+  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-douyin-comments', '0.8.6')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-comment-viewer', '0.2.16')
 })
 
-it('drops the legacy standalone viewer bundle when the merged collector bundle is enabled', () => {
+it('applies built-in defaults and drops the legacy standalone viewer when the merged collector is enabled', () => {
   const root = fixture()
   const profile = join(root, 'profile')
   mkdirSync(profile)
@@ -100,19 +111,25 @@ it('drops the legacy standalone viewer bundle when the merged collector bundle i
   writeFileSync(filename, JSON.stringify({
     name: 'profile', dsh: { profile: { bundles: [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app',
-      'dsh-douyin-comments', 'dsh-comment-viewer', 'dsh-skill-explorer',
+      'dsh-douyin-comments', 'dsh-comment-viewer',
     ] } },
   }))
   migrateNovaFlowBundledPlugins(profile)
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
     '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments', 'dsh-skill-explorer',
   ])
-  // A profile that only enabled the old viewer keeps it.
+  // A profile that only enabled the old viewer keeps it, and still receives the built-in bundle.
   writeFileSync(filename, JSON.stringify({
     name: 'profile', dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-comment-viewer'] } },
   }))
   migrateNovaFlowBundledPlugins(profile)
-  expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', ['@deepseek-ai/dsh-base', 'dsh-comment-viewer'])
+  expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer',
+  ])
+  // The optional Douyin bundle is not added by the migration.
+  expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer',
+  ])
 })
 
 it('leaves older runtimes unchanged and rejects an invalid shipped catalog or changed pinned source', () => {

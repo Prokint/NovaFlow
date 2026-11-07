@@ -21,7 +21,7 @@ import {
   type IconProps, type StateDotState, type TerminalBlockLabels,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import { EXTENSION_BUNDLES, HIDDEN_BUNDLES, MORE_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
+import { EXTENSION_BUNDLES, HIDDEN_BUNDLES, MORE_BUNDLES, NOVAFLOW_OPTIONAL_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
 import type { createNavigationStore } from './navigation-store.ts'
 import type { PluginHeaderLayoutFace } from './header-scroll.ts'
 import { rowConfigKey, type OfficialItem } from './config-ledger.ts'
@@ -1577,10 +1577,12 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
     && (pkg.installed || pkg.official || pkg.error !== undefined))
   const mine = listed.filter(pkg => !pkg.official)
   const official = listed.filter(pkg => pkg.official)
+  const shipped = official.filter(pkg => NOVAFLOW_OPTIONAL_BUNDLES.includes(pkg.name))
+  const experimental = official.filter(pkg => !NOVAFLOW_OPTIONAL_BUNDLES.includes(pkg.name))
   // Both lists read one order over the eligible bundles: the main list holds the always-held ones plus the held-back
   // ones the profile enabled, and the More list holds the eligible ones, so enabling a bundle from the More list pins it
   // to the main list without moving it among its neighbours there.
-  const ordered = orderOptionalBundles(official)
+  const ordered = orderOptionalBundles(experimental)
   const pinned = new Set(official.filter(pinnedToMainList).map(pkg => pkg.name))
   const extensions = ordered.filter(pkg => pinned.has(pkg.name))
   const more = ordered
@@ -1638,7 +1640,7 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
   const basicCards = ledger.items.map(item => (
     <ItemCard key={`item:${item.id}`} item={item} t={t} renderSlot={renderSlot} onOpen={() => { setView({ kind: 'item', id: item.id }) }} />
   ))
-  const renderGroup = (id: 'basic' | 'extensions' | 'bundles', heading: string, cards: readonly ReactNode[]): ReactNode => {
+  const renderGroup = (id: 'basic' | 'shipped' | 'extensions' | 'bundles', heading: string, cards: readonly ReactNode[]): ReactNode => {
     const offersMore = id === 'extensions' && more.length > 0
     if (cards.length === 0 && !offersMore) return null
     return (
@@ -1829,6 +1831,7 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
                 ) : (
                   <>
                     {renderGroup('basic', t('basicTitle'), basicCards)}
+                    {renderGroup('shipped', t('shippedTitle'), shipped.map(packageCard))}
                     {renderGroup('extensions', t('extensionsTitle'), extensions.map(packageCard))}
                     {renderGroup('bundles', t('bundlesTitle'), mine.map(packageCard))}
                   </>

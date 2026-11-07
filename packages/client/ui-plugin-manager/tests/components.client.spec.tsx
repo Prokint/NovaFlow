@@ -785,6 +785,18 @@ describe('PluginManagerPage', () => {
     expect(document.querySelector('[data-plugin-count]')).toBeNull()
   })
 
+  it('groups NovaFlow shipped optional bundles under the live switch', () => {
+    const name = 'dsh-douyin-comments'
+    renderTab({ packages: [pkg({
+      name, official: true, optional: true, installed: false, availability: 'installation',
+      removable: false, enabled: false,
+    })] })
+    const group = document.querySelector('[data-plugin-group="shipped"]') as HTMLElement
+    expect(within(group).getByRole('heading', { name: en.shippedTitle, level: 3 })).toBeTruthy()
+    expect(within(group).getAllByRole('listitem').map(card => card.getAttribute('data-plugin-package'))).toEqual([name])
+    expect(within(group).getByRole('switch', { name: en.enableToggle.replace('{name}', name) })).toBeTruthy()
+  })
+
   it.each([false, true])('hides persistent terminals from both lists and direct navigation without changing enabled=%s', (enabled) => {
     const name = '@deepseek-ai/dsh-experimental-terminal-bundle'
     const b = renderTab({ packages: [

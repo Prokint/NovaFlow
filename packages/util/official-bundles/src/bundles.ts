@@ -70,6 +70,11 @@ export const OPTIONAL_BUNDLES: readonly string[] = [
   '@deepseek-ai/dsh-experimental-forge-bundle',
 ]
 
+/** NovaFlow launcher bundles shipped installed but switched off for the user to turn on. */
+export const NOVAFLOW_OPTIONAL_BUNDLES: readonly string[] = [
+  'dsh-douyin-comments',
+]
+
 /** Public DSH release members available through the ordinary on-demand bundle installer. */
 export const ON_DEMAND_BUNDLES: readonly string[] = [
   '@deepseek-ai/dsh-subagent-claude-code',
