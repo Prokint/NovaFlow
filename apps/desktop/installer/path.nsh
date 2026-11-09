@@ -153,6 +153,20 @@ Function InstallerPreflight
         Return
     ${EndIf}
     System::Call 'kernel32::DeleteFileW(w r3)'
+    ; Security policy can allow an ordinary temporary file while rejecting the executable payload the
+    ; installer writes next, so the probe repeats with a .dll name in the same directory.
+    ${GetFileName} $r3 $4
+    StrCpy $4 $4 -4
+    StrCpy $5 "$2\$4.dll"
+    ClearErrors
+    FileOpen $4 $5 w
+    ${If} ${Errors}
+        StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE)"
+        Return
+    ${EndIf}
+    FileWrite $4 "probe"
+    FileClose $4
+    Delete "$5"
     System::Call 'kernel32::GetDiskFreeSpaceExW(w r2, *l .r0, p 0, p 0) i.r1'
     ${If} $1 == 0
         StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE)"

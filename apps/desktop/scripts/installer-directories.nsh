@@ -71,7 +71,9 @@ Var dshRecoveryStopped
   !endif
 !macroend
 
-!macro dshExtractPayload FILE
+; Security software can hold a payload file it just inspected; the retry below recovers from that without
+; hiding a genuine permission, space or archive failure, which fails again and reports.
+!macro dshExtractAttempt FILE
   !ifmacrodef customInstallerExtract
     !insertmacro customInstallerExtract "${FILE}"
   !else
@@ -79,6 +81,14 @@ Var dshRecoveryStopped
     Pop $R0
     Pop $R1
   !endif
+!macroend
+
+!macro dshExtractPayload FILE
+  !insertmacro dshExtractAttempt "${FILE}"
+  ${If} $R0 != 0
+    Sleep 1500
+    !insertmacro dshExtractAttempt "${FILE}"
+  ${EndIf}
   ${If} $R0 != 0
     DetailPrint $R1
     Call dshRollbackDirectories

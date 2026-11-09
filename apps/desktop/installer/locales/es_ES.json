@@ -25,7 +25,7 @@
     "INSTALLER_DISK_SPACE": "No hay suficiente espacio libre en disco. Elija otra ubicación.",
     "INSTALLER_PER_USER": "Este instalador solo admite el usuario actual. Primero desinstale la instalación existente para todos los usuarios.",
     "INSTALLER_EXTRACT_FAILED": "No se pudieron extraer los archivos de la aplicación.",
-    "INSTALLER_EXTRACT_HINT": "Es posible que el software de seguridad haya bloqueado un archivo o que el disco esté lleno. Cierra este instalador y vuelve a intentarlo. Si sigue fallando, envíenos los detalles del error a continuación.",
+    "INSTALLER_EXTRACT_HINT": "Es posible que el software de seguridad haya bloqueado un archivo o que el disco esté lleno. Pausa la protección antivirus durante esta instalación o añade el instalador y la carpeta de destino a sus exclusiones, cierra este instalador y vuelve a intentarlo. El informe siguiente indica el archivo que falló; cópialo si necesitas ayuda.",
     "INSTALLER_EXTRACT_COPY": "Copiar detalles del error",
     "INSTALLER_EXTRACT_EXPAND": "Mostrar detalles",
     "INSTALLER_EXTRACT_COLLAPSE": "Ocultar detalles",

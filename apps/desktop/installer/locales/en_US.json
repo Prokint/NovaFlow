@@ -25,7 +25,7 @@
     "INSTALLER_DISK_SPACE": "There is not enough free disk space. Choose another location.",
     "INSTALLER_PER_USER": "This installer supports the current user only. Uninstall the existing all-users installation first.",
     "INSTALLER_EXTRACT_FAILED": "The application files could not be extracted.",
-    "INSTALLER_EXTRACT_HINT": "Security software may have blocked a file, or the disk may be full. Close this installer and try again. If it keeps failing, send us the error details below.",
+    "INSTALLER_EXTRACT_HINT": "Security software may have blocked a file, or the disk may be full. Pause antivirus protection for this install or add the installer and the target folder to its exclusions, then close this installer and try again. The report below names the file that failed; copy it if you need help.",
     "INSTALLER_EXTRACT_COPY": "Copy error details",
     "INSTALLER_EXTRACT_EXPAND": "Show details",
     "INSTALLER_EXTRACT_COLLAPSE": "Hide details",

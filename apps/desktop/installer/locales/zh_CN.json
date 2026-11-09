@@ -25,7 +25,7 @@
     "INSTALLER_DISK_SPACE": "此磁盘的可用空间不足，请选择其他位置。",
     "INSTALLER_PER_USER": "此安装程序仅支持当前用户。请先卸载已有的所有用户安装版本。",
     "INSTALLER_EXTRACT_FAILED": "无法解压应用程序文件。",
-    "INSTALLER_EXTRACT_HINT": "可能是安全软件拦截了文件，或磁盘空间不足。请关闭安装程序后重试；如仍然失败，请将下方错误信息发送给我们。",
+    "INSTALLER_EXTRACT_HINT": "可能是安全软件拦截了文件，或磁盘空间不足。请暂时暂停杀毒软件防护，或把安装包和目标文件夹加入其排除项，然后关闭安装程序重试。下方报告会指出写入失败的文件，需要帮助时可复制它。",
     "INSTALLER_EXTRACT_COPY": "复制错误信息",
     "INSTALLER_EXTRACT_EXPAND": "显示详情",
     "INSTALLER_EXTRACT_COLLAPSE": "隐藏详情",
