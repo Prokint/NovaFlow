@@ -26,8 +26,9 @@ it('retries a failed extraction once before reporting it', () => {
 })
 
 it.each(['en_US', 'zh_CN'])('names security software and exclusions in %s', (locale) => {
-  const [resource] = readInstallerLocales().filter(candidate => candidate.id === locale)
-  const hint = resource.strings.INSTALLER_EXTRACT_HINT
+  const resource = readInstallerLocales().find(candidate => candidate.id === locale)
+  expect(resource, `${locale} installer locale is missing`).toBeDefined()
+  const hint = resource!.strings.INSTALLER_EXTRACT_HINT!
   expect(hint.toLowerCase()).toMatch(/antivirus|antivírus|杀毒|ウイルス/)
   expect(hint.toLowerCase()).toMatch(/exclusion|排除|除外/)
 })

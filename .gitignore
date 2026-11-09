@@ -5,6 +5,10 @@ apps/desktop/.env.macos
 apps/desktop/*.p12
 node_modules/
 lib/
+# Vendored third-party plugins ship their built entry points; only their artifacts are tracked.
+!apps/desktop/third-party/*/lib/
+!apps/desktop/third-party/*/lib/*.js
+apps/desktop/third-party/*/lib/*.js.map
 *.tsbuildinfo
 pnpm-debug.log
 .pnpm-store/
