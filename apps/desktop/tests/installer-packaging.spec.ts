@@ -21,9 +21,9 @@ describe('installer preparation preserves application dependencies', () => {
       DSH_DESKTOP_MACOS_SIGNING_IDENTITY: 'Example Company (TEAMID1234)', DSH_DESKTOP_MACOS_TEAM_ID: 'TEAMID1234', APPLE_KEYCHAIN_PROFILE: 'installer-test',
       DSH_DESKTOP_LINUX_DEVELOPMENT_APPIMAGE: '1', DSH_DESKTOP_TARGET_PLATFORM: platform }, platform, 'x64')
     expect(config).toMatchObject({ productName: 'NovaFlow', protocols: [], extraMetadata: { name: 'novaflow' } })
-    // Development AppImages stay out of the feed; installers read this repository's GitHub Releases.
+    // Development AppImages stay out of the feed; installers read the self-hosted static feed.
     expect(config.publish).toEqual(platform === 'linux' ? null
-      : [{ provider: 'github', owner: 'Prokint', repo: 'NovaFlow', releaseType: 'release' }])
+      : [{ provider: 'generic', url: 'https://updates.lanjiaotrade.com/' }])
     expect(config.artifactName.startsWith('novaflow-')).toBe(true)
     expect(() => createElectronBuilderConfig({ DSH_DESKTOP_APP_ID: 'com.deepseek.harness', DSH_DESKTOP_TARGET_PLATFORM: platform }, platform, 'x64'))
       .toThrow('separate application identifier')
