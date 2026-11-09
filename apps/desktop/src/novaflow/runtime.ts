@@ -91,6 +91,14 @@ export class NovaFlowDesktopRuntime {
   /** @returns the account/catalog admission revision for the private Host relay. */
   getRelayRevision(): number { return this.generation }
 
+  /**
+   * Read the current account bearer for the main-process collect relay only.
+   * @returns the native access token; callers must never forward it to a renderer or log it.
+   */
+  async getCollectAccessToken(): Promise<string> {
+    return (await this.account.getRequestCredentials()).accessToken
+  }
+
   /** @returns a fresh safe projection suitable for owned-window IPC. */
   getSnapshot(): NovaFlowDesktopSnapshot {
     const catalog = this.catalog.getSnapshot()

@@ -604,7 +604,12 @@ async function main(): Promise<void> {
   })
   const createRelay = (): Promise<NovaFlowLoopbackRelay> => startNovaFlowLoopbackRelay({ runtime: novaflow,
     admit: () => accountAdmission && desktopAccountKey(desktopAccountIdentity(novaflow.getSnapshot())) === accountScope.key,
-    maxRequestBytes: 20 * 1024 * 1024, maxConcurrentRequests: 16, requestTimeoutMs: 30_000 })
+    maxRequestBytes: 20 * 1024 * 1024, maxConcurrentRequests: 16, requestTimeoutMs: 30_000,
+    // The Host forwards subscription requests through this relay; the account bearer stays in this process.
+    collect: {
+      origin: () => process.env.NOVAFLOW_COLLECT_ORIGIN ?? 'https://collect.lanjiaotrade.com',
+      access: () => novaflow.getCollectAccessToken(),
+    } })
   let novaflowRelay = await createRelay()
   try {
     await novaflow.restore()

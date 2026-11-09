@@ -20,6 +20,16 @@ import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
 import { installSharpWasmResolution } from './sharp-wasm.ts'
 
+/**
+ * Publish the loopback collect relay to the Host's plugin environment.
+ * The capability grants only this process's loopback listener; it is never written to profile files.
+ * @param configuration - authenticated Host configuration carrying the relay coordinates.
+ */
+function publishCollectRelayEnvironment(configuration: NovaFlowHostConfiguration): void {
+  process.env.NOVAFLOW_RELAY_URL = configuration.baseURL
+  process.env.NOVAFLOW_RELAY_CAPABILITY = configuration.localCapability
+}
+
 async function main(): Promise<void> {
   const runtimeDir = process.argv[2] as string
   const branded = process.env.DSH_NOVAFLOW_DESKTOP === '1'
@@ -45,6 +55,7 @@ async function main(): Promise<void> {
         if (message.type !== 'novaflow-config') return
         try {
           const configuration = parseNovaFlowHostConfiguration(message)
+          publishCollectRelayEnvironment(configuration)
           if (updateNativeConfiguration) updateNativeConfiguration(configuration)
           else nativeConfiguration = configuration
           waiting = false; clearTimeout(timer)
@@ -54,6 +65,7 @@ async function main(): Promise<void> {
       process.send?.({ type: 'novaflow-ready' })
     })
     if (nativeConfiguration === undefined) return
+    publishCollectRelayEnvironment(nativeConfiguration)
   }
   const projectDir = process.argv[3] as string
   installOfficeEngineResolution(runtimeDir)

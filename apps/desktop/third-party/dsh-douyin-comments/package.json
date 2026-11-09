@@ -1,6 +1,6 @@
 {
   "name": "dsh-douyin-comments",
-  "version": "0.8.6",
+  "version": "0.9.21",
   "description": "DeepSeek Harness / NovaFlow plugin: collect Douyin video comments with a bundled Chrome extension (douyin_comments tool) + the merged comment wordcloud viewer (interactive wordcloud + comment table + AI digest + region filter + favorite customers (also listed / searchable / exportable on the collector page) + shop-accounts account reuse (Chrome/ego) + AES-encrypted collector + unified UI (shared design tokens, dark/light, manual theme switch, compact region distribution, terse one-line copy with details moved to tooltips)) that opens automatically after a collection",
   "type": "module",
   "main": "index.js",
@@ -24,8 +24,7 @@
     "viewer",
     "client",
     "cordis.patch.yml",
-    "README.md",
-    "NOTICE.txt"
+    "README.md"
   ],
   "scripts": {
     "sync-ext": "node sync-extension.mjs",

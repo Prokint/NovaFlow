@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectDouyinComments, DEFAULTS } from './collector.mjs';
+import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, DEFAULTS, resolveDouyinVideoInputs } from './collector.mjs';
 import { listShopAccounts } from './shop-accounts-bridge.mjs';
 
 export const CONSOLE_PREFIX = '/plugins/dsh-douyin-comments';
@@ -44,7 +44,8 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-const EXPORT_RE = /^douyin-(?:comments|wordcloud)-.*\.(json|csv|html)$/i;
+// v0.9.0：关键词模式的产物名也纳入导出列表（douyin-keyword-* / douyin-videos-*）。
+const EXPORT_RE = /^douyin-(?:comments|keyword|videos|wordcloud)-.*\.(json|csv|html)$/i;
 
 function httpError(message, status = 400) {
   const error = new Error(String(message || '请求失败'));
@@ -214,11 +215,18 @@ function publicResult(result) {
     error: String(result.error || ''),
     videoId: String(result.videoId || ''),
     title: String(result.title || ''),
+    // v0.9.0：关键词搜索模式
+    keyword: String(result.keyword || ''),
+    videoCount: Number(result.videoCount) || 0,
+    videoListPath: String(result.videoListPath || ''),
+    videos: Array.isArray(result.videos) ? result.videos.slice(0, 100).map((s) => String(s)) : [],
     count: Number(result.count) || 0,
     csvPath: String(result.csvPath || ''),
     jsonPath: String(result.jsonPath || ''),
     htmlPath: String(result.htmlPath || ''),
     phase: String(result.phase || ''),
+    // v0.9.1：收工原因（done/max-cap/top-done/stall/timeout/abort/verify-wait），前端据此提示「等人机验证」
+    endedBy: String(result.endedBy || ''),
     note: String(result.note || ''),
     lanes: Number(result.extLanes || result.lanes) || 0,
     durationSec: Number(result.durationSec) || 0,
@@ -250,6 +258,11 @@ function publicJob(job, { logs = true } = {}) {
       videoId: String(status.videoId || ''),
       note: String(status.note || ''),
       hasSig: status.hasSig === true,
+      // v0.9.0：关键词模式进度
+      keyword: String(status.keyword || ''),
+      videoIndex: Number(status.videoIndex) || 0,
+      videoTotal: Number(status.videoTotal) || 0,
+      videoTitle: String(status.videoTitle || ''),
     },
     logs: logs ? job.logs.slice(-120).map((item) => item.line) : [],
     result: job.done ? publicResult(job.result) : null,
@@ -260,8 +273,14 @@ function publicJob(job, { logs = true } = {}) {
 function normalizeInput(raw, settings, outDir) {
   const body = raw && typeof raw === 'object' ? raw : {};
   const url = String(body.url || '').trim();
-  if (!url) throw httpError('缺少视频链接', 400);
+  // v0.9.16：多条链接（前端把「逗号/空格分隔的多条链接」解析成数组传过来）
+  const urls = Array.isArray(body.urls) ? body.urls.map((u) => String(u || '').trim()).filter(Boolean) : [];
+  const keyword = String(body.keyword || '').trim();
+  if (!url && !keyword && !urls.length) throw httpError('缺少视频链接或搜索关键词', 400);
   if (url.length > 4000) throw httpError('视频链接太长', 400);
+  if (keyword.length > 200) throw httpError('搜索关键词太长（最多 200 字）', 400);
+  // keyword 优先：同时填了链接和关键词时走「关键词搜索视频 → 采前 N 条」模式。
+  const isKeyword = keyword !== '';
 
   const n = (value, fallback) => {
     const num = Number(value);
@@ -269,18 +288,40 @@ function normalizeInput(raw, settings, outDir) {
   };
   const max = Math.min(1_000_000, Math.max(1, Math.round(n(body.max, settings.max || DEFAULTS.max || 80000))));
   const lanes = Math.min(8, Math.max(1, Math.round(n(body.lanes, settings.lanes || DEFAULTS.lanes || 3))));
-  const timeoutMs = Math.min(14_400_000, Math.max(60_000, Math.round(n(body.timeoutMs, settings.timeoutMs || DEFAULTS.timeoutMs || 1_800_000))));
+  const timeoutDefault = isKeyword
+    ? (settings.keywordTimeoutMs || DEFAULTS.keywordTimeoutMs || 14_400_000)
+    : (settings.timeoutMs || DEFAULTS.timeoutMs || 1_800_000);
+  const timeoutRaw = Math.round(n(body.timeoutMs, timeoutDefault));
+  // 单视频模式 1 分钟~4 小时；关键词模式是整个任务的预算，4 分钟~24 小时。
+  const timeoutMs = isKeyword
+    ? Math.min(86_400_000, Math.max(120_000, timeoutRaw))
+    : Math.min(14_400_000, Math.max(60_000, timeoutRaw));
   const waitLoginSec = body.waitLoginSec === undefined || body.waitLoginSec === null
     ? Math.max(0, Number(settings.waitLoginSec ?? DEFAULTS.waitLoginSec) || 0)
     : Math.max(0, Math.round(Number(body.waitLoginSec) || 0));
+  // v0.9.1：撞人机验证时等你在窗口里过验证的秒数（0 = 不等）
+  const verifyWaitSec = body.verifyWaitSec === undefined || body.verifyWaitSec === null
+    ? Math.max(0, Number(settings.verifyWaitSec ?? DEFAULTS.verifyWaitSec) || 0)
+    : Math.max(0, Math.min(7200, Math.round(Number(body.verifyWaitSec) || 0)));
+  const videoCount = Math.min(100, Math.max(1,
+    Math.round(n(body.videoCount, settings.keywordVideoCount || DEFAULTS.keywordVideoCount || 10))));
 
   return {
     url,
+    urls,
+    keyword,
+    videoCount,
+    // 筛选值原样透传，由 collector 的 normalizeSearchOptions 统一校验/纠错。
+    sortType: String(body.sortType || '').trim(),
+    publishTime: String(body.publishTime || '').trim(),
+    duration: String(body.duration || '').trim(),
+    contentType: String(body.contentType || '').trim(),
     account: String(body.account || '').trim(),
     max,
     lanes,
     timeoutMs,
     waitLoginSec,
+    verifyWaitSec,
     replies: body.replies !== false,
     clearBefore: body.clearBefore === undefined ? settings.clearBefore === true : body.clearBefore === true,
     replyLanes: settings.replyLanes,
@@ -303,7 +344,10 @@ function normalizeInput(raw, settings, outDir) {
  * }} [options]
  */
 export function createConsole(options = {}) {
-  const collect = options.collect || collectDouyinComments;
+  // v0.9.0：控制台既支持单视频采集也支持关键词模式，按输入里有没有 keyword 自动分发。
+  const collect = options.collect
+    || ((opts) => (opts && opts.keyword ? collectDouyinKeyword(opts)
+      : (opts && Array.isArray(opts.urls) && opts.urls.length > 1 ? collectDouyinLinks(opts) : collectDouyinComments(opts))));
   const getSettings = options.getSettings || (() => ({}));
   const getOutDir = options.getOutDir || (() => DEFAULTS.outDir);
   const version = String(options.version || VERSION);
@@ -365,6 +409,11 @@ export function createConsole(options = {}) {
         total: Number(status.total) || 0,
         note: String(status.note || ''),
         hasSig: status.hasSig === true,
+        // v0.9.0：关键词模式的分段进度（第 n 条视频 / 共 m 条）
+        keyword: String(status.keyword || ''),
+        videoIndex: Number(status.videoIndex) || 0,
+        videoTotal: Number(status.videoTotal) || 0,
+        videoTitle: String(status.videoTitle || ''),
       };
       if (job.status.phase) job.phase = job.status.phase;
       if (job.status.phase === 'waiting-login' || job.status.phase === 'need-login') job.needLogin = true;
@@ -448,9 +497,14 @@ export function createConsole(options = {}) {
             lanes: Number(settings.lanes) || DEFAULTS.lanes || 3,
             timeoutMs: Number(settings.timeoutMs) || DEFAULTS.timeoutMs || 1_800_000,
             waitLoginSec: Number(settings.waitLoginSec) || 0,
+            // v0.9.1：撞人机验证时等使用者过验证的秒数（0 = 不等）
+            verifyWaitSec: Math.max(0, Math.min(7200, Math.round(Number(settings.verifyWaitSec ?? DEFAULTS.verifyWaitSec ?? 900)))),
             clearBefore: settings.clearBefore === true,
             replies: true,
             cloud: false,
+            // v0.9.0：关键词模式
+            keywordVideoCount: Math.max(1, Math.min(100, Math.round(Number(settings.keywordVideoCount) || Number(DEFAULTS.keywordVideoCount) || 10))),
+            keywordTimeoutMs: Number(settings.keywordTimeoutMs) || DEFAULTS.keywordTimeoutMs || 14_400_000,
           },
         });
       }
@@ -464,8 +518,46 @@ export function createConsole(options = {}) {
 
       if (pathname === `${CONSOLE_PREFIX}/api/jobs` && req.method === 'POST') {
         const body = await readJson(req);
+        const kw = String((body && body.keyword) || '').trim();
+        const rawUrlText = String((body && body.url) || '').trim();
+        // v0.9.14：url 允许整段分享文案 / v.douyin.com 短链，先解析成标准作品页，再交给采集器
+        // v0.9.16：多条链接（逗号/空格分隔）→ 解析成 urls 数组，逐条采集后合并导出
+        if (rawUrlText && !kw) {
+          const resolvedList = await resolveDouyinVideoInputs(rawUrlText);
+          if (!resolvedList.ok) {
+            throw httpError('没识别到视频链接：' + (resolvedList.errors.join('；') || '没找到抖音链接'), 400);
+          }
+          if (resolvedList.targets.length > 1) {
+            body.urls = resolvedList.targets.map((t) => t.url);
+            body.url = '';
+          } else {
+            body.url = resolvedList.targets[0].url;
+            delete body.urls;
+          }
+        }
         const job = startJob(body);
         return sendJson(res, 200, { ok: true, job: publicJob(job) });
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/resolve` && req.method === 'POST') {
+        // v0.9.14：把链接 / 分享文案解析成标准作品页（供采集页输入框即时回填）
+        // v0.9.16：多条链接返回 urls 数组（前端保留原文，提示「识别到 N 条」）
+        const body = await readJson(req);
+        const resolvedList = await resolveDouyinVideoInputs(String((body && body.text) || (body && body.url) || ''));
+        if (!resolvedList.ok) {
+          throw httpError('没识别到视频链接：' + (resolvedList.errors.join('；') || '没找到抖音链接'), 400);
+        }
+        const first = resolvedList.targets[0];
+        return sendJson(res, 200, {
+          ok: true,
+          count: resolvedList.targets.length,
+          urls: resolvedList.targets.map((t) => t.url),
+          url: first.url,
+          videoId: first.videoId,
+          kind: first.kind,
+          source: first.source,
+          targets: resolvedList.targets.map((t) => ({ url: t.url, videoId: t.videoId, kind: t.kind, source: t.source })),
+        });
       }
 
       const jobMatch = pathname.match(new RegExp(`^${CONSOLE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/api/jobs/([^/]+)$`));

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { entitlementEnabled, issueKey } from './entitlement.mjs';
 
 const PLUGIN_DIR = fileURLToPath(new URL('.', import.meta.url));
 const HOME = process.env.DOUYIN_HOME || path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'douyin-collector');
@@ -30,8 +31,28 @@ const SEED_C = ['df7d', 'b0e6', '1493', 'fe10'];
 const SEED_D = { u: '46de', v: '6d4b', w: 'c873', z: '74D5', q: 'ede4', r: '623d' };
 const DECOY_PARTS = ['0000', 'ffff'];  // 未参与派生
 
+/**
+ * v0.9.21（NovaFlow 收费版）：密钥材料不再只来自硬编码——
+ *   · `DYC_MATERIAL` 环境变量（64 位 hex，或已带 `|dyc.v1` 后缀）：构建/轮换用；
+ *   · NovaFlow relay 模式：启动时向授权服务换一次 material（仅内存，不落盘）。
+ * 两者都没有时退回内置常量（独立运行/开发模式，行为与旧版完全一致）。
+ */
+let ISSUED_MATERIAL = '';
+let ENTITLEMENT_ISSUE_ERROR = '';
+
+function normalizeMaterial(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase() + '|dyc.v1';
+  if (/^[0-9a-f]{64}\|dyc\.v1$/i.test(s)) return s.toLowerCase();
+  return '';
+}
+
 /** 拼回 64 位十六进制主串，再加域分隔后缀 */
 function keyMaterial() {
+  const fromEnv = normalizeMaterial(process.env.DYC_MATERIAL);
+  if (ISSUED_MATERIAL) return ISSUED_MATERIAL;
+  if (fromEnv) return fromEnv;
   const parts = [
     ...SEED_A,
     SEED_B.hi, SEED_B.lo, SEED_B.x, SEED_B.y,
@@ -39,6 +60,16 @@ function keyMaterial() {
     SEED_D.u, SEED_D.v, SEED_D.w, SEED_D.z, SEED_D.q, SEED_D.r,
   ];
   return parts.join('').toLowerCase() + '|dyc.v1';
+}
+
+// NovaFlow 模式：优先拿服务端签发的 material（与本次构建匹配）；拿不到不阻断加载（授权在工具调用时再校验）
+if (entitlementEnabled()) {
+  try {
+    const key = await issueKey();
+    if (key && key.material) ISSUED_MATERIAL = normalizeMaterial(key.material);
+  } catch (e) {
+    ENTITLEMENT_ISSUE_ERROR = (e && e.code) || (e && e.message) || String(e);
+  }
 }
 
 /** 每个域（core / ext）用自己的盐；salt 是确定性的，载荷里那份必须与之一致 */
@@ -148,10 +179,17 @@ try {
 } catch (e) { /* runtime 目录不存在 */ }
 
 const inner = await import(pathToFileURL(cachePath).href);
-const { collectDouyinComments, DEFAULTS, resolveOutDir, sessionWorkspaceCwd } = inner;
+const {
+  collectDouyinComments,
+  DEFAULTS,
+  resolveOutDir,
+  sessionWorkspaceCwd,
+} = inner;
 for (const [name, v] of Object.entries({ collectDouyinComments, DEFAULTS, resolveOutDir, sessionWorkspaceCwd })) {
   if (v === undefined) throw new Error('core.enc 解出的模块缺少导出：' + name);
 }
+/** v0.9.21：授权服务在加载期换 material 失败时的错误码（空串 = 正常/独立运行模式） */
+export { ENTITLEMENT_ISSUE_ERROR };
 
 // 兼容既有调用方（verify-tool / sync 脚本 / 老代码）的具名导入：
 // 这些名字在解密后的核心模块里都有，加载器原样透传（不改变 4 个主接口的语义）。
@@ -167,6 +205,23 @@ const {
   extensionIdPathBytes,
   decryptExtensionBundle,
   videoIdFromUrl,
+  extractDouyinLink,
+  resolveDouyinVideoInput,
+  // v0.9.16：多链接批量（逗号/空格分隔）
+  splitDouyinInput,
+  resolveDouyinVideoInputs,
+  collectDouyinLinks,
+  // v0.9.0：关键词搜索模式（searchDouyinVideos 是底层搜索，collectDouyinKeyword 是编排）
+  douyinTargetFromUrl,
+  collectDouyinKeyword,
+  searchDouyinVideos,
+  shutdownDouyinBrowser,
+  normalizeSearchOptions,
+  describeSearchOptions,
+  searchPageUrl,
+  toKeywordCsv,
+  toVideoListCsv,
+  SEARCH_FILTERS,
   cleanText,
   toCsv,
   csvLabelRow,
@@ -198,6 +253,23 @@ export {
   extensionIdPathBytes,
   decryptExtensionBundle,
   videoIdFromUrl,
+  extractDouyinLink,
+  resolveDouyinVideoInput,
+  // v0.9.16：多链接批量（逗号/空格分隔）
+  splitDouyinInput,
+  resolveDouyinVideoInputs,
+  collectDouyinLinks,
+  // v0.9.0：关键词搜索模式（searchDouyinVideos 是底层搜索，collectDouyinKeyword 是编排）
+  douyinTargetFromUrl,
+  collectDouyinKeyword,
+  searchDouyinVideos,
+  shutdownDouyinBrowser,
+  normalizeSearchOptions,
+  describeSearchOptions,
+  searchPageUrl,
+  toKeywordCsv,
+  toVideoListCsv,
+  SEARCH_FILTERS,
   cleanText,
   toCsv,
   csvLabelRow,

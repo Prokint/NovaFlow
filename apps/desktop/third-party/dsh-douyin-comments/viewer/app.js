@@ -5,33 +5,11 @@
 (function () {
   'use strict';
 
-  /* ===================== 主题（深 / 浅，可手动切换） ===================== */
-  const safeThemeParam = (name) => { try { return new URLSearchParams(location.search).get(name) || ''; } catch (e) { return ''; } };
-  /* v0.8.2：手动切换优先（localStorage 记住），其次 ?theme=，最后跟随系统偏好；
-     两个子页共用同一 key，切主题时另一个 iframe 通过 storage 事件同步 */
-  (function themeBoot() {
-    const KEY = 'dsh.douyin.theme';
-    const asked = safeThemeParam('theme');
-    let stored = '';
-    try { stored = localStorage.getItem(KEY) || ''; } catch (e) { stored = ''; }
-    const apply = (mode) => {
-      const dark = mode !== 'light';
-      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-      const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute('content', dark ? '#0b0b0c' : '#f5f6f8');
-    };
-    const current = () => (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
-    const mode = stored || asked || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
-    apply(mode);
-    window.__douyinTheme = {
-      key: KEY,
-      get: current,
-      set: (m) => { const v = m === 'light' ? 'light' : 'dark'; try { localStorage.setItem(KEY, v); } catch (e) { /* ignore */ } apply(v); return v; },
-      toggle: () => { const next = current() === 'light' ? 'dark' : 'light'; try { localStorage.setItem(KEY, next); } catch (e) { /* ignore */ } apply(next); return next; },
-    };
-    window.addEventListener('storage', (e) => {
-      if (e.key === KEY && e.newValue) apply(e.newValue === 'light' ? 'light' : 'dark');
-    });
+  /* v0.9.10：去掉深 / 浅主题切换，固定白色（浅色）主题 */
+  (function fixedTheme() {
+    document.documentElement.setAttribute('data-theme', 'light');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', '#f5f6f8');
   })();
 
   /* ===================== 工具 ===================== */
@@ -92,6 +70,27 @@
       t = setTimeout(() => fn.apply(self, args), ms);
     };
   }
+
+  // v0.9.10：抖音接口本身就带用户头像（`user.avatar_thumb.url_list`），能拿到就直接显示真头像，
+  // 拿不到（老数据、收藏列表、头像链接失效）再退回「首字 + 淡色底」的占位头像。
+  const pickAvatarUrl = (u) => {
+    const fromOne = (o) => {
+      if (!o) return '';
+      if (typeof o === 'string') return o.trim();
+      if (Array.isArray(o.url_list) && o.url_list.length) return String(o.url_list[0] || '').trim();
+      if (typeof o.url === 'string') return o.url.trim();
+      return '';
+    };
+    return fromOne(u.avatar_thumb) || fromOne(u.avatar_medium) || fromOne(u.avatar_larger)
+      || fromOne(u.avatar_168x168) || fromOne(u.avatar) || fromOne(u.avatarUri) || '';
+  };
+  const avatarImg = (user) => {
+    const url = String((user && user.avatar) || '');
+    if (!url) return '';
+    // referrerpolicy：douyinpic 对带 Referer 的请求偶发 403，头像直连更稳；失败时 onerror 移除 img，露出下面的首字
+    return `<img class="av-img" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`;
+  };
+  const avatarHtml = (user) => `<span class="avatar" style="${esc(avatarStyle(user))}">${avatarImg(user)}${esc(initials((user || {}).nickname))}</span>`;
 
   const initials = (name) => {
     const s = String(name || '').trim();
@@ -182,15 +181,51 @@
   function num(v) { const n = Number(String(v == null ? '' : v).trim()); return isFinite(n) ? n : 0; }
 
   /* ===================== 归一化 ===================== */
+  // v0.9.10：uid / secUid → 头像直链索引。收藏客户只存了 uid + 昵称 + 属地（老数据没有头像），
+  // 弹层里渲染时可以用这份索引补上（同一个人在当前导出数据里出现过就能补出来）。
+  const avatarIndex = new Map(); // 'u:<uid>' / 's:<secUid>' → url
+
   function normalizeUser(u) {
     u = u || {};
+    // v0.9.10：抖音评论接口的 user 自带 avatar_thumb / avatar_medium / avatar_larger；
+    // 词云页优先显示真头像，取不到再用首字占位。
+    const avatar = pickAvatarUrl(u);
+    const uid = u.uid ? String(u.uid) : '';
+    const secUid = u.sec_uid ? String(u.sec_uid) : (u.secUid ? String(u.secUid) : '');
+    if (avatar) {
+      if (uid) avatarIndex.set('u:' + uid, avatar);
+      if (secUid) avatarIndex.set('s:' + secUid, avatar);
+    }
     return {
       nickname: String(u.nickname || '').trim() || '匿名用户',
-      uid: u.uid ? String(u.uid) : '',
-      secUid: u.sec_uid ? String(u.sec_uid) : (u.secUid ? String(u.secUid) : ''),
+      uid,
+      secUid,
       uniqueId: u.unique_id ? String(u.unique_id) : (u.uniqueId ? String(u.uniqueId) : ''),
       shortId: u.short_id ? String(u.short_id) : (u.shortId ? String(u.shortId) : ''),
+      avatar,
     };
+  }
+
+  // v0.9.10：给收藏记录 / 分组用户补头像（记录自带 avatar 优先，其次按 uid/secUid 查索引）。
+  function avatarOf(rec) {
+    if (!rec) return '';
+    if (rec.avatar) return String(rec.avatar);
+    const uid = rec.uid ? String(rec.uid) : '';
+    const secUid = rec.secUid ? String(rec.secUid) : '';
+    if (uid && avatarIndex.has('u:' + uid)) return avatarIndex.get('u:' + uid);
+    if (secUid && avatarIndex.has('s:' + secUid)) return avatarIndex.get('s:' + secUid);
+    return '';
+  }
+
+  function backfillFavoriteAvatars() {
+    let changed = 0;
+    state.favorites.forEach((f) => {
+      if (!f.avatar) {
+        const a = avatarOf(f);
+        if (a) { f.avatar = a; changed++; }
+      }
+    });
+    return changed;
   }
 
   // v2.4：导出数据本来就带清洗后的文本（`text_clean`，去表情/@/#，扩展的 cleanText() 生成）。
@@ -223,7 +258,7 @@
     return {
       cid,
       videoId,
-      videoTitle: meta.title || '',
+      videoTitle: String(raw.video_title || meta.title || ''),
       text,
       textClean: cleanForTokens(raw, text),
       digg: num(raw.digg_count != null ? raw.digg_count : raw.digg),
@@ -257,6 +292,7 @@
       state.comments.push(c);
       added++;
     }
+    if (added && state.favorites.size) backfillFavoriteAvatars();
     return added;
   }
 
@@ -270,6 +306,11 @@
       arr = obj.comments;
       meta.videoId = String(obj.videoId || obj.video_id || '');
       meta.title = String(obj.title || '');
+      // v0.9.6：关键词模式的合并 JSON（一次采集里前 N 条视频的全部评论）
+      if (obj.keyword) {
+        meta.keyword = String(obj.keyword);
+        meta.title = '关键词「' + obj.keyword + '」· ' + (Number(obj.videoCount) || 0) + ' 条视频';
+      }
     } else if (obj && obj.data && Array.isArray(obj.data.comments)) {
       arr = obj.data.comments;
     }
@@ -280,6 +321,21 @@
         url: obj.url || ('https://www.douyin.com/video/' + meta.videoId),
         collectedAt: obj.collectedAt || '',
       });
+    }
+    // 合并 JSON 里的每条评论自带 video_id / video_title：把涉及的视频都登记出来（还有视频清单可点）
+    if (!meta.videoId) {
+      for (const c of arr) {
+        const vid = String((c && (c.video_id || c.videoId)) || '');
+        if (!vid) continue;
+        const vt = String((c && c.video_title) || '');
+        if (!state.videos.has(vid)) {
+          state.videos.set(vid, {
+            id: vid, title: vt || ('视频 ' + vid.slice(-8)),
+            url: String((c && c.video_url) || ('https://www.douyin.com/video/' + vid)),
+            collectedAt: String((obj && obj.collectedAt) || ''),
+          });
+        }
+      }
     }
     const list = arr.map((c) => normalizeComment(c, meta));
     return addComments(list);
@@ -749,52 +805,86 @@
   const SENT_NEG_STRONG = new Set(('垃圾 恶心 恶心人 烂 骗子 欺骗 智障 弱智 傻逼 恶臭 反感 讨厌 恨 愤怒 崩溃 心碎 失望 无语 离谱 逆天 破防 麻了 服了 难受 痛苦 吐了 呕吐 鄙视 白眼 嘲讽 喷 骂 举报 差评 水军 掉粉 取关 别买 不值 退钱 翻车 侮辱 冒犯 恶俗 低俗 割韭菜 智商税 阴阳怪气 洗白 洗地 拉胯 恰饭 硬广'.split(/\s+/)));
   const SENT_NEG = new Set(('不行 不好 难看 难听 难受 麻烦 复杂 混乱 卡 卡顿 慢 贵 亏 可惜 遗憾 一般 普通 平庸 老套 套路 水 敷衍 凑数 多余 尬 冷场 叹气 皱眉 害怕 恐怖 吓人 阴影 不适 争议 质疑 反驳 抬杠 双标 强行 尴尬 无聊 拖沓 生气 发怒 差 弱 划水 广告 坑 糊弄 玄学 劝退'.split(/\s+/)));
   const SENT_NEGATORS = new Set(('不 没 无 未 别 莫 非 勿 没有 不是 不算 不会 不能 不要 不用 不必 不够 不太 不怎么 没那么'.split(/\s+/)));
-  const SENT_DEGREE = new Set(('太 很 非常 特别 超 巨 极 真 更 最 十分 相当 格外 尤其 愈发 更加 简直 实在 真是 巨他妈'.split(/\s+/)));
+  const SENT_DEGREE = new Set(('太 很 非常 特别 超 巨 极 真 更 最 十分 相当 格外 尤其 愈发 更加 简直 实在 真是 巨他妈 有点 有点儿 稍微 稍 挺'.split(/\s+/)));
   const EMOJI_POS = new Set(('憨笑 微笑 大笑 笑哭 呲牙 偷笑 得意 调皮 酷 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 撒花 庆祝 耶 亲亲 害羞 愉快 色 吃瓜 调皮'.split(/\s+/)));
   const EMOJI_NEG = new Set(('流泪 大哭 崩溃 发怒 生气 鄙视 白眼 呕吐 敲打 菜刀 心碎 失望 无语 裂开 叹气 皱眉 骷髅 害怕 惊恐 再见 弱 尬 汗 擦汗 抠鼻 黑线 委屈 可怜 抓狂 咒骂 闭嘴 哼 怒 困'.split(/\s+/)));
 
   const EMOJI_TAG_RE = /\[[^\[\]]{1,12}\]/g;
+  // v0.9.13：求推荐 / 求链接这类「提问型」文案不算夸奖；「推荐」当需求词时不计入情感
+  const SENT_REQUEST_RE = /求推荐|求链接|求教程|求分享|求攻略|求方案|求个推荐|有没有推荐|推荐一下|怎么买|哪里买|求问/;
+  // v0.9.13：单字弱负向词只有落在「程度词/否定词旁边」或「X了 / X啊」里才算负向，
+  // 否则「谢贵师传喜讯」「差评里拆出的『差』」这类分词碎片会造出假负评。
+  const SENT_WEAK_SINGLE = new Set('贵 差 弱 水 坑 卡 慢 尬 亏 怪 丑 假 烦 吵 臭 脏 苦'.split(/\s+/));
+  const SENT_SINGLE_SUFFIX = new Set(['了', '啊', '死', '得', '多', '些']);
+  // v0.9.13：分词器会把「差评/不好/太贵」拆散，先按整词短语扫一遍再删掉，避免碎片重复计分
+  const SENT_PHRASE_NEG = [['不好用', -1.5], ['不好看', -1.5], ['不好听', -1.5], ['不推荐', -1.5], ['有点贵', -1.2], ['一般般', -1], ['很一般', -1], ['差评', -1.5], ['差劲', -1.5], ['不好', -1], ['不行', -1], ['不值', -1.5], ['好贵', -1.2], ['太贵', -1.2], ['贵了', -1.2], ['踩雷', -2], ['退货', -1.5], ['退款', -1.5], ['骗人', -2], ['别买', -2], ['踩坑', -1.5], ['难用', -1.5]];
 
   function sentimentOf(text) {
     const raw = String(text || '');
-    let score = 0;
-    let emoHits = 0;
     const tags = raw.match(EMOJI_TAG_RE) || [];
-    for (const t of tags) {
-      const name = t.slice(1, -1);
-      if (EMOJI_POS.has(name)) { score += 1.2; emoHits++; }
-      else if (EMOJI_NEG.has(name)) { score -= 1.2; emoHits++; }
+    // v0.9.13：表情按「去重后种类数」计分并封顶 ±1.2 —— 旧版把 `[抠鼻]` 复制 9 次算成 -10.8，
+    // 会把「你的作品非常优秀，你是最棒的」这种夸奖判成负评。
+    const emoNames = new Set(tags.map((t) => t.slice(1, -1)));
+    let emoScore = 0;
+    let emoHits = 0;
+    for (const name of emoNames) {
+      if (EMOJI_POS.has(name)) { emoScore += 0.6; emoHits++; }
+      else if (EMOJI_NEG.has(name)) { emoScore -= 0.6; emoHits++; }
     }
+    emoScore = Math.max(-1.2, Math.min(1.2, emoScore));
     const s = raw.replace(EMOJI_TAG_RE, ' ').replace(/@[^\s@]+|#[^\s#]+/g, ' ');
     if (!s.trim()) {
-      const norm0 = Math.tanh(score / 2);
+      const norm0 = Math.tanh(emoScore / 2);
       return { score: Math.round(norm0 * 100) / 100, label: norm0 > 0.15 ? 'pos' : (norm0 < -0.15 ? 'neg' : 'neu'), hits: emoHits };
     }
-    const toks = [];
-    if (segmenter) for (const seg of segmenter.segment(s)) if (seg.isWordLike) toks.push(seg.segment);
-    else for (const p of s.match(/[A-Za-z][A-Za-z0-9']*|[\u4e00-\u9fff]{1,4}/g) || []) toks.push(p);
-    let hits = 0;
-    for (let i = 0; i < toks.length; i++) {
-      const t = toks[i];
-      let base = 0;
-      if (SENT_POS_STRONG.has(t)) base = 2;
-      else if (SENT_POS.has(t)) base = 1;
-      else if (SENT_NEG_STRONG.has(t)) base = -2;
-      else if (SENT_NEG.has(t)) base = -1;
-      if (!base) continue;
-      let mult = 1;
-      for (let j = Math.max(0, i - 2); j < i; j++) {
-        if (SENT_DEGREE.has(toks[j])) mult *= 1.5;
-        if (SENT_NEGATORS.has(toks[j])) mult *= -0.8;
+    const request = SENT_REQUEST_RE.test(s);
+    let score = emoScore;
+    let hits = emoHits;
+    // v0.9.13：按标点/空白切子句，否定词只在子句内生效（「不要制冰 求推荐」不会把「推荐」翻成负向）
+    const clauses = s.split(/[。！？!?，,；;、\n\r]+|\s+/).filter((x) => x && x.trim());
+    for (const clause of clauses) {
+      let clauseText = clause;
+      // v0.9.13：整词短语优先（并把命中的词从待分词文本里删掉，避免「差评」又按「差」「评」重复算分）
+      for (const [phrase, weight] of SENT_PHRASE_NEG) {
+        if (clauseText.indexOf(phrase) >= 0) {
+          score += weight;
+          hits++;
+          clauseText = clauseText.split(phrase).join(' ');
+        }
       }
-      score += base * mult;
-      hits++;
+      const toks = [];
+      if (segmenter) for (const seg of segmenter.segment(clauseText)) if (seg.isWordLike) toks.push(seg.segment);
+      else for (const p of clauseText.match(/[A-Za-z][A-Za-z0-9']*|[\u4e00-\u9fff]{1,4}/g) || []) toks.push(p);
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (request && (t === '推荐' || t === '安利')) continue;
+        if (t.length === 1 && SENT_WEAK_SINGLE.has(t)) {
+          const prev = toks[i - 1] || '';
+          const prev2 = toks[i - 2] || '';
+          const next = toks[i + 1] || '';
+          const ctx = SENT_DEGREE.has(prev) || SENT_NEGATORS.has(prev) || SENT_DEGREE.has(prev2) || (next ? SENT_SINGLE_SUFFIX.has(next.slice(0, 1)) : false);
+          if (!ctx) continue;
+        }
+        let base = 0;
+        if (SENT_POS_STRONG.has(t)) base = 2;
+        else if (SENT_POS.has(t)) base = 1;
+        else if (SENT_NEG_STRONG.has(t)) base = -2;
+        else if (SENT_NEG.has(t)) base = -1;
+        if (!base) continue;
+        let mult = 1;
+        for (let j = Math.max(0, i - 2); j < i; j++) {
+          if (SENT_DEGREE.has(toks[j])) mult *= 1.5;
+          if (SENT_NEGATORS.has(toks[j])) mult *= -0.8;
+        }
+        score += base * mult;
+        hits++;
+      }
     }
     const norm = Math.tanh(score / 2);
     return {
       score: Math.round(norm * 100) / 100,
       label: norm > 0.15 ? 'pos' : (norm < -0.15 ? 'neg' : 'neu'),
-      hits: hits + emoHits,
+      hits,
     };
   }
 
@@ -1375,9 +1465,10 @@ function bindAiEvents() {
     const st = sentimentStats(list);
     const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
     const seg = (cls, n) => (total && n ? `<i class="sent-seg ${cls}" style="width:${(n / total) * 100}%"></i>` : '');
-    const negTop = list
-      .filter((c) => c.sentiment && c.sentiment.label === 'neg')
-      .sort((a, b) => b.digg - a.digg)
+    // v0.9.19：不再按「负向」筛（词典打分对高赞玩梗评论仍有误判），改成本次评论里按点赞最高的 Top3「评价」。
+    const topComments = list
+      .filter((c) => String(c.text || '').trim())
+      .sort((a, b) => (b.digg || 0) - (a.digg || 0))
       .slice(0, 3);
     const sentHtml = total
       ? `<div class="sent-bar">${seg('pos', st.pos)}${seg('neu', st.neu)}${seg('neg', st.neg)}</div>
@@ -1386,7 +1477,7 @@ function bindAiEvents() {
            <span><i class="sw-dot neu"></i>中性 ${fmtNum(st.neu)} · ${pct(st.neu)}%</span>
            <span><i class="sw-dot neg"></i>负向 ${fmtNum(st.neg)} · ${pct(st.neg)}%</span>
          </div>
-         ${negTop.length ? `<div class="mini-list"><div class="mini-h">负评 Top${negTop.length}（按点赞）</div>${negTop.map((c) => `<button class="mini-row" type="button" data-neg-cid="${esc(c.cid)}"><span class="mini-txt">${esc((c.text || '').slice(0, 46) || '（无文字）')}</span><span class="mini-num">${fmtNum(c.digg)}</span></button>`).join('')}</div>` : '<p class="meta">没有识别到负向评论</p>'}`
+         ${topComments.length ? `<div class="mini-list"><div class="mini-h">评价 Top${topComments.length}（按点赞）</div>${topComments.map((c) => `<button class="mini-row" type="button" data-neg-cid="${esc(c.cid)}" title="按点赞排序的 Top${topComments.length} 条评价 · 情感倾向：${SENT_LABEL[(c.sentiment && c.sentiment.label) || 'neu']}（词典打分 ${(c.sentiment && c.sentiment.score) || 0}）"><span class="mini-txt">${esc((c.text || '').slice(0, 46) || '（无文字）')}</span><span class="mini-num">${fmtNum(c.digg)}</span></button>`).join('')}</div>` : '<p class="meta">暂无文字评论可展示</p>'}`
       : '<p class="meta">暂无数据</p>';
 
     const regions = new Map();
@@ -1955,7 +2046,7 @@ function bindAiEvents() {
       return `<div class="dc">
         <div class="dc-head">
           <div class="dc-user">
-            <span class="avatar" style="${esc(avatarStyle(c.user))}">${esc(initials(c.user.nickname))}</span>
+            ${avatarHtml(c.user)}
             <div class="user-meta">
               <span class="user-name">${esc(c.user.nickname)}</span>
               <span class="user-sub">${esc(c.user.uniqueId || (c.user.shortId ? 'ID ' + c.user.shortId : 'ID ' + String(c.user.uid || '').slice(-8)))}</span>
@@ -2030,14 +2121,14 @@ function bindAiEvents() {
       const nameHtml = highlight(c.user.nickname, q);
       const favRec = c.user.uid ? state.favorites.get(String(c.user.uid)) : null;
       const userCell = `<div class="user-cell">
-        <span class="avatar" style="${esc(avatarStyle(c.user))}">${esc(initials(c.user.nickname))}</span>
+        ${avatarHtml(c.user)}
         <div class="user-meta">
           ${href ? `<a class="user-name" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="打开抖音主页">${nameHtml}</a>`
                  : `<span class="user-name nolink" title="导出数据里没有 sec_uid，无法拼主页">${nameHtml}</span>`}
           <span class="user-sub">${esc(c.user.uniqueId || (c.user.shortId ? 'ID ' + c.user.shortId : ''))}</span>
-          <button type="button" class="fav-star${favRec ? ' on' : ''}" data-fav-uid="${esc(c.user.uid)}" data-fav-nick="${esc(c.user.nickname)}" data-fav-secuid="${esc(c.user.secUid)}" data-fav-unique="${esc(c.user.uniqueId)}" data-fav-region="${esc(c.ip || '')}" title="${favRec ? '取消收藏' : '收藏为目标客户'}" aria-label="收藏客户">${favRec ? '★' : '☆'}</button>
         </div>
       </div>`;
+      const starBtn = `<button type="button" class="fav-star${favRec ? ' on' : ''}" data-fav-uid="${esc(c.user.uid)}" data-fav-nick="${esc(c.user.nickname)}" data-fav-secuid="${esc(c.user.secUid)}" data-fav-unique="${esc(c.user.uniqueId)}" data-fav-region="${esc(c.ip || '')}" title="${favRec ? '取消收藏' : '收藏为目标客户'}" aria-label="收藏客户">${favRec ? '★' : '☆'}</button>`;
       const badges = `<span class="badges">
         ${c.isHot ? '<span class="badge hot">热</span>' : ''}
         ${c.isReply ? '<span class="badge reply">回复</span>' : ''}
@@ -2054,6 +2145,7 @@ function bindAiEvents() {
         <td class="muted small" data-label="时间">${esc(c.createTimeStr ? c.createTimeStr.slice(0, 16) : fmtTime(c.createTime))}</td>
         <td class="muted small" data-label="层级">${c.isReply ? '二级' : '一级'}</td>
         <td class="cell-sent" data-label="情感">${sentBadge(c)}</td>
+        <td class="cell-star" data-label="收藏">${starBtn}</td>
       </tr>`;
     }).join('');
     $('#tableEmpty').classList.toggle('hidden', rows.length > 0);
@@ -2226,17 +2318,6 @@ function bindAiEvents() {
     $('#fileInput').addEventListener('change', (e) => { loadFiles(e.target.files); e.target.value = ''; });
     $('#dirInput').addEventListener('change', (e) => { loadFiles(e.target.files); e.target.value = ''; });
 
-  const btnTheme = $('#btnTheme');
-  if (btnTheme) {
-    btnTheme.addEventListener('click', () => {
-      const mode = window.__douyinTheme ? window.__douyinTheme.toggle() : 'dark';
-      toast(mode === 'light' ? '已切换到浅色主题' : '已切换到深色主题');
-      if (state.comments.length) { renderTable(); renderRegionPanel(); }
-      const gm = $('#groupModal');
-      if (gm && !gm.classList.contains('hidden')) renderGrouped(gm.dataset.mode === '__fav__' ? '__fav__' : '');
-    });
-  }
-
     $('#btnClear').addEventListener('click', () => {
       state.comments = [];
       state.videos = new Map();
@@ -2351,16 +2432,17 @@ function bindAiEvents() {
     if ($('#btnCloseGroup')) $('#btnCloseGroup').addEventListener('click', closeGroupModal);
     if ($('#groupModal')) {
       $('#groupModal').addEventListener('click', (e) => { if (e.target === $('#groupModal')) closeGroupModal(); });
-      $('#groupChips').addEventListener('click', (e) => {
-        const favChip = e.target.closest('[data-fav-region]');
-        if (favChip) {
-          favRegion = favChip.dataset.favRegion || '';
+      const groupSelEl = $('#groupRegionSel');
+      if (groupSelEl) groupSelEl.addEventListener('change', (e) => {
+        const modal = $('#groupModal');
+        const mode = modal && modal.dataset.mode;
+        const val = (e.target && e.target.value) || '';
+        if (mode === '__fav__') {
+          favRegion = val;
           renderGrouped('__fav__');
-          return;
+        } else {
+          renderGrouped(val);
         }
-        const chip = e.target.closest('[data-group-region]');
-        if (!chip) return;
-        renderGrouped(chip.dataset.groupRegion || '');
       });
       $('#groupBody').addEventListener('click', (e) => {
         const star = e.target.closest('[data-fav-uid]');
@@ -2462,6 +2544,8 @@ let favRegion = '';
       secUid: String(u.secUid || ''),
       nickname: String(u.nickname || ''),
       uniqueId: String(u.uniqueId || ''),
+      // v0.9.10：收藏时把头像一起存下来，收藏列表/分组弹层里也能显示真头像
+      avatar: String(u.avatar || ''),
       region: String(region || ''),
       profileUrl: u.secUid ? 'https://www.douyin.com/user/' + encodeURIComponent(String(u.secUid)) : '',
     };
@@ -2481,6 +2565,7 @@ let favRegion = '';
       state.favorites = new Map((data.favorites || []).map((f) => [String(f.uid), f]));
       state.favReady = true;
     } catch (e) { /* 旧服务端 / 离线：忽略，收藏按钮会提示 */ }
+    backfillFavoriteAvatars();
     renderFavBadge();
     if (state.comments.length) { renderTable(); renderRegionPanel(); }
   }
@@ -2491,19 +2576,22 @@ let favRegion = '';
     if (!uid) { toast('这个用户没有 uid，无法收藏'); return; }
     const was = state.favorites.get(uid) || null;
     const label = (user && user.nickname) || uid;
+    const favUser = Object.assign({}, user, { avatar: avatarOf(user) });
     if (was) state.favorites.delete(uid);
-    else state.favorites.set(uid, Object.assign(favPayload(user, region), { savedAt: Date.now() }));
+    else state.favorites.set(uid, Object.assign(favPayload(favUser, region), { savedAt: Date.now() }));
     renderFavBadge(); renderTable(); renderRegionPanel();
     try {
       const r = await fetch(favEndpoint(was ? 'remove' : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(was ? { uid } : { user: favPayload(user, region) }),
+        body: JSON.stringify(was ? { uid } : { user: favPayload(favUser, region) }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || data.ok === false) throw new Error((data && data.error) || ('HTTP ' + r.status));
       state.favorites = new Map((data.favorites || []).map((f) => [String(f.uid), f]));
       state.favReady = true;
+      // v0.9.10：老收藏没有头像，用当前导出数据里的头像索引补一下（只影响本次显示，不写回）
+      backfillFavoriteAvatars();
       toast(was ? '已取消收藏：' + label : '已收藏客户：' + label);
     } catch (e) {
       if (was) state.favorites.set(uid, was); else state.favorites.delete(uid);
@@ -2555,7 +2643,7 @@ let favRegion = '';
       if (!u) {
         u = {
           uid: c.user.uid || '', nickname: c.user.nickname || '', secUid: c.user.secUid || '',
-          uniqueId: c.user.uniqueId || '', region, comments: 0, digg: 0, lastAt: 0, sample: '',
+          uniqueId: c.user.uniqueId || '', avatar: c.user.avatar || '', region, comments: 0, digg: 0, lastAt: 0, sample: '',
         };
         g.users.set(key, u);
       }
@@ -2629,7 +2717,7 @@ let favRegion = '';
       ? `<a class="user-name" href="${esc(profile)}" target="_blank" rel="noopener noreferrer">${esc(u.nickname)}</a>`
       : `<span class="user-name">${esc(u.nickname || '匿名用户')}</span>`;
     return `<div class="group-user">
-      <span class="avatar" style="${esc(avatarStyle({ secUid: u.secUid, uid: u.uid, nickname: u.nickname }))}">${esc(initials(u.nickname))}</span>
+      ${avatarHtml({ secUid: u.secUid, uid: u.uid, nickname: u.nickname, avatar: u.avatar })}
       <div class="gu-main">
         ${name}
         <span class="muted small">${esc(u.uniqueId || (u.uid ? 'uid ' + String(u.uid).slice(-8) : '') || '无抖音号')}${u.region ? ' · ' + esc(u.region) : ''}</span>
@@ -2655,23 +2743,30 @@ let favRegion = '';
       const favs = favRegion ? favsAll.filter((f) => regionOfFav(f) === favRegion) : favsAll;
       $('#groupTitle').textContent = '已收藏客户';
       const rows = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'));
-      $('#groupChips').innerHTML = [
-        `<button type="button" class="chip${favRegion ? '' : ' on'}" data-fav-region="">全部（${fmtNum(favsAll.length)}）</button>`,
-        ...rows.map(([region, n]) => `<button type="button" class="chip${favRegion === region ? ' on' : ''}" data-fav-region="${esc(region)}">${esc(region)} · ${fmtNum(n)}</button>`),
-      ].join('');
+      const sel = $('#groupRegionSel');
+      if (sel) {
+        sel.innerHTML = [
+          `<option value="">全部（${fmtNum(favsAll.length)}）</option>`,
+          ...rows.map(([region, n]) => `<option value="${esc(region)}">${esc(region)} · ${fmtNum(n)} 人</option>`),
+        ].join('');
+        sel.value = favRegion || '';
+      }
       const sub = $('#groupSub');
       if (sub) sub.textContent = favRegion ? `${fmtNum(favs.length)} / ${fmtNum(favsAll.length)} 位 · ${favRegion}` : `${fmtNum(favsAll.length)} 位`;
       body.innerHTML = favs.length
-        ? favs.map((f) => groupUserRow({ uid: f.uid, nickname: f.nickname, secUid: f.secUid, uniqueId: f.uniqueId, region: f.region, comments: 0, digg: 0, sample: f.note || '' })).join('')
+        ? favs.map((f) => groupUserRow({ uid: f.uid, nickname: f.nickname, secUid: f.secUid, uniqueId: f.uniqueId, avatar: avatarOf(f), region: f.region, comments: 0, digg: 0, sample: f.note || '' })).join('')
         : `<p class="meta">${favsAll.length ? '这个属地没有已收藏客户' : '还没有收藏客户：在评论表里点用户旁的「☆」，或在「按地域分组看客户」里批量收藏。'}</p>`;
       return;
     }
     const groups = collectGroups();
     $('#groupTitle').textContent = groupRegion ? `${groupRegion} · 地域客户` : '按地域分组看客户';
-    const chips = [`<button type="button" class="chip${groupRegion ? '' : ' on'}" data-group-region="">全部地域（${groups.length}）</button>`]
-      .concat(groups.map((g) => `<button type="button" class="chip${groupRegion === g.region ? ' on' : ''}" data-group-region="${esc(g.region)}">${esc(g.region)} · ${fmtNum(g.userCount)}人</button>`))
-      .join('');
-    $('#groupChips').innerHTML = chips;
+    const sel = $('#groupRegionSel');
+    if (sel) {
+      sel.innerHTML = [`<option value="">全部地域（${groups.length}）</option>`]
+        .concat(groups.map((g) => `<option value="${esc(g.region)}">${esc(g.region)} · ${fmtNum(g.userCount)} 人</option>`))
+        .join('');
+      sel.value = groupRegion || '';
+    }
     const list = groupRegion ? groups.filter((g) => g.region === groupRegion) : groups;
     const usersTotal = list.reduce((n, g) => n + g.userCount, 0);
     const sub = $('#groupSub');
@@ -2851,7 +2946,7 @@ let favRegion = '';
         select.style.display = '';
         if (files.length) select.value = '';
         if (!files.length) {
-          toast('没有找到本地导出的 douyin-comments-*.json');
+          toast('没有找到本地导出的 douyin-comments-*.json 或 douyin-keyword-*.json');
           return;
         }
         // v0.1.5：优先恢复「上次看的那份」；从没清空过则自动载入最新一份；

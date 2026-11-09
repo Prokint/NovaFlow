@@ -665,6 +665,8 @@ input::placeholder { color: var(--meta); }
 }
 .fav-avatar {
   flex: 0 0 auto;
+  position: relative;
+  overflow: hidden;
   width: 30px;
   height: 30px;
   border-radius: var(--r-pill);
@@ -676,6 +678,17 @@ input::placeholder { color: var(--meta); }
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.3px;
+}
+
+/* v0.9.10：收藏客户显示真实头像（取不到时露出首字占位） */
+.fav-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  background: var(--surface-3);
 }
 .fav-main { flex: 1 1 auto; min-width: 0; }
 .fav-name-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
