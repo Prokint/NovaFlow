@@ -689,6 +689,7 @@ async function main(): Promise<void> {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, paths.profile,
       hostInspectPort, { ...hostEnvironment, DSH_HOME: accountScope.home, DSH_NOVAFLOW_SCOPE_PATCH: accountScope.patchFile,
+        ...(accountScope.agentsHome === undefined ? {} : { DSH_AGENTS_HOME: accountScope.agentsHome }),
         DSH_CLIENT_VERSION: desktopClientVersion(), DSH_NOVAFLOW_DESKTOP: '1', DSH_TELEMETRY_DISABLED: '1' }, onFailure,
       primaryRuntime,
       resources, nativeConfiguration(), saveModelCapacity)

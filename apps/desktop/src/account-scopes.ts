@@ -21,6 +21,8 @@ export interface DesktopAccountScope {
   readonly authenticated: boolean
   readonly partition: string | undefined
   readonly patchFile: string | undefined
+  /** Per-account shared agent root; undefined keeps the machine-wide `~/.agents` for the legacy owner. */
+  readonly agentsHome: string | undefined
 }
 
 /** Native roots; all account paths below them are derived from hashed identities. */
@@ -115,7 +117,10 @@ export class DesktopAccountScopes {
     const home = legacy ? this.options.home : join(this.options.home, 'accounts', key)
     return { key, home, legacy, authenticated: identity !== null, profile: join(home, 'profiles', 'desktop'),
       partition: legacy ? undefined : `persist:novaflow-account-${key}`,
-      patchFile: legacy ? undefined : join(home, 'desktop-account.patch.json') }
+      patchFile: legacy ? undefined : join(home, 'desktop-account.patch.json'),
+      // The legacy owner keeps the machine-wide `~/.agents` its skills already live in; every other
+      // account reads and writes its own root so one account never lists another's skills.
+      agentsHome: legacy ? undefined : join(home, 'agents') }
   }
 
   /**

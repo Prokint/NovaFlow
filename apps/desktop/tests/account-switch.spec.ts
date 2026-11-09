@@ -3,7 +3,7 @@ import { DesktopAccountSwitch } from '../src/account-switch.ts'
 import type { DesktopAccountScope } from '../src/account-scopes.ts'
 
 const scope = (key: string): DesktopAccountScope => ({ key, home: key, profile: key, legacy: false,
-  authenticated: true, partition: key, patchFile: undefined })
+  authenticated: true, partition: key, patchFile: undefined, agentsHome: `${key}-agents` })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((r) => { resolve = r }); return { promise, resolve } }
 
 it('revokes synchronously, waits for old Host exit, then prepares and reveals the next account', async () => {

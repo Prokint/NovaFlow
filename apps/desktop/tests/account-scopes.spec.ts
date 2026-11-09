@@ -51,6 +51,18 @@ it('never assigns unowned legacy data to a subsequent login or its saved record 
   expect(restarted.legacyOwner).toBeNull()
 })
 
+it('isolates the shared agent root per account while the legacy owner keeps ~/.agents', async () => {
+  const { scopes, options } = await fixture()
+  await scopes.claimLegacy(a)
+  const legacy = new DesktopAccountScopes(options).resolve(a)
+  // The legacy owner already keeps skills under the machine-wide ~/.agents, so it stays undefined.
+  expect(legacy.agentsHome).toBeUndefined()
+  const account = scopes.resolve(b)
+  expect(account.agentsHome).toBe(join(account.home, 'agents'))
+  expect(account.agentsHome).not.toBe(join(options.home, '.agents'))
+  expect(scopes.resolve(a).agentsHome).not.toBe(account.agentsHome)
+})
+
 it('composes the account-owned first workspace directory after the shipped product overlay', async () => {
   const { scopes, options } = await fixture()
   const scope = scopes.resolve(b)
