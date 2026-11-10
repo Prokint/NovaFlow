@@ -72,6 +72,8 @@ export class NovaFlowDesktopRuntime {
   private accountRefreshError: AccountFailure | undefined
   private catalogTask: { generation: number; promise: Promise<void> } | undefined
   private walletTask: { generation: number; promise: Promise<void> } | undefined
+  /** One site-settings read per account generation, shared by catalog and wallet refreshes. */
+  private quotaTask: { generation: number; promise: Promise<void> } | undefined
   private refreshTask: { epoch: number; promise: Promise<void> } | undefined
   private mutationTail: Promise<void> = Promise.resolve()
   private disposed = false
@@ -288,8 +290,9 @@ export class NovaFlowDesktopRuntime {
   }
 
   private async readWallet(generation: number, signal: AbortSignal): Promise<void> {
-    const display = this.quotaDisplay === undefined && this.catalogStatus !== 'loading'
-      ? this.readQuotaDisplay(generation, signal) : Promise.resolve()
+    // Re-read the site's display settings with every balance refresh: an operator can switch the
+    // currency or unit while a user stays signed in, and the wallet must follow that change.
+    const display = this.readQuotaDisplay(generation, signal)
     try {
       let access = await this.account.getRequestCredentials()
       let wallet: NovaFlowWalletQuota
@@ -347,10 +350,21 @@ export class NovaFlowDesktopRuntime {
     while (this.pending.size) await Promise.all([...this.pending])
   }
 
-  private async readQuotaDisplay(generation: number, signal: AbortSignal): Promise<void> {
+  private readQuotaDisplay(generation: number, signal: AbortSignal): Promise<void> {
+    if (this.quotaTask?.generation === generation) return this.quotaTask.promise
+    const promise = this.fetchQuotaDisplay(generation, signal).finally(() => {
+      if (this.quotaTask?.promise === promise) this.quotaTask = undefined
+    })
+    this.quotaTask = { generation, promise }
+    return this.track(promise)
+  }
+
+  private async fetchQuotaDisplay(generation: number, signal: AbortSignal): Promise<void> {
     try {
       const display = await readNovaFlowQuotaDisplay(this.options.fetch, this.options.server.get(), signal)
-      if (generation === this.generation && !signal.aborted) this.quotaDisplay = display
+      if (generation !== this.generation || signal.aborted) return
+      this.quotaDisplay = display
+      this.publish()
     } catch (_displayError) { /* Cosmetic settings do not change quota or account authorization. */ }
   }
 

@@ -494,6 +494,7 @@ describe('native NovaFlow account UI', () => {
     let rotations = 0
     let group = 'discount'
     let offline = false
+    let displayType = 'USD'
     const requests: string[] = []
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -520,7 +521,7 @@ describe('native NovaFlow account UI', () => {
         if (offline) throw new Error('Authorization: fixture-secret')
         return Response.json({ quota_remaining: '500000', quota_used: '0', unit: 'quota', quota_used_kind: 'account_usage_total', device_quota_used: '0', device_quota_limit: null })
       }
-      if (path === '/api/status') return Response.json({ success: true, data: { quota_per_unit: 500000, quota_display_type: 'USD' } })
+      if (path === '/api/status') return Response.json({ success: true, data: { quota_per_unit: 500000, quota_display_type: displayType, usd_exchange_rate: 7 } })
       throw new Error('unexpected endpoint')
     })
     let listener: (snapshot: NovaFlowDesktopSnapshot) => void = () => {}
@@ -564,6 +565,11 @@ describe('native NovaFlow account UI', () => {
     await vi.waitFor(() => { expect(button('Refresh balance').disabled).toBe(false) })
     button('Refresh balance').click()
     await vi.waitFor(() => { expect(page.textContent).not.toContain('Refresh failed; showing the last successful data.') })
+    // The site can switch its currency while the account stays signed in; a balance refresh follows it.
+    displayType = 'CNY'
+    button('Refresh balance').click()
+    await vi.waitFor(() => { expect(row('Wallet balance')).toBe('¥7') })
+    expect(runtime.getSnapshot().quotaDisplay?.type).toBe('CNY')
     expect(JSON.stringify(runtime.getSnapshot())).not.toMatch(/dsk\.|dsr\.|refreshToken|accessToken/u)
   })
 
