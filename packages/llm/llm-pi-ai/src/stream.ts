@@ -40,8 +40,10 @@ export function mapUsage(usage: PiUsage): TokenUsage {
 // If pi-ai ever forwards the original Error (or a fetch/dispatcher hook that lets
 // us capture the cause ourselves), classify on `code`/`cause` instead of text.
 function classifyPiAiError(message: string): string {
+  // A gateway reports an exhausted balance as 403 as often as 402, so quota wording is classified before
+  // the bare 401/403 authentication branch would claim it.
+  if (isQuotaExceededError(message) || /\b402\b/.test(message)) return QUOTA_EXCEEDED_CODE
   if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
-  if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
   // A rejected request body (gateway or provider size cap): resending the
   // same request cannot succeed, so it is invalid, not transient.

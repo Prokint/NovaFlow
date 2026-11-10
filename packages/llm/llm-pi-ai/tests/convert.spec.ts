@@ -904,6 +904,14 @@ describe('mapStopReason / mapUsage', () => {
       .toMatchObject({ kind: 'error', failure: { code: 'RATE_LIMIT' } })
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'HTTP 429: insufficient_quota' })))
       .toMatchObject({ kind: 'error', failure: { code: 'QUOTA' } })
+    // A gateway that reports an exhausted balance as 403 must not be reported as an invalid key.
+    expect(mapStopReason(assistant({
+      stopReason: 'error',
+      errorMessage: '403 Insufficient user quota, remaining quota: ＄0.000000',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'QUOTA' } })
+    // The relay rewrites the same failure to 402, which carries no quota wording of its own.
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: '402 status code (no body)' })))
+      .toMatchObject({ kind: 'error', failure: { code: 'QUOTA' } })
     expect(mapStopReason(assistant({
       stopReason: 'error',
       errorMessage: 'OpenAI API error (429): You exceeded your current quota, please check your plan and billing details.',
