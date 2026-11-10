@@ -2,6 +2,23 @@
 
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
+## 0.2.6-m3
+
+### 新增
+
+- 桌面端内置抖音评论插件 `dsh-douyin-comments` 升级到 0.9.21：新增 NovaFlow 订阅授权 —— 激活码绑定一个 NovaFlow 账号、最多 2 台设备、199 元/月；不在 NovaFlow 授权环境里运行时保持原有的免费行为。
+- 主进程本地回路中继新增 `/novaflow/collect/v1/*` 订阅通道：Host 子进程以 `x-novaflow-capability` 鉴权访问，主进程注入账号令牌后只转发 `v1` 路径，调用方的请求头、Cookie 与凭据不会被转发。
+
+### 变更
+
+- 内置插件启动时从本地中继领取解密材料（仅内存，不落盘）；构建侧可用 `DYC_MATERIAL` 轮换材料。
+- 桌面端 Host 在收到账号配置后把本地中继地址与能力令牌注入自身进程环境，供随包插件读取。
+
+### 升级说明
+
+- 本版为测试构建（prerelease）：Windows 安装包未签名，SmartScreen 提示时选择「更多信息」再「仍要运行」。
+- 在 NovaFlow 里使用抖音采集需要先激活订阅；激活入口在插件面板，词云查看不受影响。
+
 ## 0.2.5
 
 ### 新增
