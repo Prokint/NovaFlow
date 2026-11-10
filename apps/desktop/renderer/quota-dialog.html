@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'">
+    <title></title>
+    <link rel="stylesheet" href="quota-dialog.css">
+  </head>
+  <body class="quota-dialog">
+    <main id="dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="title" aria-describedby="message detail" hidden>
+      <button id="close" class="close" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+      <span class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H17v3" />
+          <rect x="3" y="7" width="18" height="12" rx="3" />
+          <path d="M16 13h2" />
+        </svg>
+      </span>
+      <h1 id="title"></h1>
+      <p id="message"></p>
+      <p id="detail"></p>
+      <div id="balance" class="balance" hidden>
+        <span id="balance-label"></span>
+        <strong id="balance-value"></strong>
+      </div>
+      <div id="actions"></div>
+    </main>
+    <script src="quota-dialog.js"></script>
+  </body>
+</html>

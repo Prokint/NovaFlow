@@ -13,6 +13,7 @@ import { ModelCapacitySettings, type ModelCapacityOverride } from './novaflow/mo
 import { desktopDeviceName } from './novaflow/device-name.ts'
 import { checkNovaFlowRelease, fetchNovaFlowReleaseNotes, ReleaseNoticeState } from './novaflow/release-check.ts'
 import type { NovaFlowHostConfiguration } from '@deepseek-ai/dsh-desktop-host/novaflow'
+import { formatQuota } from './novaflow/quota-display.ts'
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 import { DesktopAccountScopes, desktopAccountIdentity, desktopAccountKey } from './account-scopes.ts'
 import { readNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
@@ -66,6 +67,7 @@ import { desktopErrorState } from './startup-error.ts'
 import { readDesktopLoginShellEnvironment, resolveDesktopLoginShellConfig } from './login-shell-environment.ts'
 import { desktopClientVersion } from './client-metadata.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
+import { DesktopQuotaDialog } from './quota-dialog.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
 import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays, shadeCaptionColor } from './update-overlay.ts'
@@ -441,6 +443,7 @@ async function main(): Promise<void> {
   }
   const updateOverlays = new DesktopUpdateOverlays(paintCaption)
   const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
+  const quotaDialog = new DesktopQuotaDialog(fileURLToPath(new URL('./preload-quota-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
   const ordinaryMessageBox = async (options: UpdateDialogOptions): Promise<Electron.MessageBoxReturnValue> => {
     const controller = new AbortController()
     ordinaryDialogs.add(controller)
@@ -609,11 +612,18 @@ async function main(): Promise<void> {
     const at = Date.now()
     if (at - quotaNoticeShownAt < 30_000) return
     quotaNoticeShownAt = at
+    const parent = currentMainWindow()
+    if (parent === undefined || parent.isDestroyed()) return
     const copy = novaFlowAccountCopy(currentDesktopLocale().id)
-    void dialog.showMessageBox({
-      type: 'warning', title: copy.quotaTitle, message: copy.quotaMessage, detail: copy.quotaDetail,
-      buttons: [copy.quotaRecharge, copy.quotaLater], defaultId: 0, cancelId: 1, noLink: true,
-    }).then(({ response }) => {
+    const snapshot = novaflow.getSnapshot()
+    const balanceValue = snapshot.wallet === undefined
+      ? ''
+      : formatQuota(snapshot.wallet.remaining, snapshot.quotaDisplay, currentDesktopLocale().id)
+    void quotaDialog.show(parent, {
+      title: copy.quotaTitle, message: copy.quotaMessage, detail: copy.quotaDetail,
+      balanceLabel: copy.quotaBalance, balanceValue,
+      buttons: [copy.quotaRecharge, copy.quotaLater], cancelId: 1,
+    }).then((response) => {
       if (response === 0) void shell.openExternal(`${server.get()}/wallet`)
     }).catch((_dialogError: unknown) => {
       // A dismissed or unavailable dialog must not fail the request that already reported its quota error.
@@ -1336,6 +1346,7 @@ async function main(): Promise<void> {
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()
     updateSchedule.dispose()
     updateDialog.dispose()
+    quotaDialog.dispose()
     void Promise.all([backend.close(), closeNovaFlow()])
       .catch((error: unknown) => { console.error(error) }).finally(() => { app.quit() })
   }
@@ -1347,6 +1358,7 @@ async function main(): Promise<void> {
       updateJournal?.action('quit-requested')
       tray?.dispose()
       updateDialog.dispose()
+      quotaDialog.dispose()
       return
     }
     if (quitting) return
