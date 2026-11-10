@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'">
+    <title></title>
+    <link rel="stylesheet" href="topup-dialog.css">
+  </head>
+  <body class="topup-dialog">
+    <main id="dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="title" hidden>
+      <button id="close" class="close" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+
+      <header class="head">
+        <span class="badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+        </span>
+        <div>
+          <h1 id="title"></h1>
+          <p class="balance"><span id="balance-label"></span><strong id="balance-value"></strong></p>
+        </div>
+      </header>
+
+      <section id="form" hidden>
+        <p class="section-label" id="amount-label"></p>
+        <div id="options" class="options"></div>
+        <label class="custom">
+          <span id="custom-label"></span>
+          <input id="custom-amount" type="number" inputmode="numeric" min="1" step="1" autocomplete="off">
+        </label>
+        <p id="hint" class="hint"></p>
+        <div id="methods" class="methods"></div>
+        <p id="error" class="error" hidden></p>
+      </section>
+
+      <section id="progress" class="progress" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <p id="progress-text"></p>
+      </section>
+
+      <section id="done" class="done" hidden>
+        <span class="check" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7" /></svg>
+        </span>
+        <p id="done-text"></p>
+        <p class="done-balance"><span id="done-balance-label"></span><strong id="done-balance-value"></strong></p>
+      </section>
+
+      <div class="actions">
+        <button id="pay" class="primary" type="button"></button>
+        <button id="finish" class="primary" type="button" hidden></button>
+      </div>
+    </main>
+    <script src="topup-dialog.js"></script>
+  </body>
+</html>

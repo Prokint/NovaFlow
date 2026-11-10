@@ -4,13 +4,14 @@ import { accountFailure, type AccountFailure } from './account-errors.ts'
 import type { NovaFlowQuotaDisplay } from './quota-display.ts'
 import { NovaFlowAuthBroker } from './auth-broker.ts'
 import { NovaFlowAuthError } from './auth-protocol.ts'
+import type { NewApiTopUpFace, NewApiTopUpInfo, NewApiTopUpOrder, NewApiTopUpState } from './new-api.ts'
 import { groupSelection, sameGroupSelection, type GroupSelection } from './group-policy.ts'
 import type { NovaFlowAccountSnapshot, NovaFlowAuthBrokerOptions } from './auth-broker.ts'
 import { normalizeServerOrigin, type ServerOriginSetting } from './server-origin.ts'
 import { NovaFlowCatalogController } from './catalog-controller.ts'
 import type { CatalogControllerOptions, DesktopCatalogView } from './catalog-controller.ts'
 import { NovaFlowRelayBroker } from './relay-broker.ts'
-import type { DesktopRelayResult } from './relay-broker.ts'
+import type { DesktopRelayResult, RelayAccess } from './relay-broker.ts'
 import type { DesktopEndpoint } from './catalog.ts'
 
 /** Safe native account view; no method returning credentials belongs in renderer IPC. */
@@ -42,6 +43,8 @@ export interface NovaFlowDesktopOptions extends Omit<NovaFlowAuthBrokerOptions, 
   readonly accountMode?: 'site-session'
   readonly readCatalog?: CatalogControllerOptions['readCatalog']
   readonly readWalletQuota?: typeof readNovaFlowWalletQuota
+  /** Online top-up surface; absent when this account mode cannot pay through the site. */
+  readonly topUp?: NewApiTopUpFace
   readonly endpointPath?: (endpoint: DesktopEndpoint) => string
   readonly onChange?: (snapshot: NovaFlowDesktopSnapshot) => void
 }
@@ -272,6 +275,35 @@ export class NovaFlowDesktopRuntime {
       if (epoch !== this.accountEpoch || this.disposed) return
       return this.loadWallet()
     }))
+  }
+
+  /** Read the authenticated site's top-up form (amount shortcuts and payment methods). */
+  topUpInfo(): Promise<NewApiTopUpInfo> {
+    return this.withTopUp((face, origin, access) => face.info(this.options.fetch, origin, access, this.balanceRequest.signal))
+  }
+
+  /** Ask the site what one whole-dollar amount costs after its own price and discounts. */
+  quoteTopUp(amount: number): Promise<string> {
+    return this.withTopUp((face, origin, access) => face.quote(this.options.fetch, origin, access, amount, this.balanceRequest.signal))
+  }
+
+  /** Create one payment order; the shell opens its payment window for the returned form. */
+  startTopUp(amount: number, method: string): Promise<NewApiTopUpOrder> {
+    return this.withTopUp((face, origin, access) =>
+      face.start(this.options.fetch, origin, access, { amount, method }, this.balanceRequest.signal))
+  }
+
+  /** Read one order's state from the authenticated top-up history. */
+  topUpState(tradeNo: string): Promise<NewApiTopUpState> {
+    return this.withTopUp((face, origin, access) => face.state(this.options.fetch, origin, access, tradeNo, this.balanceRequest.signal))
+  }
+
+  private async withTopUp<T>(run: (face: NewApiTopUpFace, origin: string, access: RelayAccess) => Promise<T>): Promise<T> {
+    const face = this.options.topUp
+    if (face === undefined || this.disposed || this.account.getSnapshot().status !== 'signed-in') {
+      throw new NovaFlowAuthError('invalid_response')
+    }
+    return run(face, this.options.server.get(), await this.account.getRequestCredentials())
   }
 
   private loadWallet(): Promise<void> {

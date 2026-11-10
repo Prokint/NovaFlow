@@ -136,6 +136,7 @@ export function createElectronBuilderConfig(
       'lib/preload-app.cjs',
       'lib/preload-update-dialog.cjs',
       'lib/preload-quota-dialog.cjs',
+      'lib/preload-topup-dialog.cjs',
       'renderer/**/*',
       'package.json',
       '!node_modules/**/*.{js,cjs,mjs,ts,cts,mts,css}.map',

@@ -66,6 +66,7 @@ export function installNovaFlowAccountUi(): void {
     cancel: () => ipcRenderer.invoke('novaflow:cancel') as Promise<NovaFlowDesktopSnapshot>,
     signOut: () => ipcRenderer.invoke('novaflow:sign-out') as Promise<{ remoteRevoked: boolean; cancelled?: boolean }>,
     openPage: page => ipcRenderer.invoke('novaflow:open-page', page) as Promise<void>,
+    openTopUp: () => { void ipcRenderer.invoke('novaflow:open-topup') },
     refresh: () => ipcRenderer.invoke('novaflow:refresh') as ReturnType<NovaFlowAccountUiOperations['refresh']>,
     refreshCatalog: () => ipcRenderer.invoke('novaflow:refresh-catalog') as ReturnType<NovaFlowAccountUiOperations['refreshCatalog']>,
     restore: () => ipcRenderer.invoke('novaflow:restore') as ReturnType<NovaFlowAccountUiOperations['restore']>,

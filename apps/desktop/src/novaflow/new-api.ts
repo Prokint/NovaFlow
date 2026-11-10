@@ -296,3 +296,156 @@ export function newApiSessionEndpoint(endpoint: DesktopEndpoint): string {
   if (endpoint !== '/v1/chat/completions') throw new NovaFlowAuthError('invalid_response')
   return '/pg/chat/completions'
 }
+
+/** One payment method the authenticated site offers for top-up. */
+export interface NewApiPayMethod {
+  /** Provider identifier sent back to `/api/user/pay` (for example `alipay`). */
+  readonly type: string
+  /** Operator-supplied label shown in the dialog. */
+  readonly name: string
+}
+
+/** The site's authenticated top-up configuration. */
+export interface NewApiTopUpInfo {
+  /** Whole-dollar amounts the operator offers as shortcuts. */
+  readonly amountOptions: readonly number[]
+  /** Smallest whole-dollar amount the site accepts. */
+  readonly minTopUp: number
+  /** Empty when online top-up is disabled or unconfigured. */
+  readonly payMethods: readonly NewApiPayMethod[]
+}
+
+/** One created payment order: the gateway form the shell posts in its payment window. */
+export interface NewApiTopUpOrder {
+  readonly tradeNo: string
+  readonly payUrl: string
+  readonly fields: Readonly<Record<string, string>>
+}
+
+/** How one order is progressing server-side. */
+export type NewApiTopUpState = 'pending' | 'paid' | 'failed'
+
+/** Upper bound on a top-up amount; keeps decimal math inside New API's integer units. */
+const MAX_TOP_UP_AMOUNT = 1_000_000
+
+function wholeAmount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > MAX_TOP_UP_AMOUNT) {
+    throw new NovaFlowAuthError('invalid_response')
+  }
+  return value
+}
+
+function payMethodType(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/u.test(value)) throw new NovaFlowAuthError('invalid_response')
+  return value
+}
+
+/**
+ * Read the authenticated site's top-up form configuration.
+ * @param fetcher - Main-process transport.
+ * @param origin - Selected site.
+ * @param access - Broker-owned session access.
+ * @param signal - Dialog cancellation.
+ * @returns Shortcut amounts, the minimum, and the payment methods that can be used now.
+ */
+export async function readNewApiTopUpInfo(fetcher: typeof fetch, origin: string, access: RelayAccess,
+  signal: AbortSignal): Promise<NewApiTopUpInfo> {
+  const payload = record(data(await readAccountJson(fetcher, `${origin}/api/user/topup/info`, request(access, signal), 65536)))
+  const options = Array.isArray(payload.amount_options)
+    ? payload.amount_options.filter(value => typeof value === 'number' && Number.isSafeInteger(value) && value > 0).slice(0, 12) as number[]
+    : []
+  const minTopUp = typeof payload.min_topup === 'number' && Number.isSafeInteger(payload.min_topup) && payload.min_topup > 0
+    ? payload.min_topup : 1
+  if (payload.enable_online_topup !== true) return { amountOptions: options, minTopUp, payMethods: [] }
+  const methods = Array.isArray(payload.pay_methods) ? payload.pay_methods.map((value) => {
+    const method = record(value)
+    return { type: payMethodType(method.type), name: text(method.name, 64) }
+  }) : []
+  return { amountOptions: options, minTopUp, payMethods: methods }
+}
+
+/**
+ * Ask the site what one whole-dollar amount costs after its own price and discounts.
+ * @param fetcher - Main-process transport.
+ * @param origin - Selected site.
+ * @param access - Broker-owned session access.
+ * @param amount - Whole-dollar top-up amount the user selected.
+ * @param signal - Dialog cancellation.
+ * @returns The money string the payment gateway receives (for example `7.00`).
+ */
+export async function quoteNewApiTopUp(fetcher: typeof fetch, origin: string, access: RelayAccess,
+  amount: number, signal: AbortSignal): Promise<string> {
+  const body = JSON.stringify({ amount: wholeAmount(amount) })
+  const init = { ...request(access, signal), method: 'POST', headers: {
+    authorization: `Bearer ${access.accessToken}`, accept: 'application/json', 'content-type': 'application/json',
+  }, body }
+  // This legacy handler answers `{message, data}` without the `success` flag the newer routes carry.
+  const envelope = record(await readAccountJson(fetcher, `${origin}/api/user/amount`, init, 16384))
+  if (envelope.message !== 'success') throw new NovaFlowAuthError('invalid_response')
+  const money = envelope.data
+  if (typeof money !== 'string' || !/^\d{1,9}(?:\.\d{1,4})?$/u.test(money)) throw new NovaFlowAuthError('invalid_response')
+  return money
+}
+
+/**
+ * Create one payment order. The shell posts the returned gateway form in its own payment window.
+ * @param fetcher - Main-process transport.
+ * @param origin - Selected site.
+ * @param access - Broker-owned session access.
+ * @param request - Whole-dollar amount and the selected payment provider.
+ * @param signal - Dialog cancellation.
+ * @returns Trade number, gateway URL, and the form fields the gateway expects.
+ */
+export async function startNewApiTopUp(fetcher: typeof fetch, origin: string, access: RelayAccess,
+  request_: { amount: number; method: string }, signal: AbortSignal): Promise<NewApiTopUpOrder> {
+  const body = JSON.stringify({ amount: wholeAmount(request_.amount), payment_method: payMethodType(request_.method) })
+  const init = { ...request(access, signal), method: 'POST', headers: {
+    authorization: `Bearer ${access.accessToken}`, accept: 'application/json', 'content-type': 'application/json',
+  }, body }
+  const envelope = record(await readAccountJson(fetcher, `${origin}/api/user/pay`, init, 16384))
+  if (envelope.message !== 'success') throw new NovaFlowAuthError('invalid_response')
+  const order = record(envelope.data)
+  const tradeNo = text(order.out_trade_no, 128)
+  const payUrl = text(envelope.url, 2048)
+  let parsed: URL
+  try { parsed = new URL(payUrl) } catch (_error) { throw new NovaFlowAuthError('invalid_response') }
+  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') throw new NovaFlowAuthError('invalid_response')
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(order)) {
+    if (!/^[a-zA-Z0-9_]{1,64}$/u.test(key) || key === 'out_trade_no') continue
+    if (typeof value === 'string' && value.length <= 2048 && !/[\u0000-\u001f\u007f]/u.test(value)) fields[key] = value
+  }
+  return { tradeNo, payUrl, fields }
+}
+
+/**
+ * Read one order's server-side state from the authenticated top-up history.
+ * @param fetcher - Main-process transport.
+ * @param origin - Selected site.
+ * @param access - Broker-owned session access.
+ * @param tradeNo - Trade number returned by {@link startNewApiTopUp}.
+ * @param signal - Dialog cancellation.
+ * @returns `paid` once the gateway callback credited the order.
+ */
+export async function readNewApiTopUpState(fetcher: typeof fetch, origin: string, access: RelayAccess,
+  tradeNo: string, signal: AbortSignal): Promise<NewApiTopUpState> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(tradeNo)) throw new NovaFlowAuthError('invalid_response')
+  const payload = record(data(await readAccountJson(fetcher, `${origin}/api/user/topup/self?p=1&size=20`, request(access, signal), 262144)))
+  const items = Array.isArray(payload.items) ? payload.items : []
+  for (const value of items) {
+    const row = record(value)
+    if (row.trade_no !== tradeNo) continue
+    if (row.status === 'success') return 'paid'
+    if (row.status === 'pending') return 'pending'
+    return 'failed'
+  }
+  throw new NovaFlowAuthError('invalid_response')
+}
+
+/** One account mode's complete online top-up surface, injected into the desktop runtime. */
+export interface NewApiTopUpFace {
+  readonly info: typeof readNewApiTopUpInfo
+  readonly quote: typeof quoteNewApiTopUp
+  readonly start: typeof startNewApiTopUp
+  readonly state: typeof readNewApiTopUpState
+}

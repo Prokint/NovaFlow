@@ -68,6 +68,9 @@ import { readDesktopLoginShellEnvironment, resolveDesktopLoginShellConfig } from
 import { desktopClientVersion } from './client-metadata.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { DesktopQuotaDialog } from './quota-dialog.ts'
+import { DesktopTopUpDialog } from './topup-dialog.ts'
+import { quoteNewApiTopUp, readNewApiTopUpInfo, readNewApiTopUpState, startNewApiTopUp } from './novaflow/new-api.ts'
+import type { NovaFlowQuotaDisplay } from './novaflow/quota-display.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
 import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays, shadeCaptionColor } from './update-overlay.ts'
@@ -444,6 +447,39 @@ async function main(): Promise<void> {
   const updateOverlays = new DesktopUpdateOverlays(paintCaption)
   const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
   const quotaDialog = new DesktopQuotaDialog(fileURLToPath(new URL('./preload-quota-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
+  /** Currency prefix and rate note for the top-up dialog, following the site's display settings. */
+  const quotaPresentation = (): { prefix: string; exchangeHint: string } => {
+    const display: NovaFlowQuotaDisplay | undefined = novaflow.getSnapshot().quotaDisplay
+    const copy = novaFlowAccountCopy(currentDesktopLocale().id)
+    if (display === undefined) return { prefix: '¥', exchangeHint: '' }
+    const prefix = display.type === 'CUSTOM' ? `${display.symbol} ` : display.type === 'CNY' ? '¥' : display.type === 'USD' ? '$' : ''
+    const exchangeHint = display.type === 'CNY'
+      ? copy.topupExchangeHint.replace('{rate}', String(display.rate)) : ''
+    return { prefix, exchangeHint }
+  }
+  const openTopUp = (): void => {
+    const parent = currentMainWindow()
+    if (parent === undefined || parent.isDestroyed()) return
+    void topUpDialog.show(parent).catch((_error: unknown) => {
+      // A failed configuration read leaves the dialog closed; the account page still opens the web console.
+    })
+  }
+  const topUpDialog = new DesktopTopUpDialog(
+    fileURLToPath(new URL('./preload-topup-dialog.cjs', import.meta.url)), updateOverlays, {
+      info: () => novaflow.topUpInfo(),
+      quote: amount => novaflow.quoteTopUp(amount),
+      start: (amount, method) => novaflow.startTopUp(amount, method),
+      state: tradeNo => novaflow.topUpState(tradeNo),
+      balance: () => {
+        const snapshot = novaflow.getSnapshot()
+        const value = snapshot.wallet === undefined ? '' : snapshot.wallet.remaining
+        return value === '' ? '—' : `${quotaPresentation().prefix}${formatQuota(value, snapshot.quotaDisplay, currentDesktopLocale().id)}`
+      },
+      refreshWallet: () => novaflow.refreshWallet(),
+      copy: () => novaFlowAccountCopy(currentDesktopLocale().id),
+      moneyPrefix: () => quotaPresentation().prefix,
+      exchangeHint: () => quotaPresentation().exchangeHint,
+    })
   const ordinaryMessageBox = async (options: UpdateDialogOptions): Promise<Electron.MessageBoxReturnValue> => {
     const controller = new AbortController()
     ordinaryDialogs.add(controller)
@@ -581,6 +617,7 @@ async function main(): Promise<void> {
     readCatalog: (origin, access, signal) => readNewApiCatalog(globalThis.fetch, origin, access, signal,
       { contextWindow: 65536, maxOutputTokens: 8192 }),
     readWalletQuota: readNewApiWallet,
+    topUp: { info: readNewApiTopUpInfo, quote: quoteNewApiTopUp, start: startNewApiTopUp, state: readNewApiTopUpState },
     endpointPath: newApiSessionEndpoint,
     fetch: globalThis.fetch, maxRequestBytes: 20 * 1024 * 1024,
     deviceName: desktopDeviceName(hostname(), process.platform, process.arch),
@@ -624,7 +661,7 @@ async function main(): Promise<void> {
       balanceLabel: copy.quotaBalance, balanceValue,
       buttons: [copy.quotaRecharge, copy.quotaLater], cancelId: 1,
     }).then((response) => {
-      if (response === 0) void shell.openExternal(`${server.get()}/wallet`)
+      if (response === 0) openTopUp()
     }).catch((_dialogError: unknown) => {
       // A dismissed or unavailable dialog must not fail the request that already reported its quota error.
     })
@@ -692,6 +729,10 @@ async function main(): Promise<void> {
     const paths = { wallet: '/wallet', usage: '/usage-logs', devices: '/security' } as const
     if (page !== 'wallet' && page !== 'usage' && page !== 'devices') throw new Error('novaflow: invalid account page')
     return shell.openExternal(`${server.get()}${paths[page]}`)
+  })
+  ipcMain.handle('novaflow:open-topup', (event) => {
+    assertProductSender(event)
+    openTopUp()
   })
   ipcMain.handle('novaflow:refresh', (event) => {
     assertProductSender(event)
@@ -1347,6 +1388,7 @@ async function main(): Promise<void> {
     updateSchedule.dispose()
     updateDialog.dispose()
     quotaDialog.dispose()
+    topUpDialog.dispose()
     void Promise.all([backend.close(), closeNovaFlow()])
       .catch((error: unknown) => { console.error(error) }).finally(() => { app.quit() })
   }
@@ -1359,6 +1401,7 @@ async function main(): Promise<void> {
       tray?.dispose()
       updateDialog.dispose()
       quotaDialog.dispose()
+      topUpDialog.dispose()
       return
     }
     if (quitting) return

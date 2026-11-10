@@ -29,7 +29,7 @@ function hosts() {
   return { page, head, content }
 }
 
-function fixture(initial = signedOut, language = 'en') {
+function fixture(initial = signedOut, language = 'en', openTopUp?: () => void) {
   let latest = initial
   let listener: (state: NovaFlowDesktopSnapshot) => void = () => {}
   const unsubscribe = vi.fn()
@@ -43,6 +43,7 @@ function fixture(initial = signedOut, language = 'en') {
     restore: vi.fn(async () => latest),
     selectGroup: vi.fn<(selection: GroupSelection) => Promise<GroupSelectionResult>>(async () => 'selected'),
     subscribe: (callback: typeof listener) => { listener = callback; return unsubscribe },
+    ...openTopUp === undefined ? {} : { openTopUp },
   }
   const view = createNovaFlowAccountUi(document, operations, novaFlowAccountCopy(language))
   disposers.push(() => { view.dispose() })
@@ -571,6 +572,14 @@ describe('native NovaFlow account UI', () => {
     await vi.waitFor(() => { expect(row('Wallet balance')).toBe('¥7') })
     expect(runtime.getSnapshot().quotaDisplay?.type).toBe('CNY')
     expect(JSON.stringify(runtime.getSnapshot())).not.toMatch(/dsk\.|dsr\.|refreshToken|accessToken/u)
+  })
+
+  it('user with an in-app top-up path gets a top-up action on the wallet card', async () => {
+    const openTopUp = vi.fn()
+    const f = fixture(signedIn, 'en', openTopUp)
+    await f.ui.open()
+    button('Top up').click()
+    expect(openTopUp).toHaveBeenCalledOnce()
   })
 
   it('explains a browser denial instead of a generic failure', async () => {

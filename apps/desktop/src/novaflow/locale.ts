@@ -49,6 +49,23 @@ export interface NovaFlowAccountCopy {
   quotaDetail: string
   quotaRecharge: string
   quotaLater: string
+  /** Account-page action that opens the native top-up dialog. */
+  topupAction: string
+  topupTitle: string
+  topupAmountLabel: string
+  topupCustomLabel: string
+  topupPay: string
+  topupPaying: string
+  topupWaiting: string
+  topupSuccess: string
+  topupFailed: string
+  topupClose: string
+  topupFinish: string
+  /** Hint naming the smallest whole-dollar amount; `{money}` is formatted by the caller. */
+  topupMinHint: string
+  topupNoMethod: string
+  /** Hint naming the site's exchange rate; `{rate}` is formatted by the caller. */
+  topupExchangeHint: string
   deviceUsage: string
   deviceLimit: string
   deviceUnlimited: string
@@ -115,6 +132,11 @@ export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
     quotaTitle: '余额不足', quotaMessage: '当前账号余额不足以继续调用模型。', quotaBalance: '当前余额',
     quotaDetail: '充值后即可继续对话，已生成的内容和运行中的任务不会丢失。',
     quotaRecharge: '去充值', quotaLater: '稍后再说',
+    topupAction: '充值', topupTitle: '充值', topupAmountLabel: '选择金额', topupCustomLabel: '自定义金额（美元）',
+    topupPay: '去支付', topupPaying: '正在创建订单…', topupWaiting: '请在付款窗口扫码完成支付，成功后余额会自动更新。',
+    topupSuccess: '充值成功，余额已更新。', topupFailed: '充值未完成，请重试。', topupClose: '关闭', topupFinish: '完成',
+    topupMinHint: '最低 {money}', topupNoMethod: '站点暂未开放在线充值，请到网页后台充值。',
+    topupExchangeHint: '金额按美元额度计，1 美元 = ¥{rate}',
     wallet: '钱包剩余', walletQuota: '钱包剩余（额度）', numberLocale: 'zh-CN', accountUsage: '账号累计用量', quotaUnavailable: '暂不可用',
     title: 'NovaFlow 账号', signIn: '在浏览器中登录', cancel: '取消登录', signOut: '退出登录', refresh: '刷新账号', signedIn: '已登录', signingIn: '正在登录…',
     signedOut: '尚未登录', waiting: '请在系统浏览器中完成授权…', group: '分组', models: '可用模型', unavailable: '暂不可用',
@@ -147,6 +169,11 @@ export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
     quotaTitle: 'Insufficient balance', quotaMessage: 'Your account balance cannot fund further model requests.', quotaBalance: 'Balance',
     quotaDetail: 'Top up to continue; existing messages and running tasks are kept.',
     quotaRecharge: 'Top up', quotaLater: 'Later',
+    topupAction: 'Top up', topupTitle: 'Top up', topupAmountLabel: 'Amount', topupCustomLabel: 'Custom amount (USD)',
+    topupPay: 'Pay', topupPaying: 'Creating the order…', topupWaiting: 'Scan the code in the payment window; the balance updates when payment completes.',
+    topupSuccess: 'Top-up complete; the balance is updated.', topupFailed: 'Top-up did not complete. Please retry.', topupClose: 'Close', topupFinish: 'Done',
+    topupMinHint: 'Minimum {money}', topupNoMethod: 'The site does not offer online top-up; use the web console.',
+    topupExchangeHint: 'Amounts are USD credit; $1 = ¥{rate}',
     wallet: 'Wallet balance', walletQuota: 'Wallet balance (quota)', numberLocale: 'en-US', accountUsage: 'Account usage', quotaUnavailable: 'Unavailable',
     title: 'NovaFlow account', signIn: 'Sign in using browser', cancel: 'Cancel sign-in', signOut: 'Sign out', refresh: 'Refresh account', signedIn: 'Signed in', signingIn: 'Signing in…',
     signedOut: 'Not signed in', waiting: 'Finish authorization in your browser…', group: 'Group', models: 'Available models',

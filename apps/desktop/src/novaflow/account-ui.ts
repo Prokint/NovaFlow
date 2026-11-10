@@ -21,6 +21,8 @@ export interface NovaFlowAccountUiOperations {
   /** Select another server while signed out; rejects an invalid address. */
   setServer(origin: string): Promise<NovaFlowDesktopSnapshot>
   openPage(page: 'wallet' | 'usage' | 'devices'): Promise<void>
+  /** Open the native top-up dialog; absent when this build cannot pay in-app. */
+  openTopUp?(): void
   subscribe(listener: (snapshot: NovaFlowDesktopSnapshot) => void): () => void
 }
 
@@ -312,6 +314,8 @@ export function createNovaFlowAccountUi(
   const deviceValue = term(stats, copy.deviceUsage)
   const limitValue = term(stats, copy.deviceLimit)
   const links = element('div', 'hcx-links')
+  const topUp = operations.openTopUp === undefined
+    ? undefined : button('hcx-button hcx-primary hcx-small', copy.topupAction)
   const walletPage = button('hcx-page-link', copy.walletPage)
   const usagePage = button('hcx-page-link', copy.usagePage)
   const devicePage = button('hcx-page-link', copy.devicePage)
@@ -753,6 +757,10 @@ export function createNovaFlowAccountUi(
   serverForm.addEventListener('submit', (event) => { event.preventDefault(); void perform('server') })
   serverEdit.addEventListener('click', () => { serverExpanded = true; render(); serverInput.focus(); serverInput.select() })
   serverReset.addEventListener('click', () => { serverInput.value = DEFAULT_NOVAFLOW_ORIGIN; void perform('server') })
+  if (topUp !== undefined) {
+    links.prepend(topUp)
+    topUp.addEventListener('click', () => { operations.openTopUp?.() })
+  }
   for (const [link, target] of [[walletPage, 'wallet'], [devicePage, 'devices'], [usagePage, 'usage']] as const) {
     link.addEventListener('click', () => {
       const operation = generation
