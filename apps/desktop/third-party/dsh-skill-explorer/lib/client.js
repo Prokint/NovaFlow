@@ -515,7 +515,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:src/client/panel/panel.module.css.mjs
-		const css = ".jbF1yq_view{height:100%;min-height:0;overflow:hidden}.jbF1yq_panel{background:var(--dsw-alias-bg-base);min-width:0;height:100%;min-height:0;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);flex-direction:column;gap:10px;padding:14px 16px 16px;display:flex}.jbF1yq_panelHeader{flex:none;align-items:center;gap:10px;display:flex}.jbF1yq_panelTitle{color:var(--dsw-alias-label-primary);white-space:nowrap;flex:1;margin:0;font-size:16px;font-weight:700}.jbF1yq_tabBar{border-bottom:1px solid var(--dsw-alias-border-l1);flex:none;gap:2px;display:flex}.jbF1yq_tab{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-bottom:2px solid #0000;border-radius:6px 6px 0 0;padding:7px 14px;font-size:13px}.jbF1yq_tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_tab[data-active]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.jbF1yq_panelContent{flex-direction:column;flex:1;min-height:0;display:flex;overflow:hidden}.jbF1yq_fillBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow:hidden}.jbF1yq_tabBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow-y:auto}.jbF1yq_toolbar{flex-wrap:wrap;flex:none;align-items:center;gap:8px;display:flex}.jbF1yq_search{min-width:120px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;flex:0 260px;padding:6px 10px;font-size:13px}.jbF1yq_search::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_select{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;padding:6px 8px;font-size:13px}.jbF1yq_toolbarSpacer{flex:1}.jbF1yq_checkboxLabel{color:var(--dsw-alias-label-secondary);cursor:pointer;align-items:center;gap:6px;font-size:12px;display:inline-flex}.jbF1yq_facetBar{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;flex-direction:column;flex:none;gap:6px;padding:8px 10px;display:flex}.jbF1yq_facetRow{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.jbF1yq_facetLabel{min-width:34px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}.jbF1yq_facetChip{color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:999px;align-items:center;gap:5px;padding:2px 9px;font-size:11.5px;line-height:1.7;display:inline-flex}.jbF1yq_facetChip:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetChip[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetCount{color:var(--dsw-alias-label-tertiary);font-size:10.5px}.jbF1yq_facetChip[data-active] .jbF1yq_facetCount{color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton{color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:8px;padding:5px 12px;font-size:12px}.jbF1yq_ghostButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_ghostButton:disabled{opacity:.45;cursor:default}.jbF1yq_formActions{align-items:center;gap:8px;display:flex}.jbF1yq_primaryButton{color:var(--dsw-alias-label-primary-foreground);background:var(--dsw-alias-button-primary-fill);cursor:pointer;white-space:nowrap;border:none;border-radius:8px;align-self:flex-start;padding:6px 14px;font-size:13px;font-weight:600}.jbF1yq_primaryButton:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.jbF1yq_primaryButton:disabled{opacity:.5;cursor:default}.jbF1yq_linkButton{color:var(--dsw-alias-state-business-primary);cursor:pointer;white-space:nowrap;background:0 0;border:none;padding:0;font-size:12px}.jbF1yq_linkButton:hover:not(:disabled){text-decoration:underline}.jbF1yq_linkButton:disabled{opacity:.45;cursor:default}.jbF1yq_linkButton[data-danger]{color:var(--dsw-alias-state-error-primary)}.jbF1yq_banner{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;border-radius:8px;padding:8px 12px;font-size:12.5px;line-height:1.5}.jbF1yq_banner[data-kind=ok]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_banner[data-kind=error]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}.jbF1yq_empty{text-align:center;color:var(--dsw-alias-label-tertiary);padding:28px 12px;font-size:12.5px}.jbF1yq_list{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex-direction:column;flex:1;gap:14px;min-height:0;padding:8px 12px 10px;display:flex;overflow-y:auto}.jbF1yq_group{flex-direction:column;gap:6px;display:flex}.jbF1yq_groupToggle{width:100%;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:6px;align-items:center;gap:6px;padding:4px 2px;font-size:13px;font-weight:600;display:flex}.jbF1yq_groupToggle:hover{background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_groupCaret{border-bottom:1.5px solid;border-right:1.5px solid;flex:none;width:6px;height:6px;transition:transform .15s;transform:rotate(-45deg)}.jbF1yq_groupToggle[aria-expanded=true] .jbF1yq_groupCaret{transform:rotate(45deg)}.jbF1yq_groupTitleText{font-weight:600}.jbF1yq_count{color:var(--dsw-alias-label-secondary);margin-left:6px;font-weight:400}.jbF1yq_groupHint{color:var(--dsw-alias-label-secondary);margin:0;font-size:11px}.jbF1yq_skillRow{border-bottom:1px solid var(--dsw-alias-border-l1);padding:8px 0}.jbF1yq_skillRow:last-child{border-bottom:none}.jbF1yq_skillRow:hover{background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_skillHeader{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.jbF1yq_skillName{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600;font-family:var(--ds-font-family-code)}.jbF1yq_badge{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;padding:1px 8px;font-size:11px;line-height:1.6;display:inline-block}.jbF1yq_badgeWorkspace{color:var(--dsw-alias-label-secondary)}.jbF1yq_badgeInvokable{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_badgeIsolated{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.jbF1yq_skillIsolated{opacity:.76}.jbF1yq_skillIsolated:hover{opacity:.98}.jbF1yq_switch{cursor:pointer;background:0 0;border:none;border-radius:99px;align-items:center;margin-left:auto;padding:2px;display:inline-flex}.jbF1yq_switch:disabled{opacity:.45;cursor:default}.jbF1yq_switchTrack{background:var(--dsw-alias-border-l2);border-radius:99px;flex:none;width:30px;height:16px;transition:background .18s;position:relative}.jbF1yq_switchThumb{background:var(--dsw-alias-bg-base);border-radius:50%;width:12px;height:12px;transition:left .18s;position:absolute;top:2px;left:2px}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchTrack{background:var(--dsw-alias-state-success-primary)}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchThumb{left:16px}.jbF1yq_deleteButton{margin-left:4px}.jbF1yq_skillDesc{color:var(--dsw-alias-label-primary);margin:6px 0 0;font-size:12px;line-height:1.5}.jbF1yq_skillWhen{color:var(--dsw-alias-label-secondary);margin:4px 0 0;font-size:11px}.jbF1yq_skillPath{color:var(--dsw-alias-label-tertiary);font-size:10px;font-family:var(--ds-font-family-code);word-break:break-all;margin:6px 0 0}.jbF1yq_form{flex-direction:column;gap:10px;max-width:640px;display:flex}.jbF1yq_field{flex-direction:column;gap:5px;display:flex}.jbF1yq_fieldLabel{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600}.jbF1yq_fieldGroup{border:none;flex-direction:column;gap:5px;margin:0;padding:0;display:flex}.jbF1yq_radioRow{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.jbF1yq_outcomeList{flex-direction:column;gap:4px;max-height:260px;margin:8px 0 0;padding:0;list-style:none;display:flex;overflow-y:auto}.jbF1yq_outcomeItem{flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12px;display:flex}.jbF1yq_outcomeName{font-family:var(--ds-font-family-code);color:var(--dsw-alias-label-primary);font-weight:600}.jbF1yq_outcomeReason{color:var(--dsw-alias-label-secondary);font-size:11.5px}.jbF1yq_outcomeItem[data-status=skipped] .jbF1yq_outcomeReason{color:var(--dsw-alias-state-warn-primary)}.jbF1yq_bannerAction{margin-left:8px}.jbF1yq_input{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);resize:vertical;border-radius:8px;outline:none;padding:7px 10px;font-family:inherit;font-size:13px}.jbF1yq_input:focus{border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_input::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_input:disabled{opacity:.55}.jbF1yq_textarea{min-height:140px;font-family:var(--ds-font-family-code)}.jbF1yq_note{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:1.7}";
+		const css = ".jbF1yq_view{height:100%;min-height:0;overflow:hidden}.jbF1yq_panel{background:var(--dsw-alias-bg-base);min-width:0;height:100%;min-height:0;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);flex-direction:column;gap:10px;padding:14px 16px 16px;display:flex}.jbF1yq_panelHeader{flex:none;align-items:center;gap:10px;display:flex}.jbF1yq_panelTitle{color:var(--dsw-alias-label-primary);white-space:nowrap;flex:1;margin:0;font-size:16px;font-weight:700}.jbF1yq_tabBar{border-bottom:1px solid var(--dsw-alias-border-l1);flex:none;gap:2px;display:flex}.jbF1yq_tab{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-bottom:2px solid #0000;border-radius:6px 6px 0 0;padding:7px 14px;font-size:13px}.jbF1yq_tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_tab[data-active]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.jbF1yq_panelContent{flex-direction:column;flex:1;min-height:0;display:flex;overflow:hidden}.jbF1yq_fillBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow:hidden}.jbF1yq_tabBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow-y:auto}.jbF1yq_toolbar{flex-wrap:wrap;flex:none;align-items:center;gap:8px;display:flex}.jbF1yq_search{min-width:120px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;flex:0 260px;padding:6px 10px;font-size:13px}.jbF1yq_search::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_select{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;padding:6px 8px;font-size:13px}.jbF1yq_toolbarSpacer{flex:1}.jbF1yq_checkboxLabel{color:var(--dsw-alias-label-secondary);cursor:pointer;align-items:center;gap:6px;font-size:12px;display:inline-flex}.jbF1yq_facetBar{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;flex-direction:column;flex:none;gap:6px;padding:8px 10px;display:flex}.jbF1yq_facetRow{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.jbF1yq_facetLabel{min-width:34px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}.jbF1yq_facetChip{color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:999px;align-items:center;gap:5px;padding:2px 9px;font-size:11.5px;line-height:1.7;display:inline-flex}.jbF1yq_facetChip:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetChip[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetCount{color:var(--dsw-alias-label-tertiary);font-size:10.5px}.jbF1yq_facetChip[data-active] .jbF1yq_facetCount{color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton{color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:8px;padding:5px 12px;font-size:12px}.jbF1yq_ghostButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_ghostButton:disabled{opacity:.45;cursor:default}.jbF1yq_formActions{align-items:center;gap:8px;display:flex}.jbF1yq_primaryButton{color:var(--dsw-alias-label-primary-foreground);background:var(--dsw-alias-button-primary-fill);cursor:pointer;white-space:nowrap;border:none;border-radius:8px;align-self:flex-start;padding:6px 14px;font-size:13px;font-weight:600}.jbF1yq_primaryButton:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.jbF1yq_primaryButton:disabled{opacity:.5;cursor:default}.jbF1yq_linkButton{color:var(--dsw-alias-state-business-primary);cursor:pointer;white-space:nowrap;background:0 0;border:none;padding:0;font-size:12px}.jbF1yq_linkButton:hover:not(:disabled){text-decoration:underline}.jbF1yq_linkButton:disabled{opacity:.45;cursor:default}.jbF1yq_linkButton[data-danger]{color:var(--dsw-alias-state-error-primary)}.jbF1yq_banner{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;border-radius:8px;padding:8px 12px;font-size:12.5px;line-height:1.5}.jbF1yq_banner[data-kind=ok]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_banner[data-kind=error]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}.jbF1yq_empty{text-align:center;color:var(--dsw-alias-label-tertiary);padding:28px 12px;font-size:12.5px}.jbF1yq_list{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex-direction:column;flex:1;gap:14px;min-height:0;padding:8px 12px 10px;display:flex;overflow-y:auto}.jbF1yq_group{flex-direction:column;gap:6px;display:flex}.jbF1yq_groupToggle{width:100%;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:6px;align-items:center;gap:6px;padding:4px 2px;font-size:13px;font-weight:600;display:flex}.jbF1yq_groupToggle:hover{background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_groupCaret{border-bottom:1.5px solid;border-right:1.5px solid;flex:none;width:6px;height:6px;transition:transform .15s;transform:rotate(-45deg)}.jbF1yq_groupToggle[aria-expanded=true] .jbF1yq_groupCaret{transform:rotate(45deg)}.jbF1yq_groupTitleText{font-weight:600}.jbF1yq_count{color:var(--dsw-alias-label-secondary);margin-left:6px;font-weight:400}.jbF1yq_groupHint{color:var(--dsw-alias-label-secondary);margin:0;font-size:11px}.jbF1yq_skillGrid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:4px 0 8px;display:grid}.jbF1yq_skillCard{background:var(--dsw-alias-interactive-bg-hover);border:1px solid #0000;border-radius:12px;flex-direction:column;gap:8px;min-width:0;padding:12px 14px;transition:border-color .15s,background .15s;display:flex}.jbF1yq_skillCard:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base)}.jbF1yq_cardHead{align-items:flex-start;gap:10px;display:flex}.jbF1yq_skillAvatar{border-radius:9px;flex:none;justify-content:center;align-items:center;width:32px;height:32px;font-size:14px;font-weight:600;line-height:1;display:flex}.jbF1yq_cardIdentity{flex-direction:column;gap:2px;min-width:0;display:flex}.jbF1yq_cardMeta{color:var(--dsw-alias-label-secondary);white-space:nowrap;text-overflow:ellipsis;font-size:11px;overflow:hidden}.jbF1yq_cardControls{flex:none;align-items:center;gap:6px;margin-left:auto;display:flex}.jbF1yq_cardControls .jbF1yq_switch{margin-left:0}.jbF1yq_cardTags{flex-wrap:wrap;gap:6px;display:flex}.jbF1yq_cardActions{border-top:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:6px;display:flex}.jbF1yq_skillName{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600;font-family:var(--ds-font-family-code)}.jbF1yq_badge{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;padding:1px 8px;font-size:11px;line-height:1.6;display:inline-block}.jbF1yq_badgeWorkspace{color:var(--dsw-alias-label-secondary)}.jbF1yq_badgeInvokable{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_badgeIsolated,.jbF1yq_badgeDisabled{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.jbF1yq_skillIsolated{opacity:.76}.jbF1yq_skillIsolated:hover{opacity:.98}.jbF1yq_switch{cursor:pointer;background:0 0;border:none;border-radius:99px;align-items:center;margin-left:auto;padding:2px;display:inline-flex}.jbF1yq_switch:disabled{opacity:.45;cursor:default}.jbF1yq_switchTrack{background:var(--dsw-alias-border-l2);border-radius:99px;flex:none;width:30px;height:16px;transition:background .18s;position:relative}.jbF1yq_switchThumb{background:var(--dsw-alias-bg-base);border-radius:50%;width:12px;height:12px;transition:left .18s;position:absolute;top:2px;left:2px}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchTrack{background:var(--dsw-alias-state-success-primary)}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchThumb{left:16px}.jbF1yq_deleteButton{margin-left:4px}.jbF1yq_skillDesc{color:var(--dsw-alias-label-primary);-webkit-line-clamp:3;-webkit-box-orient:vertical;margin:0;font-size:12px;line-height:1.5;display:-webkit-box;overflow:hidden}.jbF1yq_skillWhen{color:var(--dsw-alias-label-secondary);margin:4px 0 0;font-size:11px}.jbF1yq_skillPath{color:var(--dsw-alias-label-tertiary);font-size:10px;font-family:var(--ds-font-family-code);word-break:break-all;margin:6px 0 0}.jbF1yq_form{flex-direction:column;gap:10px;max-width:640px;display:flex}.jbF1yq_field{flex-direction:column;gap:5px;display:flex}.jbF1yq_fieldLabel{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600}.jbF1yq_fieldGroup{border:none;flex-direction:column;gap:5px;margin:0;padding:0;display:flex}.jbF1yq_radioRow{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.jbF1yq_outcomeList{flex-direction:column;gap:4px;max-height:260px;margin:8px 0 0;padding:0;list-style:none;display:flex;overflow-y:auto}.jbF1yq_outcomeItem{flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12px;display:flex}.jbF1yq_outcomeName{font-family:var(--ds-font-family-code);color:var(--dsw-alias-label-primary);font-weight:600}.jbF1yq_outcomeReason{color:var(--dsw-alias-label-secondary);font-size:11.5px}.jbF1yq_outcomeItem[data-status=skipped] .jbF1yq_outcomeReason{color:var(--dsw-alias-state-warn-primary)}.jbF1yq_bannerAction{margin-left:8px}.jbF1yq_input{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);resize:vertical;border-radius:8px;outline:none;padding:7px 10px;font-family:inherit;font-size:13px}.jbF1yq_input:focus{border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_input::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_input:disabled{opacity:.55}.jbF1yq_textarea{min-height:140px;font-family:var(--ds-font-family-code)}.jbF1yq_note{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:1.7}";
 		const tagId = "dsh-skill-explorer/src/client/panel/panel.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -526,11 +526,18 @@ window.__ModuleLoader__.load({
 		}
 		var panel_module_css_default = {
 			"badge": "jbF1yq_badge",
+			"badgeDisabled": "jbF1yq_badgeDisabled",
 			"badgeInvokable": "jbF1yq_badgeInvokable",
 			"badgeIsolated": "jbF1yq_badgeIsolated",
 			"badgeWorkspace": "jbF1yq_badgeWorkspace",
 			"banner": "jbF1yq_banner",
 			"bannerAction": "jbF1yq_bannerAction",
+			"cardActions": "jbF1yq_cardActions",
+			"cardControls": "jbF1yq_cardControls",
+			"cardHead": "jbF1yq_cardHead",
+			"cardIdentity": "jbF1yq_cardIdentity",
+			"cardMeta": "jbF1yq_cardMeta",
+			"cardTags": "jbF1yq_cardTags",
 			"checkboxLabel": "jbF1yq_checkboxLabel",
 			"count": "jbF1yq_count",
 			"deleteButton": "jbF1yq_deleteButton",
@@ -568,12 +575,13 @@ window.__ModuleLoader__.load({
 			"radioRow": "jbF1yq_radioRow",
 			"search": "jbF1yq_search",
 			"select": "jbF1yq_select",
+			"skillAvatar": "jbF1yq_skillAvatar",
+			"skillCard": "jbF1yq_skillCard",
 			"skillDesc": "jbF1yq_skillDesc",
-			"skillHeader": "jbF1yq_skillHeader",
+			"skillGrid": "jbF1yq_skillGrid",
 			"skillIsolated": "jbF1yq_skillIsolated",
 			"skillName": "jbF1yq_skillName",
 			"skillPath": "jbF1yq_skillPath",
-			"skillRow": "jbF1yq_skillRow",
 			"skillWhen": "jbF1yq_skillWhen",
 			"switch": "jbF1yq_switch",
 			"switchThumb": "jbF1yq_switchThumb",
@@ -1524,8 +1532,21 @@ window.__ModuleLoader__.load({
 			if (skill.userInvocable) marks.push(tt("list.mark.user"));
 			return marks.join(" / ");
 		}
-		/** One skill row: name, badges, enable switch, edit, duplicate and delete actions. */
-		function SkillRow({ skill, api, onChanged, onEdit, onDuplicate }) {
+		/** Deterministic avatar tint so one skill keeps its color between visits and themes. */
+		function avatarTint(name) {
+			let hue = 0;
+			for (const char of name) hue = (hue * 31 + (char.codePointAt(0) ?? 0)) % 360;
+			return {
+				background: `color-mix(in srgb, hsl(${hue} 70% 50%) 22%, transparent)`,
+				color: `hsl(${hue} 62% 46%)`
+			};
+		}
+		/** The avatar label: the first visible character of the skill name. */
+		function avatarText(name) {
+			return Array.from(name.trim())[0]?.toUpperCase() ?? "?";
+		}
+		/** One skill card: identity, badges, enable switch, edit, duplicate and delete actions. */
+		function SkillRow({ skill, sourceLabel, api, onChanged, onEdit, onDuplicate }) {
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)(void 0);
 			const busyRef = (0, react.useRef)(false);
@@ -1593,17 +1614,75 @@ window.__ModuleLoader__.load({
 			const isIsolated = skill.isActiveWorkspace === false;
 			const fileBadge = skill.path === void 0 ? localFileBadge(skill) : void 0;
 			const canCopy = skill.path !== void 0;
+			const stateBadge = !skill.modelInvocable && canToggle(skill) ? {
+				label: tt("list.disabled"),
+				tone: panel_module_css_default.badgeDisabled,
+				tooltip: tt("list.disabled")
+			} : fileBadge === void 0 ? void 0 : {
+				label: fileBadge.label,
+				tone: "",
+				tooltip: fileBadge.tooltip
+			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
-				className: `${panel_module_css_default.skillRow}${isIsolated ? ` ${panel_module_css_default.skillIsolated}` : ""}`,
+				className: `${panel_module_css_default.skillCard}${isIsolated ? ` ${panel_module_css_default.skillIsolated}` : ""}`,
 				"data-dsh-part": "skill-row",
+				title: skill.path,
 				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
-						className: panel_module_css_default.skillHeader,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: panel_module_css_default.cardHead,
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: panel_module_css_default.skillName,
-								children: skill.name
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: panel_module_css_default.skillAvatar,
+								style: avatarTint(skill.name),
+								"aria-hidden": "true",
+								children: avatarText(skill.name)
 							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: panel_module_css_default.cardIdentity,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: panel_module_css_default.skillName,
+									children: skill.name
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: panel_module_css_default.cardMeta,
+									children: sourceLabel
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: panel_module_css_default.cardControls,
+								children: [stateBadge !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: `${panel_module_css_default.badge} ${stateBadge.tone}`,
+									title: stateBadge.tooltip,
+									children: stateBadge.label
+								}), canToggle(skill) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: panel_module_css_default.switch,
+									role: "switch",
+									"aria-checked": skill.modelInvocable,
+									"aria-label": skill.modelInvocable ? tt("list.enabled") : tt("list.disabled"),
+									title: skill.modelInvocable ? tt("list.enabled") : tt("list.disabled"),
+									disabled: busy,
+									onClick: () => {
+										toggle();
+									},
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: panel_module_css_default.switchTrack,
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: panel_module_css_default.switchThumb })
+									})
+								})]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: panel_module_css_default.skillDesc,
+						children: skill.description
+					}),
+					skill.whenToUse !== void 0 && skill.whenToUse !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: panel_module_css_default.skillWhen,
+						children: tt("list.when", { when: skill.whenToUse })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: panel_module_css_default.cardTags,
+						children: [
 							skill.workspaceName !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: `${panel_module_css_default.badge} ${panel_module_css_default.badgeWorkspace}`,
 								children: skill.workspaceName
@@ -1622,32 +1701,25 @@ window.__ModuleLoader__.load({
 								className: panel_module_css_default.badge,
 								children: tt("list.linked")
 							}),
-							fileBadge !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: panel_module_css_default.badge,
-								title: fileBadge.tooltip,
-								children: fileBadge.label
-							}),
 							(skill.modelInvocable || skill.userInvocable) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: `${panel_module_css_default.badge} ${panel_module_css_default.badgeInvokable}`,
 								title: tt("list.invokableTooltip"),
 								children: tt("list.invokable", { marks: invokableMarks(skill) })
-							}),
-							canToggle(skill) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: panel_module_css_default.switch,
-								role: "switch",
-								"aria-checked": skill.modelInvocable,
-								"aria-label": skill.modelInvocable ? tt("list.enabled") : tt("list.disabled"),
-								title: skill.modelInvocable ? tt("list.enabled") : tt("list.disabled"),
-								disabled: busy,
-								onClick: () => {
-									toggle();
-								},
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: panel_module_css_default.switchTrack,
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: panel_module_css_default.switchThumb })
-								})
-							}),
+							})
+						]
+					}),
+					skill.path === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: panel_module_css_default.skillWhen,
+						children: localFileHint(skill)
+					}),
+					error !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: panel_module_css_default.banner,
+						"data-kind": "error",
+						children: error
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: panel_module_css_default.cardActions,
+						children: [
 							canCopy && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
 								className: panel_module_css_default.linkButton,
@@ -1677,27 +1749,6 @@ window.__ModuleLoader__.load({
 								children: tt("list.delete")
 							})
 						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-						className: panel_module_css_default.skillDesc,
-						children: skill.description
-					}),
-					skill.whenToUse !== void 0 && skill.whenToUse !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-						className: panel_module_css_default.skillWhen,
-						children: tt("list.when", { when: skill.whenToUse })
-					}),
-					skill.path !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: panel_module_css_default.skillPath,
-						children: skill.path
-					}),
-					skill.path === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-						className: panel_module_css_default.skillWhen,
-						children: localFileHint(skill)
-					}),
-					error !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-						className: panel_module_css_default.banner,
-						"data-kind": "error",
-						children: error
 					})
 				]
 			});
@@ -1970,15 +2021,19 @@ window.__ModuleLoader__.load({
 										className: panel_module_css_default.groupHint,
 										children: hint
 									}),
-									expanded && group.skills.map((skill) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillRow, {
-										skill,
-										api,
-										onChanged: () => {
-											load();
-										},
-										onEdit,
-										onDuplicate
-									}, skill.name))
+									expanded && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: panel_module_css_default.skillGrid,
+										children: group.skills.map((skill) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillRow, {
+											skill,
+											sourceLabel: groupTitle(group),
+											api,
+											onChanged: () => {
+												load();
+											},
+											onEdit,
+											onDuplicate
+										}, skill.name))
+									})
 								]
 							}, group.key);
 						})

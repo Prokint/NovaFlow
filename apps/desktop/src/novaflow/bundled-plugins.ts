@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 /** Built-in bundles enabled for every account, without a plugin-page switch. */
 export const NOVAFLOW_BUNDLED_PLUGINS = [
-  { name: 'dsh-skill-explorer', version: '0.1.0' },
+  { name: 'dsh-skill-explorer', version: '0.1.1' },
 ] as const
 
 /** Shipped bundles installed with NovaFlow but switched off until the user enables them. */
