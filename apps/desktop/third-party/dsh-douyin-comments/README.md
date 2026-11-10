@@ -1,7 +1,12 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.21；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.22 变更**（2026-11-10）：**修 NovaFlow 内置包缺文件的问题**——`package.json` 的 `files` 白名单一直没加 `entitlement.mjs`，pnpm 按白名单打包 file: 依赖时把它漏掉了，导致 CI 出来的安装包里插件一 import 就崩（授权/采集都不可用）。
+- 修法：`dsh-douyin-comments/package.json` 的 `files` 加入 `entitlement.mjs`；插件版本升到 0.9.22。
+- 自检新增 `pkg-files-entitlement`，以后白名单再漏文件会被 341 项自检抓到。
+- 说明：只改打包白名单，插件运行逻辑不变。
 
 **0.9.21 变更**（2026-11-09，进行中）：**接入 NovaFlow 收费授权（v3.1 设计）**——采集不再只靠本地安装，改为「激活码 + 设备绑定 + 每次运行向服务端换运行凭据」。
 - 服务端（新目录 `novaflow-collect/`，Node 24 + 内置 `node:sqlite`，无第三方依赖）：注册码/权益/设备/material/nonce 六张表；`POST /v1/activate`（Bearer 令牌 + code + machineId）、`GET|POST /v1/status`、`POST /v1/keys/issue`（签发 material + lease）、`POST /v1/devices/remove`；规则：一码绑一个 Now API `user_id`、同用户最多 **2 台设备**、有效期从激活时算起、nonce 防重放、按用户/IP 限流、版本白名单、material 版本可轮换（`cli.mjs material set/retire`）；`test/smoke.mjs` **17/17** 通过；本地已实跑 `material current` / `codes create`。

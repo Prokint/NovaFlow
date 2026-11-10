@@ -134,4 +134,4 @@ export async function issueKey({ version = PLUGIN_VERSION, force = false } = {})
 export function flushKeyCache() { cachedMaterial = null; }
 export function peekKeyCache() { return cachedMaterial; }
 
-export const PLUGIN_VERSION = '0.9.21';
+export const PLUGIN_VERSION = '0.9.22';

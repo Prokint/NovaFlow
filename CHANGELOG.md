@@ -2,6 +2,17 @@
 
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
+## 0.2.6-m4
+
+### 修复
+
+- 内置抖音评论插件升级到 0.9.22：补上 `package.json` 的 `files` 白名单遗漏的 `entitlement.mjs`。此前按白名单打包 file: 依赖时该文件被漏掉，安装包里的插件加载会直接失败，授权与采集都不可用。
+- 自检新增 `pkg-files-entitlement`，防止白名单再漏运行期模块。
+
+### 升级说明
+
+- 未签名测试包，Windows 可能提示 SmartScreen；需要在 NovaFlow 里用激活码激活后才能采集。
+
 ## 0.2.6-m3
 
 ### 新增
