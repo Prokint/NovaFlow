@@ -257,6 +257,7 @@ window.__ModuleLoader__.load({
 			"entry.label": "技能中心",
 			"entry.tooltip": "技能中心：浏览与管理已加载的 skill",
 			"panel.title": "技能中心",
+			"dialog.close": "关闭",
 			"tab.list": "技能",
 			"tab.create": "创建",
 			"tab.import": "导入",
@@ -373,6 +374,7 @@ window.__ModuleLoader__.load({
 			"entry.label": "Skill Center",
 			"entry.tooltip": "Skill center: browse and manage loaded skills",
 			"panel.title": "Skill Center",
+			"dialog.close": "Close",
 			"tab.list": "Skills",
 			"tab.create": "Create",
 			"tab.import": "Import",
@@ -515,7 +517,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:src/client/panel/panel.module.css.mjs
-		const css = ".jbF1yq_view{height:100%;min-height:0;overflow:hidden}.jbF1yq_panel{background:var(--dsw-alias-bg-base);min-width:0;height:100%;min-height:0;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);flex-direction:column;gap:10px;padding:14px 16px 16px;display:flex}.jbF1yq_panelHeader{flex:none;align-items:center;gap:10px;display:flex}.jbF1yq_panelTitle{color:var(--dsw-alias-label-primary);white-space:nowrap;flex:1;margin:0;font-size:16px;font-weight:700}.jbF1yq_tabBar{border-bottom:1px solid var(--dsw-alias-border-l1);flex:none;gap:2px;display:flex}.jbF1yq_tab{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-bottom:2px solid #0000;border-radius:6px 6px 0 0;padding:7px 14px;font-size:13px}.jbF1yq_tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_tab[data-active]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.jbF1yq_panelContent{flex-direction:column;flex:1;min-height:0;display:flex;overflow:hidden}.jbF1yq_fillBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow:hidden}.jbF1yq_tabBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow-y:auto}.jbF1yq_toolbar{flex-wrap:wrap;flex:none;align-items:center;gap:8px;display:flex}.jbF1yq_search{min-width:120px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;flex:0 260px;padding:6px 10px;font-size:13px}.jbF1yq_search::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_select{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;padding:6px 8px;font-size:13px}.jbF1yq_toolbarSpacer{flex:1}.jbF1yq_checkboxLabel{color:var(--dsw-alias-label-secondary);cursor:pointer;align-items:center;gap:6px;font-size:12px;display:inline-flex}.jbF1yq_facetBar{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;flex-direction:column;flex:none;gap:6px;padding:8px 10px;display:flex}.jbF1yq_facetRow{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.jbF1yq_facetLabel{min-width:34px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}.jbF1yq_facetChip{color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:999px;align-items:center;gap:5px;padding:2px 9px;font-size:11.5px;line-height:1.7;display:inline-flex}.jbF1yq_facetChip:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetChip[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetCount{color:var(--dsw-alias-label-tertiary);font-size:10.5px}.jbF1yq_facetChip[data-active] .jbF1yq_facetCount{color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton{color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:8px;padding:5px 12px;font-size:12px}.jbF1yq_ghostButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_ghostButton:disabled{opacity:.45;cursor:default}.jbF1yq_formActions{align-items:center;gap:8px;display:flex}.jbF1yq_primaryButton{color:var(--dsw-alias-label-primary-foreground);background:var(--dsw-alias-button-primary-fill);cursor:pointer;white-space:nowrap;border:none;border-radius:8px;align-self:flex-start;padding:6px 14px;font-size:13px;font-weight:600}.jbF1yq_primaryButton:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.jbF1yq_primaryButton:disabled{opacity:.5;cursor:default}.jbF1yq_linkButton{color:var(--dsw-alias-state-business-primary);cursor:pointer;white-space:nowrap;background:0 0;border:none;padding:0;font-size:12px}.jbF1yq_linkButton:hover:not(:disabled){text-decoration:underline}.jbF1yq_linkButton:disabled{opacity:.45;cursor:default}.jbF1yq_linkButton[data-danger]{color:var(--dsw-alias-state-error-primary)}.jbF1yq_banner{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;border-radius:8px;padding:8px 12px;font-size:12.5px;line-height:1.5}.jbF1yq_banner[data-kind=ok]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_banner[data-kind=error]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}.jbF1yq_empty{text-align:center;color:var(--dsw-alias-label-tertiary);padding:28px 12px;font-size:12.5px}.jbF1yq_list{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex-direction:column;flex:1;gap:14px;min-height:0;padding:8px 12px 10px;display:flex;overflow-y:auto}.jbF1yq_group{flex-direction:column;gap:6px;display:flex}.jbF1yq_groupToggle{width:100%;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:6px;align-items:center;gap:6px;padding:4px 2px;font-size:13px;font-weight:600;display:flex}.jbF1yq_groupToggle:hover{background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_groupCaret{border-bottom:1.5px solid;border-right:1.5px solid;flex:none;width:6px;height:6px;transition:transform .15s;transform:rotate(-45deg)}.jbF1yq_groupToggle[aria-expanded=true] .jbF1yq_groupCaret{transform:rotate(45deg)}.jbF1yq_groupTitleText{font-weight:600}.jbF1yq_count{color:var(--dsw-alias-label-secondary);margin-left:6px;font-weight:400}.jbF1yq_groupHint{color:var(--dsw-alias-label-secondary);margin:0;font-size:11px}.jbF1yq_skillGrid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:4px 0 8px;display:grid}.jbF1yq_skillCard{background:var(--dsw-alias-interactive-bg-hover);border:1px solid #0000;border-radius:12px;flex-direction:column;gap:8px;min-width:0;padding:12px 14px;transition:border-color .15s,background .15s;display:flex}.jbF1yq_skillCard:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base)}.jbF1yq_cardHead{align-items:flex-start;gap:10px;display:flex}.jbF1yq_skillAvatar{border-radius:9px;flex:none;justify-content:center;align-items:center;width:32px;height:32px;font-size:14px;font-weight:600;line-height:1;display:flex}.jbF1yq_cardIdentity{flex-direction:column;gap:2px;min-width:0;display:flex}.jbF1yq_cardMeta{color:var(--dsw-alias-label-secondary);white-space:nowrap;text-overflow:ellipsis;font-size:11px;overflow:hidden}.jbF1yq_cardControls{flex:none;align-items:center;gap:6px;margin-left:auto;display:flex}.jbF1yq_cardControls .jbF1yq_switch{margin-left:0}.jbF1yq_cardTags{flex-wrap:wrap;gap:6px;display:flex}.jbF1yq_cardActions{border-top:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:6px;display:flex}.jbF1yq_skillName{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600;font-family:var(--ds-font-family-code)}.jbF1yq_badge{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;padding:1px 8px;font-size:11px;line-height:1.6;display:inline-block}.jbF1yq_badgeWorkspace{color:var(--dsw-alias-label-secondary)}.jbF1yq_badgeInvokable{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_badgeIsolated,.jbF1yq_badgeDisabled{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.jbF1yq_skillIsolated{opacity:.76}.jbF1yq_skillIsolated:hover{opacity:.98}.jbF1yq_switch{cursor:pointer;background:0 0;border:none;border-radius:99px;align-items:center;margin-left:auto;padding:2px;display:inline-flex}.jbF1yq_switch:disabled{opacity:.45;cursor:default}.jbF1yq_switchTrack{background:var(--dsw-alias-border-l2);border-radius:99px;flex:none;width:30px;height:16px;transition:background .18s;position:relative}.jbF1yq_switchThumb{background:var(--dsw-alias-bg-base);border-radius:50%;width:12px;height:12px;transition:left .18s;position:absolute;top:2px;left:2px}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchTrack{background:var(--dsw-alias-state-success-primary)}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchThumb{left:16px}.jbF1yq_deleteButton{margin-left:4px}.jbF1yq_skillDesc{color:var(--dsw-alias-label-primary);-webkit-line-clamp:3;-webkit-box-orient:vertical;margin:0;font-size:12px;line-height:1.5;display:-webkit-box;overflow:hidden}.jbF1yq_skillWhen{color:var(--dsw-alias-label-secondary);margin:4px 0 0;font-size:11px}.jbF1yq_skillPath{color:var(--dsw-alias-label-tertiary);font-size:10px;font-family:var(--ds-font-family-code);word-break:break-all;margin:6px 0 0}.jbF1yq_form{flex-direction:column;gap:10px;max-width:640px;display:flex}.jbF1yq_field{flex-direction:column;gap:5px;display:flex}.jbF1yq_fieldLabel{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600}.jbF1yq_fieldGroup{border:none;flex-direction:column;gap:5px;margin:0;padding:0;display:flex}.jbF1yq_radioRow{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.jbF1yq_outcomeList{flex-direction:column;gap:4px;max-height:260px;margin:8px 0 0;padding:0;list-style:none;display:flex;overflow-y:auto}.jbF1yq_outcomeItem{flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12px;display:flex}.jbF1yq_outcomeName{font-family:var(--ds-font-family-code);color:var(--dsw-alias-label-primary);font-weight:600}.jbF1yq_outcomeReason{color:var(--dsw-alias-label-secondary);font-size:11.5px}.jbF1yq_outcomeItem[data-status=skipped] .jbF1yq_outcomeReason{color:var(--dsw-alias-state-warn-primary)}.jbF1yq_bannerAction{margin-left:8px}.jbF1yq_input{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);resize:vertical;border-radius:8px;outline:none;padding:7px 10px;font-family:inherit;font-size:13px}.jbF1yq_input:focus{border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_input::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_input:disabled{opacity:.55}.jbF1yq_textarea{min-height:140px;font-family:var(--ds-font-family-code)}.jbF1yq_note{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:1.7}";
+		const css = ".jbF1yq_view{height:100%;min-height:0;overflow:hidden}.jbF1yq_panel{background:var(--dsw-alias-bg-base);min-width:0;height:100%;min-height:0;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);flex-direction:column;gap:10px;padding:14px 16px 16px;display:flex}.jbF1yq_panelHeader{flex:none;align-items:center;gap:10px;display:flex}.jbF1yq_panelTitle{color:var(--dsw-alias-label-primary);white-space:nowrap;flex:1;margin:0;font-size:16px;font-weight:700}.jbF1yq_tabBar{border-bottom:1px solid var(--dsw-alias-border-l1);flex:none;gap:2px;display:flex}.jbF1yq_tab{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-bottom:2px solid #0000;border-radius:6px 6px 0 0;padding:7px 14px;font-size:13px}.jbF1yq_tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_tab[data-active]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.jbF1yq_panelContent{flex-direction:column;flex:1;min-height:0;display:flex;overflow:hidden}.jbF1yq_fillBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow:hidden}.jbF1yq_tabBody{flex-direction:column;flex:1;gap:10px;min-height:0;display:flex;overflow-y:auto}.jbF1yq_toolbar{flex-wrap:wrap;flex:none;align-items:center;gap:8px;display:flex}.jbF1yq_search{min-width:120px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;flex:0 260px;padding:6px 10px;font-size:13px}.jbF1yq_search::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_select{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none;padding:6px 8px;font-size:13px}.jbF1yq_toolbarSpacer{flex:1}.jbF1yq_checkboxLabel{color:var(--dsw-alias-label-secondary);cursor:pointer;align-items:center;gap:6px;font-size:12px;display:inline-flex}.jbF1yq_facetBar{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;flex-direction:column;flex:none;gap:6px;padding:8px 10px;display:flex}.jbF1yq_facetRow{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.jbF1yq_facetLabel{min-width:34px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}.jbF1yq_facetChip{color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:999px;align-items:center;gap:5px;padding:2px 9px;font-size:11.5px;line-height:1.7;display:inline-flex}.jbF1yq_facetChip:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetChip[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_facetCount{color:var(--dsw-alias-label-tertiary);font-size:10.5px}.jbF1yq_facetChip[data-active] .jbF1yq_facetCount{color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton[data-active]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_ghostButton{color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);cursor:pointer;white-space:nowrap;background:0 0;border-radius:8px;padding:5px 12px;font-size:12px}.jbF1yq_ghostButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_ghostButton:disabled{opacity:.45;cursor:default}.jbF1yq_formActions{align-items:center;gap:8px;display:flex}.jbF1yq_primaryButton{color:var(--dsw-alias-label-primary-foreground);background:var(--dsw-alias-button-primary-fill);cursor:pointer;white-space:nowrap;border:none;border-radius:8px;align-self:flex-start;padding:6px 14px;font-size:13px;font-weight:600}.jbF1yq_primaryButton:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.jbF1yq_primaryButton:disabled{opacity:.5;cursor:default}.jbF1yq_linkButton{color:var(--dsw-alias-state-business-primary);cursor:pointer;white-space:nowrap;background:0 0;border:none;padding:0;font-size:12px}.jbF1yq_linkButton:hover:not(:disabled){text-decoration:underline}.jbF1yq_linkButton:disabled{opacity:.45;cursor:default}.jbF1yq_linkButton[data-danger]{color:var(--dsw-alias-state-error-primary)}.jbF1yq_banner{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;border-radius:8px;padding:8px 12px;font-size:12.5px;line-height:1.5}.jbF1yq_banner[data-kind=ok]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_banner[data-kind=error]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}.jbF1yq_empty{text-align:center;color:var(--dsw-alias-label-tertiary);padding:28px 12px;font-size:12.5px}.jbF1yq_list{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex-direction:column;flex:1;gap:14px;min-height:0;padding:8px 12px 10px;display:flex;overflow-y:auto}.jbF1yq_group{flex-direction:column;gap:6px;display:flex}.jbF1yq_groupToggle{width:100%;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:6px;align-items:center;gap:6px;padding:4px 2px;font-size:13px;font-weight:600;display:flex}.jbF1yq_groupToggle:hover{background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_groupCaret{border-bottom:1.5px solid;border-right:1.5px solid;flex:none;width:6px;height:6px;transition:transform .15s;transform:rotate(-45deg)}.jbF1yq_groupToggle[aria-expanded=true] .jbF1yq_groupCaret{transform:rotate(45deg)}.jbF1yq_groupTitleText{font-weight:600}.jbF1yq_count{color:var(--dsw-alias-label-secondary);margin-left:6px;font-weight:400}.jbF1yq_groupHint{color:var(--dsw-alias-label-secondary);margin:0;font-size:11px}.jbF1yq_skillGrid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:4px 0 8px;display:grid}.jbF1yq_skillCard{background:var(--dsw-alias-interactive-bg-hover);border:1px solid #0000;border-radius:12px;flex-direction:column;gap:8px;min-width:0;padding:12px 14px;transition:border-color .15s,background .15s;display:flex}.jbF1yq_skillCard:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base)}.jbF1yq_cardHead{align-items:flex-start;gap:10px;display:flex}.jbF1yq_skillAvatar{border-radius:9px;flex:none;justify-content:center;align-items:center;width:32px;height:32px;font-size:14px;font-weight:600;line-height:1;display:flex}.jbF1yq_cardIdentity{flex-direction:column;gap:2px;min-width:0;display:flex}.jbF1yq_cardMeta{color:var(--dsw-alias-label-secondary);white-space:nowrap;text-overflow:ellipsis;font-size:11px;overflow:hidden}.jbF1yq_cardControls{flex:none;align-items:center;gap:6px;margin-left:auto;display:flex}.jbF1yq_cardControls .jbF1yq_switch{margin-left:0}.jbF1yq_cardTags{flex-wrap:wrap;gap:6px;display:flex}.jbF1yq_cardActions{border-top:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:6px;display:flex}.jbF1yq_skillName{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600;font-family:var(--ds-font-family-code)}.jbF1yq_badge{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;padding:1px 8px;font-size:11px;line-height:1.6;display:inline-block}.jbF1yq_badgeWorkspace{color:var(--dsw-alias-label-secondary)}.jbF1yq_badgeInvokable{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.jbF1yq_badgeIsolated,.jbF1yq_badgeDisabled{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.jbF1yq_skillIsolated{opacity:.76}.jbF1yq_skillIsolated:hover{opacity:.98}.jbF1yq_switch{cursor:pointer;background:0 0;border:none;border-radius:99px;align-items:center;margin-left:auto;padding:2px;display:inline-flex}.jbF1yq_switch:disabled{opacity:.45;cursor:default}.jbF1yq_switchTrack{background:var(--dsw-alias-border-l2);border-radius:99px;flex:none;width:30px;height:16px;transition:background .18s;position:relative}.jbF1yq_switchThumb{background:var(--dsw-alias-bg-base);border-radius:50%;width:12px;height:12px;transition:left .18s;position:absolute;top:2px;left:2px}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchTrack{background:var(--dsw-alias-state-success-primary)}.jbF1yq_switch[aria-checked=true] .jbF1yq_switchThumb{left:16px}.jbF1yq_deleteButton{margin-left:4px}.jbF1yq_skillDesc{color:var(--dsw-alias-label-primary);-webkit-line-clamp:3;-webkit-box-orient:vertical;margin:0;font-size:12px;line-height:1.5;display:-webkit-box;overflow:hidden}.jbF1yq_skillWhen{color:var(--dsw-alias-label-secondary);margin:4px 0 0;font-size:11px}.jbF1yq_skillPath{color:var(--dsw-alias-label-tertiary);font-size:10px;font-family:var(--ds-font-family-code);word-break:break-all;margin:6px 0 0}.jbF1yq_form{flex-direction:column;gap:10px;max-width:640px;display:flex}.jbF1yq_field{flex-direction:column;gap:5px;display:flex}.jbF1yq_fieldLabel{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600}.jbF1yq_fieldGroup{border:none;flex-direction:column;gap:5px;margin:0;padding:0;display:flex}.jbF1yq_radioRow{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.jbF1yq_outcomeList{flex-direction:column;gap:4px;max-height:260px;margin:8px 0 0;padding:0;list-style:none;display:flex;overflow-y:auto}.jbF1yq_outcomeItem{flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12px;display:flex}.jbF1yq_outcomeName{font-family:var(--ds-font-family-code);color:var(--dsw-alias-label-primary);font-weight:600}.jbF1yq_outcomeReason{color:var(--dsw-alias-label-secondary);font-size:11.5px}.jbF1yq_outcomeItem[data-status=skipped] .jbF1yq_outcomeReason{color:var(--dsw-alias-state-warn-primary)}.jbF1yq_bannerAction{margin-left:8px}.jbF1yq_input{color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major);border:1px solid var(--dsw-alias-border-l2);resize:vertical;border-radius:8px;outline:none;padding:7px 10px;font-family:inherit;font-size:13px}.jbF1yq_input:focus{border-color:var(--dsw-alias-state-business-primary)}.jbF1yq_input::placeholder{color:var(--dsw-alias-label-tertiary)}.jbF1yq_input:disabled{opacity:.55}.jbF1yq_textarea{min-height:140px;font-family:var(--ds-font-family-code)}.jbF1yq_note{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:1.7}.jbF1yq_dialogOverlay{z-index:60;background:color-mix(in srgb, var(--dsw-alias-label-primary) 28%, transparent);justify-content:center;align-items:flex-start;padding:8vh 24px 24px;display:flex;position:fixed;inset:0}.jbF1yq_dialogPanel{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);width:100%;max-width:560px;max-height:82vh;box-shadow:0 18px 48px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);border-radius:14px;flex-direction:column;display:flex;overflow:hidden}.jbF1yq_dialogPanel[data-size=wide]{max-width:720px}.jbF1yq_dialogHead{border-bottom:1px solid var(--dsw-alias-border-l1);align-items:center;gap:12px;padding:14px 18px;display:flex}.jbF1yq_dialogTitle{color:var(--dsw-alias-label-primary);margin:0;font-size:14px;font-weight:600}.jbF1yq_dialogClose{color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;border-radius:6px;margin-left:auto;padding:2px 6px;font-size:18px;line-height:1}.jbF1yq_dialogClose:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.jbF1yq_dialogBody{padding:16px 18px 18px;overflow:auto}";
 		const tagId = "dsh-skill-explorer/src/client/panel/panel.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -541,6 +543,12 @@ window.__ModuleLoader__.load({
 			"checkboxLabel": "jbF1yq_checkboxLabel",
 			"count": "jbF1yq_count",
 			"deleteButton": "jbF1yq_deleteButton",
+			"dialogBody": "jbF1yq_dialogBody",
+			"dialogClose": "jbF1yq_dialogClose",
+			"dialogHead": "jbF1yq_dialogHead",
+			"dialogOverlay": "jbF1yq_dialogOverlay",
+			"dialogPanel": "jbF1yq_dialogPanel",
+			"dialogTitle": "jbF1yq_dialogTitle",
 			"empty": "jbF1yq_empty",
 			"facetBar": "jbF1yq_facetBar",
 			"facetChip": "jbF1yq_facetChip",
@@ -771,6 +779,58 @@ window.__ModuleLoader__.load({
 							children: tt("create.note")
 						})
 					]
+				})
+			});
+		}
+		//#endregion
+		//#region src/client/panel/Dialog.tsx
+		/**
+		* Modal shell for the create, import and edit forms.
+		*
+		* The panel owns one page (the skill list); the forms open over it instead of
+		* switching the center column, so leaving the panel no longer has to remember a
+		* tab. Escape and a backdrop press both close, and the close button carries the
+		* localized label.
+		*/
+		/** @returns the overlay dialog. */
+		function Dialog({ title, onClose, children, size = "normal" }) {
+			(0, react.useEffect)(() => {
+				const onKeyDown = (event) => {
+					if (event.key === "Escape") onClose();
+				};
+				document.addEventListener("keydown", onKeyDown, true);
+				return () => {
+					document.removeEventListener("keydown", onKeyDown, true);
+				};
+			}, [onClose]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: panel_module_css_default.dialogOverlay,
+				"data-dsh-part": "dialog",
+				onMouseDown: (event) => {
+					if (event.target === event.currentTarget) onClose();
+				},
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: panel_module_css_default.dialogPanel,
+					"data-size": size,
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": title,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: panel_module_css_default.dialogHead,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", {
+							className: panel_module_css_default.dialogTitle,
+							children: title
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: panel_module_css_default.dialogClose,
+							"aria-label": tt("dialog.close"),
+							onClick: onClose,
+							children: "×"
+						})]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: panel_module_css_default.dialogBody,
+						children
+					})]
 				})
 			});
 		}
@@ -1754,7 +1814,7 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/** The skills tab body. */
-		function SkillsTab({ api, onEdit, onImport, onDuplicate }) {
+		function SkillsTab({ api, onCreate, onEdit, onImport, onDuplicate }) {
 			const [payload, setPayload] = (0, react.useState)(void 0);
 			const [selectedWorkspace, setSelectedWorkspace] = (0, react.useState)("all");
 			const [query, setQuery] = (0, react.useState)("");
@@ -1897,6 +1957,12 @@ window.__ModuleLoader__.load({
 									setFiltersOpen((open) => !open);
 								},
 								children: [tt("filter.toggle"), facetsActive ? ` (${activeFacetCount(prefs)})` : ""]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: panel_module_css_default.primaryButton,
+								onClick: onCreate,
+								children: tt("tab.create")
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
@@ -2044,42 +2110,28 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/panel/SkillPanel.tsx
 		/**
-		* The skill center panel shell: a title header, a tab bar, and the active
-		* tab's content.
+		* The skill center panel shell: a title header, the skill list, and the one
+		* modal dialog the current form needs.
 		*
-		* The tab and the editor target live in the controller, not in component
-		* state: the layout mounts this page only while the panel is selected, so
-		* local state would drop the open tab and any in-progress edit on every panel
-		* switch. The inactive tab unmounts, so the tab that needs the workspace
-		* resolves it itself and the list refetches when it returns.
+		* The dialog mode and the editor target live in the controller, not in
+		* component state: the layout mounts this page only while the panel is
+		* selected, so local state would drop an open dialog on every panel switch.
+		* The list stays mounted under a dialog and refetches through a key bump when
+		* the dialog closes.
 		*
-		* The edit tab appears only while a skill is being edited: the list row hands
-		* the chosen skill over, and leaving the editor returns to the list. The
-		* import tab is always listed, and the list's import button opens it; a row's
-		* "duplicate as template" action hands a draft to the create tab through the
-		* controller for the same mount reason.
+		* The create and import buttons in the list toolbar open their dialog; a row's
+		* edit button opens the editor dialog, and a row's "duplicate as template"
+		* action opens the create dialog with a draft through the controller.
 		*/
 		/** The skill center panel. */
 		function SkillPanel({ controller, api }) {
 			const { activeTab, editing } = (0, react.useSyncExternalStore)((listener) => controller.subscribe(listener), () => controller.getSnapshot());
-			const tabs = [
-				{
-					id: "skills",
-					label: () => tt("tab.list")
-				},
-				{
-					id: "create",
-					label: () => tt("tab.create")
-				},
-				{
-					id: "import",
-					label: () => tt("tab.import")
-				},
-				...editing === void 0 ? [] : [{
-					id: "edit",
-					label: () => tt("tab.edit")
-				}]
-			];
+			const [listEpoch, setListEpoch] = (0, react.useState)(0);
+			const closeDialog = () => {
+				if (editing !== void 0) controller.closeEditor();
+				else controller.setActiveTab("skills");
+				setListEpoch((epoch) => epoch + 1);
+			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: panel_module_css_default.panel,
 				"data-dsh-plugin": "skill-explorer",
@@ -2092,53 +2144,46 @@ window.__ModuleLoader__.load({
 						})
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: panel_module_css_default.tabBar,
-						role: "tablist",
-						"data-dsh-part": "tab-bar",
-						children: tabs.map((tab) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							role: "tab",
-							"aria-selected": activeTab === tab.id,
-							"data-active": activeTab === tab.id ? "" : void 0,
-							"data-dsh-part": "tab",
-							className: panel_module_css_default.tab,
-							onClick: () => {
-								controller.setActiveTab(tab.id);
-							},
-							children: tab.label()
-						}, tab.id))
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: panel_module_css_default.panelContent,
-						children: [
-							activeTab === "skills" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillsTab, {
-								api,
-								onEdit: (skill) => {
-									controller.openEditor(skill);
-								},
-								onImport: () => {
-									controller.setActiveTab("import");
-								},
-								onDuplicate: (draft) => {
-									controller.openCreateFromTemplate(draft);
-								}
-							}),
-							activeTab === "create" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CreateTab, {
-								api,
-								controller
-							}),
-							activeTab === "import" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ImportTab, { api }),
-							activeTab === "edit" && editing !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EditTab, {
-								api,
-								skill: editing,
-								onDone: () => {
-									controller.closeEditor();
-								},
-								onCancel: () => {
-									controller.closeEditor();
-								}
-							})
-						]
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillsTab, {
+							api,
+							onCreate: () => {
+								controller.setActiveTab("create");
+							},
+							onImport: () => {
+								controller.setActiveTab("import");
+							},
+							onEdit: (skill) => {
+								controller.openEditor(skill);
+							},
+							onDuplicate: (draft) => {
+								controller.openCreateFromTemplate(draft);
+							}
+						}, listEpoch)
+					}),
+					activeTab === "create" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Dialog, {
+						title: tt("tab.create"),
+						onClose: closeDialog,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CreateTab, {
+							api,
+							controller
+						})
+					}),
+					activeTab === "import" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Dialog, {
+						title: tt("tab.import"),
+						onClose: closeDialog,
+						size: "wide",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ImportTab, { api })
+					}),
+					activeTab === "edit" && editing !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Dialog, {
+						title: tt("tab.edit"),
+						onClose: closeDialog,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EditTab, {
+							api,
+							skill: editing,
+							onDone: closeDialog,
+							onCancel: closeDialog
+						})
 					})
 				]
 			});

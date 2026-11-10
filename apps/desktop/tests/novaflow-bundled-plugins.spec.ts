@@ -98,7 +98,7 @@ it('exposes shipped bundles through the installation and preserves a user disabl
   const active = loadProfileDirectory('NovaFlow', profile, anchor).layers.map(layer => layer.packageName)
   expect(active).not.toContain('dsh-skill-explorer')
   expect(active).not.toContain('dsh-douyin-comments')
-  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-skill-explorer', '0.1.1')
+  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-skill-explorer', '0.1.2')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-douyin-comments', '0.8.6')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-comment-viewer', '0.2.16')
 })

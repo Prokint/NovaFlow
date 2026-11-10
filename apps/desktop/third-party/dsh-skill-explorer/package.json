@@ -1,7 +1,7 @@
 {
   "name": "dsh-skill-explorer",
   "description": "NovaFlow-maintained fork of the DSH Skill Explorer: browse loaded skills, toggle model invocation, author and manage SKILL.md files in a web GUI panel. Anonymous install telemetry removed.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "icon": "icon.svg",
   "type": "module",
   "main": "lib/index.js",
