@@ -602,8 +602,26 @@ async function main(): Promise<void> {
       }
     },
   })
+  // One warning per burst: a failed turn can produce several rejected requests, and a repeated native
+  // dialog is worse than the delay before the user recharges.
+  let quotaNoticeShownAt = 0
+  const notifyAccountQuotaExhausted = (): void => {
+    const at = Date.now()
+    if (at - quotaNoticeShownAt < 30_000) return
+    quotaNoticeShownAt = at
+    const copy = novaFlowAccountCopy(currentDesktopLocale().id)
+    void dialog.showMessageBox({
+      type: 'warning', title: copy.quotaTitle, message: copy.quotaMessage, detail: copy.quotaDetail,
+      buttons: [copy.quotaRecharge, copy.quotaLater], defaultId: 0, cancelId: 1, noLink: true,
+    }).then(({ response }) => {
+      if (response === 0) void shell.openExternal(`${server.get()}/wallet`)
+    }).catch((_dialogError: unknown) => {
+      // A dismissed or unavailable dialog must not fail the request that already reported its quota error.
+    })
+  }
   const createRelay = (): Promise<NovaFlowLoopbackRelay> => startNovaFlowLoopbackRelay({ runtime: novaflow,
     admit: () => accountAdmission && desktopAccountKey(desktopAccountIdentity(novaflow.getSnapshot())) === accountScope.key,
+    onAccountQuotaExhausted: notifyAccountQuotaExhausted,
     maxRequestBytes: 20 * 1024 * 1024, maxConcurrentRequests: 16, requestTimeoutMs: 30_000 })
   let novaflowRelay = await createRelay()
   try {

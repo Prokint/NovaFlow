@@ -105,6 +105,42 @@ describe('NovaFlow authenticated loopback relay', () => {
     expect(invoke.mock.calls[0]?.[2]?.aborted).toBe(false)
   })
 
+  it('reports an exhausted account quota as 402 and notifies the shell once', async () => {
+    const onAccountQuotaExhausted = vi.fn()
+    const invoke = vi.fn<NovaFlowLoopbackRelayOptions['runtime']['invoke']>().mockImplementation(async () => ({
+      response: new Response(JSON.stringify({
+        error: { message: 'Insufficient user quota, remaining quota: $0.000000', type: 'new_api_error', code: 'insufficient_user_quota' },
+      }), { status: 403, headers: { 'content-type': 'application/json' } }),
+      group: 'fixture-group', model: 'fixture-model',
+    }))
+    const relay = await startNovaFlowLoopbackRelay({
+      runtime: { invoke, getRelayRevision: vi.fn().mockReturnValue(1) }, onAccountQuotaExhausted,
+      maxRequestBytes: 1024, maxConcurrentRequests: 2, requestTimeoutMs: 1000,
+    })
+    relays.add(relay)
+    const response = await exchange(relay)
+    expect(response.status).toBe(402)
+    expect(response.body).toContain('Insufficient user quota')
+    expect(onAccountQuotaExhausted).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an unrelated upstream failure status and stays silent about quota', async () => {
+    const onAccountQuotaExhausted = vi.fn()
+    const invoke = vi.fn<NovaFlowLoopbackRelayOptions['runtime']['invoke']>().mockImplementation(async () => ({
+      response: new Response(JSON.stringify({ error: { message: 'model not found', code: 'model_not_found' } }),
+        { status: 404, headers: { 'content-type': 'application/json' } }),
+      group: 'fixture-group', model: 'fixture-model',
+    }))
+    const relay = await startNovaFlowLoopbackRelay({
+      runtime: { invoke, getRelayRevision: vi.fn().mockReturnValue(1) }, onAccountQuotaExhausted,
+      maxRequestBytes: 1024, maxConcurrentRequests: 2, requestTimeoutMs: 1000,
+    })
+    relays.add(relay)
+    const response = await exchange(relay)
+    expect(response.status).toBe(404)
+    expect(onAccountQuotaExhausted).not.toHaveBeenCalled()
+  })
+
   it.each([
     { headers: { origin: '' }, status: 403 },
     { headers: { origin: 'null' }, status: 403 },

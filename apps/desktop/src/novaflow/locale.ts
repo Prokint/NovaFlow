@@ -41,6 +41,12 @@ export interface NovaFlowAccountCopy {
   walletPage: string
   usagePage: string
   devicePage: string
+  /** Native warning shown when the account balance cannot fund a model request. */
+  quotaTitle: string
+  quotaMessage: string
+  quotaDetail: string
+  quotaRecharge: string
+  quotaLater: string
   deviceUsage: string
   deviceLimit: string
   deviceUnlimited: string
@@ -103,7 +109,11 @@ export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
   return language.toLowerCase().startsWith('zh') ? {
     switchTitle: '切换账号', switchMessage: '当前工作区仍有运行中或已安排的任务。继续将停止这些任务并关闭当前工作区。', switchContinue: '停止任务并继续', switchCancel: '保留当前账号',
     signInSite: '登录并使用模型', waitingSite: '请在登录窗口完成账号验证…', siteGroupHint: '登录后自动加载当前账号可用的模型。',
-    devicePage: '安全与设备', walletPage: '钱包与充值', usagePage: '用量记录', wallet: '钱包剩余', walletQuota: '钱包剩余（额度）', numberLocale: 'zh-CN', accountUsage: '账号累计用量', quotaUnavailable: '暂不可用',
+    devicePage: '安全与设备', walletPage: '钱包与充值', usagePage: '用量记录',
+    quotaTitle: '余额不足', quotaMessage: '当前账号余额不足，无法继续调用模型。',
+    quotaDetail: '充值后即可继续对话，已生成的内容和运行中的任务不会丢失。',
+    quotaRecharge: '去充值', quotaLater: '稍后再说',
+    wallet: '钱包剩余', walletQuota: '钱包剩余（额度）', numberLocale: 'zh-CN', accountUsage: '账号累计用量', quotaUnavailable: '暂不可用',
     title: 'NovaFlow 账号', signIn: '在浏览器中登录', cancel: '取消登录', signOut: '退出登录', refresh: '刷新账号', signedIn: '已登录', signingIn: '正在登录…',
     signedOut: '尚未登录', waiting: '请在系统浏览器中完成授权…', group: '分组', models: '可用模型', unavailable: '暂不可用',
     failed: '操作未完成，请重试', privacy: '发送给模型的内容会经过 NovaFlow 并可能发送给模型供应商。本机文件不会自动全部上传。',
@@ -131,7 +141,11 @@ export function novaFlowAccountCopy(language: string): NovaFlowAccountCopy {
   } : {
     switchTitle: 'Switch account', switchMessage: 'This workspace has running or scheduled tasks. Continuing will stop them and close this workspace.', switchContinue: 'Stop tasks and continue', switchCancel: 'Keep current account',
     signInSite: 'Sign in and use models', waitingSite: 'Complete account verification in the sign-in window…', siteGroupHint: 'Signing in loads the models available to your account.',
-    devicePage: 'Security & devices', walletPage: 'Wallet & top-up', usagePage: 'Usage', wallet: 'Wallet balance', walletQuota: 'Wallet balance (quota)', numberLocale: 'en-US', accountUsage: 'Account usage', quotaUnavailable: 'Unavailable',
+    devicePage: 'Security & devices', walletPage: 'Wallet & top-up', usagePage: 'Usage',
+    quotaTitle: 'Insufficient balance', quotaMessage: 'Your account balance cannot fund further model requests.',
+    quotaDetail: 'Top up to continue; existing messages and running tasks are kept.',
+    quotaRecharge: 'Top up', quotaLater: 'Later',
+    wallet: 'Wallet balance', walletQuota: 'Wallet balance (quota)', numberLocale: 'en-US', accountUsage: 'Account usage', quotaUnavailable: 'Unavailable',
     title: 'NovaFlow account', signIn: 'Sign in using browser', cancel: 'Cancel sign-in', signOut: 'Sign out', refresh: 'Refresh account', signedIn: 'Signed in', signingIn: 'Signing in…',
     signedOut: 'Not signed in', waiting: 'Finish authorization in your browser…', group: 'Group', models: 'Available models',
     unavailable: 'Unavailable', failed: 'The operation did not complete. Please retry.',

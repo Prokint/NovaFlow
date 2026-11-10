@@ -17,6 +17,8 @@ export interface NovaFlowLoopbackRelayOptions {
   readonly requestTimeoutMs: number
   /** When present, deny account-transition requests before and after body receipt; absence admits normally. */
   readonly admit?: () => boolean
+  /** Notified once per rejected quota failure so the shell can offer a top-up without reading the stream. */
+  readonly onAccountQuotaExhausted?: () => void
 }
 
 /** Transfer only through trusted subprocess IPC; neither field belongs in renderer state or logs. */
@@ -29,6 +31,75 @@ export interface NovaFlowLoopbackRelay {
 
 class LocalRequestError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code) }
+}
+
+/** An error response is small JSON; anything larger is forwarded unread rather than buffered. */
+const MAX_ERROR_BODY_BYTES = 64 * 1024
+
+/** Quota wording a gateway returns both for a depleted balance and for an exhausted subscription. */
+const QUOTA_FAILURE = new RegExp([
+  String.raw`\binsufficient[\s_-]+(?:\w+[\s_-]+){0,2}(?:quota|balance|credits?)\b`,
+  String.raw`\b(?:quota|balance)[\s_-]+(?:exceeded|exhausted|reached)\b`,
+  String.raw`\b402\b`,
+].join('|'), 'i')
+
+async function readErrorText(body: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (body === null) return ''
+  const reader = body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      total += chunk.value.byteLength
+      if (total > MAX_ERROR_BODY_BYTES) {
+        await reader.cancel().catch((_cancelError: unknown) => {
+          // A body already ended by the upstream cannot be cancelled; the partial text is still useful.
+        })
+        break
+      }
+      chunks.push(Buffer.from(chunk.value))
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+function quotaFailure(text: string): boolean {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return QUOTA_FAILURE.test(text)
+  }
+  if (typeof parsed !== 'object' || parsed === null || !('error' in parsed)) return QUOTA_FAILURE.test(text)
+  const error: unknown = parsed.error
+  if (typeof error !== 'object' || error === null) return QUOTA_FAILURE.test(text)
+  const detail = error as { code?: unknown; message?: unknown }
+  return (typeof detail.code === 'string' && QUOTA_FAILURE.test(detail.code))
+    || (typeof detail.message === 'string' && QUOTA_FAILURE.test(detail.message))
+}
+
+/** Forward a rejected upstream response, turning an exhausted balance into 402 so callers classify it as quota. */
+async function relayFailure(
+  upstream: Response, response: ServerResponse, onQuotaExhausted: (() => void) | undefined, signal: AbortSignal,
+): Promise<void> {
+  const text = await readErrorText(upstream.body)
+  signal.throwIfAborted()
+  const quota = quotaFailure(text)
+  if (quota) onQuotaExhausted?.()
+  const headers: Record<string, string> = {
+    'cache-control': 'no-store', 'x-content-type-options': 'nosniff', connection: 'close',
+  }
+  const contentType = upstream.headers.get('content-type')
+  if (contentType !== null) headers['content-type'] = contentType
+  const retryAfter = upstream.headers.get('retry-after')
+  if (retryAfter !== null && /^\d+$/u.test(retryAfter)) headers['retry-after'] = retryAfter
+  response.writeHead(quota ? 402 : upstream.status, headers)
+  response.end(text)
+  await finished(response, { cleanup: true })
 }
 
 function headerCount(request: IncomingMessage, name: string): number {
@@ -219,6 +290,10 @@ export async function startNovaFlowLoopbackRelay(options: NovaFlowLoopbackRelayO
       if (options.admit?.() === false) throw new LocalRequestError(503, 'account_unavailable')
       if (revision !== options.runtime.getRelayRevision()) throw new LocalRequestError(409, 'stale_relay_revision')
       const result = await options.runtime.invoke(endpoint, payload, controller.signal, revision)
+      if (result.response.status >= 400) {
+        await relayFailure(result.response, response, options.onAccountQuotaExhausted, controller.signal)
+        return
+      }
       await streamResponse(result.response, response, controller.signal)
     } catch (error) {
       failure(response, error)
