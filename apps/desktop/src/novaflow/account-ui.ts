@@ -97,13 +97,7 @@ const STYLES = `
 .hcx-stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .hcx-stats dt { color: var(--dsw-alias-label-secondary, #61666b); font-size: 13px; white-space: nowrap; }
 .hcx-stats dd { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.hcx-links { grid-area: links; display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.hcx-page-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent;
-  color: var(--dsw-alias-state-business-primary, #4176e6); font: inherit; font-size: 13px; line-height: 20px; white-space: nowrap; cursor: pointer; }
-.hcx-page-link::after { content: ''; width: 11px; height: 11px; background: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M7 2h3v3M10 2L5.5 6.5M9 7v2.5a.5.5 0 0 1-.5.5h-6a.5.5 0 0 1-.5-.5v-6a.5.5 0 0 1 .5-.5H5' stroke='%23000' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 11px no-repeat; }
-.hcx-page-link:not(:disabled):hover { text-decoration: underline; text-underline-offset: 3px; }
-
+.hcx-links { grid-area: links; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hcx-profile { flex-direction: row; align-items: center; }
 .hcx-avatar { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%;
   background: var(--dsw-alias-bg-skeleton, #0000000a); color: var(--dsw-alias-label-secondary, #61666b); font-size: 16px; font-weight: 500; }
@@ -316,10 +310,9 @@ export function createNovaFlowAccountUi(
   const links = element('div', 'hcx-links')
   const topUp = operations.openTopUp === undefined
     ? undefined : button('hcx-button hcx-primary hcx-small', copy.topupAction)
-  const walletPage = button('hcx-page-link', copy.walletPage)
-  const usagePage = button('hcx-page-link', copy.usagePage)
-  const devicePage = button('hcx-page-link', copy.devicePage)
-  links.append(walletPage, usagePage, devicePage)
+  const usagePage = button('hcx-button hcx-outline hcx-small', copy.usagePage)
+  const devicePage = button('hcx-button hcx-outline hcx-small', copy.devicePage)
+  links.append(usagePage, devicePage)
   balanceCard.append(figure, refreshWallet, walletFeedback, stats, links)
 
   const profileCard = element('section', 'hcx-card hcx-profile')
@@ -761,7 +754,7 @@ export function createNovaFlowAccountUi(
     links.prepend(topUp)
     topUp.addEventListener('click', () => { operations.openTopUp?.() })
   }
-  for (const [link, target] of [[walletPage, 'wallet'], [devicePage, 'devices'], [usagePage, 'usage']] as const) {
+  for (const [link, target] of [[devicePage, 'devices'], [usagePage, 'usage']] as const) {
     link.addEventListener('click', () => {
       const operation = generation
       void operations.openPage(target).catch(() => {

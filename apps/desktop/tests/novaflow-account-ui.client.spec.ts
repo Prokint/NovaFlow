@@ -82,10 +82,9 @@ describe('native NovaFlow account UI', () => {
     expect(page.querySelector('form')?.hidden).toBe(true)
     expect(document.head.querySelector('style')?.textContent).toContain('--dsw-alias-label-primary')
     expect(page.querySelector('select')?.hidden).toBe(true)
-    button('Wallet & top-up').click()
     button('Usage').click()
     button('Security & devices').click()
-    expect(operations.openPage.mock.calls).toEqual([['wallet'], ['usage'], ['devices']])
+    expect(operations.openPage.mock.calls).toEqual([['usage'], ['devices']])
   })
   it('re-reads usage each time a signed-in page mounts, never while signed out', async () => {
     const signedInView = fixture(signedIn)
