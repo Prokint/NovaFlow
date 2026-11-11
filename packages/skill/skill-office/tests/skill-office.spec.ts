@@ -37,7 +37,7 @@ describe('bundled Office skills', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it('loads each packaged body and removes all candidates on disposal', async () => {
+  it('loads each packaged body, reports its instruction file, and removes all candidates on disposal', async () => {
     const ctx = new Context()
     try {
       await ctx.plugin(SkillRegistry)
@@ -47,8 +47,10 @@ describe('bundled Office skills', () => {
       for (const skill of catalog) {
         expect(skill.description.length).toBeLessThanOrEqual(500)
         expect(skill).toMatchObject({ source: 'bundled', provider: 'dsh-office', invocation: { modelInvocable: true, userInvocable: true } })
+        expect(skill.path).toBe(join(assets, skill.name, 'SKILL.md'))
         const loaded = await ctx.skills.get(skill.name)
         expect(loaded?.resourceBase).toEqual({ kind: 'directory', path: join(assets, skill.name).split(sep).join('/') })
+        expect(loaded?.path).toBe(join(assets, skill.name, 'SKILL.md'))
         const raw = await readFile(join(assets, skill.name, 'SKILL.md'), 'utf8')
         const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/u, '').trim()
         expect(loaded?.content.startsWith(body)).toBe(true)
@@ -99,6 +101,7 @@ describe('bundled Office skills', () => {
       expect((await ctx.skills.list()).map(skill => skill.name)).toEqual(names)
       const loaded = await ctx.skills.get('office-xlsx')
       expect(loaded?.resourceBase).toEqual({ kind: 'directory', path: join(external, 'office-xlsx').split(sep).join('/') })
+      expect(loaded?.path).toBe(join(external, 'office-xlsx', 'SKILL.md'))
       const raw = await readFile(join(external, 'office-xlsx', 'SKILL.md'), 'utf8')
       const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/u, '').trim()
       expect(loaded?.content).toBe(body)

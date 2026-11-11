@@ -77,7 +77,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       name: skillName, description,
       invocation: { modelInvocable: true, userInvocable: true },
       provider: 'dsh-office', source: 'bundled', rank: BUNDLED_SKILL_RANK,
-      resourceBase: { kind: 'directory', path: directory.split(sep).join('/') }, locator: path,
+      // The packaged SKILL.md is the instruction file, so catalogs report it as
+      // `path`; `locator` remains the provider-owned handle to the same file.
+      resourceBase: { kind: 'directory', path: directory.split(sep).join('/') }, locator: path, path,
     }
   })
   const provider: SkillProvider = {

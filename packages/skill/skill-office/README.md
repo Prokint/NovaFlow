@@ -87,7 +87,7 @@ Ordinary Word text edits inspect the target runs and formatting, then reopen the
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The provider reads descriptions at registration and bodies on demand. Registry precedence, scope, and invocation permissions apply to every skill. Each loaded skill includes its resource directory for relative references. Disposal unregisters all candidates.
+The provider reads descriptions at registration and bodies on demand. Registry precedence, scope, and invocation permissions apply to every skill. Each catalog entry reports its packaged `SKILL.md` as `path`, and each loaded skill includes its resource directory for relative references. Disposal unregisters all candidates.
 
 The provider registers no tools or activation projection. Loaded skill results remain logged through the generic skill loader. In PTC programs, print or return the full `tools.skill(...)` result so its instructions reach the model. Resume and fork use existing session history and tool declaration reconciliation. Interpreter and CLI paths are resolved only when an operation skill is loaded.
 
