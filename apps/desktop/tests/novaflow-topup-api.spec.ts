@@ -62,7 +62,7 @@ describe('site top-up orders', () => {
     const { fetch } = route({ '/api/user/pay': order })
     await expect(startNewApiTopUp(fetch, ORIGIN, access, { amount: 1, method: 'alipay' }, signal()))
       .resolves.toEqual({ tradeNo: 'USR1NOabc', payUrl: 'https://zpayz.cn/submit.php',
-        fields: { pid: '2026', sign: 'sig', money: '7.00', type: 'alipay' } })
+        fields: { out_trade_no: 'USR1NOabc', pid: '2026', sign: 'sig', money: '7.00', type: 'alipay' } })
     const unsafe = route({ '/api/user/pay': { ...order, url: 'http://zpayz.cn/submit.php' } })
     await expect(startNewApiTopUp(unsafe.fetch, ORIGIN, access, { amount: 1, method: 'alipay' }, signal()))
       .rejects.toThrow('invalid_response')

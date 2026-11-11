@@ -410,9 +410,11 @@ export async function startNewApiTopUp(fetcher: typeof fetch, origin: string, ac
   let parsed: URL
   try { parsed = new URL(payUrl) } catch (_error) { throw new NovaFlowAuthError('invalid_response') }
   if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') throw new NovaFlowAuthError('invalid_response')
+  // Gateway forms must carry every signed field, including out_trade_no: the provider rejects the
+  // request and its signature check fails when that order number is left out.
   const fields: Record<string, string> = {}
   for (const [key, value] of Object.entries(order)) {
-    if (!/^[a-zA-Z0-9_]{1,64}$/u.test(key) || key === 'out_trade_no') continue
+    if (!/^[a-zA-Z0-9_]{1,64}$/u.test(key)) continue
     if (typeof value === 'string' && value.length <= 2048 && !/[\u0000-\u001f\u007f]/u.test(value)) fields[key] = value
   }
   return { tradeNo, payUrl, fields }
