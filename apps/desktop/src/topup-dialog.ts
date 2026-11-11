@@ -24,7 +24,6 @@ export interface TopUpDialogView {
   readonly balanceLabel: string
   readonly balanceValue: string
   readonly amountLabel: string
-  readonly customLabel: string
   readonly payLabel: string
   readonly payingText: string
   readonly waitingText: string
@@ -32,7 +31,6 @@ export interface TopUpDialogView {
   readonly failedText: string
   readonly closeLabel: string
   readonly finishLabel: string
-  readonly minHint: string
   readonly exchangeHint: string
   /** Message shown when the site offers no online payment method. */
   readonly noMethod: string
@@ -40,7 +38,6 @@ export interface TopUpDialogView {
   readonly moneyPrefix: string
   readonly options: readonly TopUpDialogOption[]
   readonly methods: readonly NewApiPayMethod[]
-  readonly minAmount: number
 }
 
 /** The document can only quote, create, and poll orders the shell owns. */
@@ -189,16 +186,13 @@ export class DesktopTopUpDialog {
         options.push({ amount, label: money(await this.deps.quote(amount)) })
       } catch (_error) { /* Skip a shortcut the site cannot price. */ }
     }
-    const minAmount = info?.minTopUp ?? 1
-    let minHint = ''
-    try { minHint = copy.topupMinHint.replace('{money}', money(await this.deps.quote(minAmount))) } catch (_error) { /* The hint stays hidden. */ }
     return {
       revision: ++this.revision, locale: copy.numberLocale, title: copy.topupTitle, balanceLabel: copy.quotaBalance,
-      balanceValue: this.deps.balance(), amountLabel: copy.topupAmountLabel, customLabel: copy.topupCustomLabel,
+      balanceValue: this.deps.balance(), amountLabel: copy.topupAmountLabel,
       payLabel: copy.topupPay, payingText: copy.topupPaying, waitingText: copy.topupWaiting,
       successText: copy.topupSuccess, failedText: copy.topupFailed, closeLabel: copy.topupClose, finishLabel: copy.topupFinish,
-      minHint, exchangeHint: this.deps.exchangeHint(), noMethod: copy.topupNoMethod, moneyPrefix: this.deps.moneyPrefix(),
-      options, methods: info?.payMethods ?? [], minAmount,
+      exchangeHint: this.deps.exchangeHint(), noMethod: copy.topupNoMethod, moneyPrefix: this.deps.moneyPrefix(),
+      options, methods: info?.payMethods ?? [],
     }
   }
 

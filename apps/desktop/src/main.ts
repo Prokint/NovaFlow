@@ -471,9 +471,10 @@ async function main(): Promise<void> {
       start: (amount, method) => novaflow.startTopUp(amount, method),
       state: tradeNo => novaflow.topUpState(tradeNo),
       balance: () => {
+        // formatQuota already renders the site currency; prefixing it again doubles the symbol.
         const snapshot = novaflow.getSnapshot()
         const value = snapshot.wallet === undefined ? '' : snapshot.wallet.remaining
-        return value === '' ? '—' : `${quotaPresentation().prefix}${formatQuota(value, snapshot.quotaDisplay, currentDesktopLocale().id)}`
+        return value === '' ? '—' : formatQuota(value, snapshot.quotaDisplay, currentDesktopLocale().id)
       },
       refreshWallet: () => novaflow.refreshWallet(),
       copy: () => novaFlowAccountCopy(currentDesktopLocale().id),

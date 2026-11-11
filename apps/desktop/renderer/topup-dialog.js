@@ -6,9 +6,7 @@ const titleNode = document.getElementById('title')
 const balanceLabel = document.getElementById('balance-label')
 const balanceValue = document.getElementById('balance-value')
 const amountLabel = document.getElementById('amount-label')
-const customLabel = document.getElementById('custom-label')
 const optionsNode = document.getElementById('options')
-const customInput = document.getElementById('custom-amount')
 const hintNode = document.getElementById('hint')
 const methodsNode = document.getElementById('methods')
 const errorNode = document.getElementById('error')
@@ -25,7 +23,7 @@ const closeButton = document.getElementById('close')
 
 /** Current main-owned view, once the shell has loaded the site's configuration. */
 let view
-/** Whole-dollar amount the user selected, or undefined while quoting a custom amount. */
+/** Whole-dollar amount the user selected. */
 let amount
 /** Payment provider the order uses. */
 let method
@@ -34,8 +32,6 @@ let price = ''
 /** Trade number of the order being polled. */
 let tradeNo
 let pollTimer
-let quoteTimer
-let quoteSeq = 0
 let closed = false
 
 function bridge() {
@@ -55,7 +51,6 @@ function section(name) {
 function lock(busy) {
   for (const button of optionsNode.querySelectorAll('button')) button.disabled = busy
   for (const button of methodsNode.querySelectorAll('button')) button.disabled = busy
-  customInput.disabled = busy
   payButton.disabled = busy || amount === undefined || price === ''
 }
 
@@ -74,39 +69,6 @@ function select(nextAmount) {
   lock(false)
 }
 
-/** Ask the shell for the price of one custom whole-dollar amount. */
-function quoteCustom() {
-  const value = Number(customInput.value)
-  const seq = ++quoteSeq
-  if (!Number.isInteger(value) || value < view.minAmount || value > 1_000_000) {
-    amount = undefined
-    price = ''
-    showError('')
-    payButton.textContent = view.payLabel
-    lock(false)
-    return
-  }
-  for (const button of optionsNode.querySelectorAll('button')) button.setAttribute('aria-pressed', 'false')
-  amount = value
-  price = ''
-  payButton.disabled = true
-  quoteTimer = setTimeout(() => {
-    void bridge()?.quote(value).then((money) => {
-      if (seq !== quoteSeq || amount !== value) return
-      price = money
-      payButton.textContent = `${view.payLabel} ${view.moneyPrefix}${money}`
-      showError('')
-      lock(false)
-    }).catch(() => {
-      if (seq !== quoteSeq) return
-      amount = undefined
-      price = ''
-      showError(view.failedText)
-      lock(false)
-    })
-  }, 250)
-}
-
 /** Render the configuration the shell loaded, keeping the first shortcut selected. */
 function render(next) {
   view = next
@@ -119,14 +81,11 @@ function render(next) {
   balanceLabel.textContent = next.balanceLabel
   balanceValue.textContent = next.balanceValue
   amountLabel.textContent = next.amountLabel
-  customLabel.textContent = next.customLabel
   doneBalanceLabel.textContent = next.balanceLabel
   closeButton.setAttribute('aria-label', next.closeLabel)
   finishButton.textContent = next.finishLabel
-  customInput.placeholder = String(next.minAmount)
   progressText.textContent = next.waitingText
-  hintNode.textContent = [next.exchangeHint, next.minHint].filter(text => text !== '').join(' · ')
-  customInput.min = String(next.minAmount)
+  hintNode.textContent = next.exchangeHint
 
   optionsNode.replaceChildren(...next.options.map((option) => {
     const button = document.createElement('button')
@@ -135,7 +94,6 @@ function render(next) {
     button.dataset.amount = String(option.amount)
     button.textContent = option.label
     button.addEventListener('click', () => {
-      customInput.value = ''
       amount = option.amount
       price = option.label
       showError('')
@@ -157,21 +115,16 @@ function render(next) {
   }))
   method = next.methods[0]?.type
 
-  if (next.options.length === 0 && next.noMethod) {
+  if (next.options.length === 0) {
     showError(next.noMethod)
     payButton.disabled = true
     payButton.textContent = next.payLabel
-  } else if (next.options.length === 0) {
-    customInput.value = String(next.minAmount)
-    quoteCustom()
   } else {
-    const first = next.options[0]
-    amount = first.amount
-    price = first.label
-    select(first.amount)
+    amount = next.options[0].amount
+    price = next.options[0].label
+    select(amount)
+    payButton.textContent = `${next.payLabel} ${price}`
   }
-  if (next.options.length > 0) select(next.options[0].amount)
-  payButton.textContent = amount === undefined ? next.payLabel : `${next.payLabel} ${price}`
   section('form')
   dialog.hidden = false
   requestAnimationFrame(() => { document.body.classList.add('visible') })
@@ -234,7 +187,6 @@ closeButton.addEventListener('click', () => { void bridge()?.close() })
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') void bridge()?.close()
 })
-customInput.addEventListener('input', () => { clearTimeout(quoteTimer); quoteCustom() })
 
 const shell = bridge()
 if (shell !== undefined) {

@@ -84,36 +84,6 @@ h1 { margin: 0; font-size: 18px; font-weight: 650; line-height: 24px; }
 .option:hover { border-color: var(--muted); }
 .option[aria-pressed='true'] { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--accent-ink); }
 
-.custom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--soft);
-  font-size: 13px;
-  color: var(--muted);
-}
-.custom input {
-  width: 110px;
-  padding: 2px 0;
-  border: 0;
-  border-bottom: 1px solid var(--muted);
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  text-align: right;
-  outline: none;
-}
-.custom input::placeholder { color: var(--muted); font-weight: 400; }
-.custom input:focus { border-bottom-color: var(--text); }
-
 .hint { margin: 8px 0 0; font-size: 11px; line-height: 17px; color: var(--muted); }
 .methods { display: flex; gap: 8px; margin-top: 12px; }
 .method {

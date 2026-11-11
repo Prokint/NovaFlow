@@ -79,9 +79,9 @@ it('builds the view from the site configuration and prices every shortcut', asyn
   await showing
   const window = fixture.windows.at(-1)!
   expect(window.webContents.send).toHaveBeenCalledWith(TOPUP_DIALOG_IPC.changed, expect.objectContaining({
-    title: '充值', balanceValue: '¥7', moneyPrefix: '¥', minAmount: 1,
+    title: '充值', balanceValue: '¥7', moneyPrefix: '¥',
     options: [{ amount: 4, label: '¥28.00' }, { amount: 15, label: '¥105.00' }],
-    methods: [{ type: 'alipay', name: '支付宝' }], minHint: '最低 ¥7.00',
+    methods: [{ type: 'alipay', name: '支付宝' }], exchangeHint: '1 美元 = ¥7',
   }))
   const view = fixture.handlers.get(TOPUP_DIALOG_IPC.status)!(ownedEvent(window)) as { revision: number }
   expect(view.revision).toBe(1)
