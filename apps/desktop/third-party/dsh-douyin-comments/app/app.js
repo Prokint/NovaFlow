@@ -7,42 +7,12 @@
   var FAV_API_BASE = new URL("../viewer/api/", location.href);
   var $ = function (id) { return document.getElementById(id); };
 
-  // v0.8.2：深 / 浅主题可手动切换（localStorage 记住，优先于 ?theme=，其次跟随系统偏好）。
-  // 与词云子页共用同一个 key，切换后另一个 iframe 通过 storage 事件同步。
-  (function themeBoot() {
-    var KEY = "dsh.douyin.theme";
-    var asked = "";
-    try { asked = new URLSearchParams(location.search).get("theme") || ""; } catch (e) { /* ignore */ }
-    var stored = "";
-    try { stored = localStorage.getItem(KEY) || ""; } catch (e) { stored = ""; }
-    var apply = function (mode) {
-      var dark = mode !== "light";
-      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-      // v0.8.1：同步浏览器地址栏/移动端状态栏底色，避免浅色主题下还是深色条
-      var meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute("content", dark ? "#0b0b0c" : "#f5f6f8");
-    };
-    var current = function () { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; };
-    var mode = stored || asked || ((window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
-    apply(mode);
-    window.__douyinTheme = {
-      key: KEY,
-      get: current,
-      set: function (m) { var v = m === "light" ? "light" : "dark"; try { localStorage.setItem(KEY, v); } catch (e) { /* ignore */ } apply(v); return v; },
-      toggle: function () { var next = current() === "light" ? "dark" : "light"; try { localStorage.setItem(KEY, next); } catch (e) { /* ignore */ } apply(next); return next; },
-    };
-    window.addEventListener("storage", function (e) {
-      if (e.key === KEY && e.newValue) apply(e.newValue === "light" ? "light" : "dark");
-    });
-  })();
-
-  (function themeButton() {
-    var btn = $("btnTheme");
-    if (!btn || !window.__douyinTheme) return;
-    btn.addEventListener("click", function () {
-      var mode = window.__douyinTheme.toggle();
-      toast(mode === "light" ? "已切换到浅色主题" : "已切换到深色主题");
-    });
+  // v0.9.10：去掉深 / 浅主题切换，固定白色（浅色）主题。
+  (function fixedTheme() {
+    document.documentElement.setAttribute("data-theme", "light");
+    // 同步浏览器地址栏 / 移动端状态栏底色
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", "#f5f6f8");
   })();
 
   var state = {
@@ -192,8 +162,15 @@
     var count = counts.unique || (result && result.count) || 0;
     $("count").textContent = String(count);
     $("saved").textContent = String(counts.savedCount || 0);
-    $("total").textContent = counts.total ? String(counts.total) : "—";
     $("elapsed").textContent = job ? fmtDuration(job.elapsedMs) : "0s";
+    // v0.9.0：关键词模式把「服务端 total」这一格改成视频进度（第 n 条 / 共 m 条）
+    if (counts.keyword) {
+      $("total").textContent = counts.videoTotal
+        ? (counts.videoIndex || 0) + "/" + counts.videoTotal + " 条视频"
+        : "—";
+    } else {
+      $("total").textContent = counts.total ? String(counts.total) : "—";
+    }
 
     // v0.5.62：进度算法修正。
     // 旧版用 topSeen / max，而 max 默认 80000（目标上限），实际采 200 条时也只有 0%，
@@ -202,7 +179,10 @@
     var max = job && job.options ? Number(job.options.max) || 0 : 0;
     var total = counts.total || 0;
     var ratio = 0;
-    if (total > 0) ratio = Math.min(1, count / total);
+    if (counts.keyword && counts.videoTotal > 0) {
+      // 关键词模式：整体进度 = 已经处理到第几条视频（每条视频内部的进度用「已采」那一格看）
+      ratio = Math.min(1, (counts.videoIndex || 0) / counts.videoTotal);
+    } else if (total > 0) ratio = Math.min(1, count / total);
     else if (max > 0 && max <= 5000 && counts.topSeen > 0) ratio = Math.min(1, counts.topSeen / max);
     var bar = $("bar");
     if (job && job.done) {
@@ -243,13 +223,20 @@
     var head = document.createElement("div");
     head.className = "result-summary";
     if (r && r.ok) {
-      head.textContent =
-        "采集完成：" + r.count + " 条" +
-        (r.title ? "（" + r.title + "）" : "") +
-        (r.account ? "（账号：" + r.account + "）" : "") +
-        " · 视频 " + (r.videoId || "—") +
-        " · 用时 " + (r.durationSec ? r.durationSec + "s" : "—") +
-        " · 顶层 " + (r.lanes || job.options.lanes || "—") + " 路";
+      if (r.keyword) {
+        head.textContent =
+          "关键词「" + r.keyword + "」：采了 " + (r.videoCount || 0) + " 条视频，共 " + (r.count || 0) + " 条评论" +
+          (r.account ? "（账号：" + r.account + "）" : "") +
+          " · 用时 " + (r.durationSec ? r.durationSec + "s" : "—");
+      } else {
+        head.textContent =
+          "采集完成：" + r.count + " 条" +
+          (r.title ? "（" + r.title + "）" : "") +
+          (r.account ? "（账号：" + r.account + "）" : "") +
+          " · 视频 " + (r.videoId || "—") +
+          " · 用时 " + (r.durationSec ? r.durationSec + "s" : "—") +
+          " · 顶层 " + (r.lanes || job.options.lanes || "—") + " 路";
+      }
     } else if (job.state === "cancelled") {
       head.textContent = "采集已取消。已采到的部分会按采集核心的逻辑尽量落盘。";
     } else {
@@ -271,8 +258,18 @@
       };
       if (r.csvPath) addLink("下载 CSV", downloadUrl(r.csvPath), false, r.csvPath);
       if (r.jsonPath) addLink("下载 JSON", downloadUrl(r.jsonPath), false, r.jsonPath);
+      if (r.videoListPath) addLink("下载视频清单 CSV", downloadUrl(r.videoListPath), false, r.videoListPath);
       if (r.htmlPath) addLink("打开词云 HTML", downloadUrl(r.htmlPath, true), true, r.htmlPath);
       if (actions.childNodes.length) body.appendChild(actions);
+
+      if (r.keyword && r.videos && r.videos.length) {
+        var vbox = document.createElement("div");
+        vbox.className = "path";
+        r.videos.forEach(function (s) {
+          vbox.appendChild(addText("div", "path", String(s)));
+        });
+        body.appendChild(vbox);
+      }
 
       if (r.sample && r.sample.length) {
         var sample = document.createElement("div");
@@ -351,31 +348,29 @@
 
   function startCollection() {
     var url = $("url").value.trim();
-    if (!url) {
-      toast("请先粘贴抖音视频链接", true);
+    var keyword = $("keyword") ? $("keyword").value.trim() : "";
+    if (!url && !keyword) {
+      toast("请填视频链接，或填关键词做搜索采集", true);
       $("url").focus();
       return;
     }
-    var max = Number($("max").value);
-    var lanes = Number($("lanes").value);
-    var timeoutMin = Number($("timeout").value);
-    var waitLogin = Number($("waitLogin").value);
     var account = $("account") ? $("account").value : "";
-    var body = {
-      url: url,
-      replies: $("replies").checked,
-      clearBefore: $("clearBefore").checked,
-      cloud: $("cloud").checked,
-    };
+    var body = {};
+    if (keyword) {
+      // v0.9.0：关键词模式 —— 先搜视频，再逐条采评论（草稿参数透传，筛选值由后端归一化）
+      body.keyword = keyword;
+      body.videoCount = Number($("videoCount").value) || 0;
+      body.sortType = $("sortType").value;
+      body.publishTime = $("publishTime").value;
+      body.duration = $("duration").value;
+      body.contentType = $("contentType").value;
+    } else {
+      body.url = url;
+    }
     if (account) {
       body.account = account;
       try { localStorage.setItem("douyin.account.v1", account); } catch (e) { /* ignore */ }
     }
-    if (max > 0) body.max = max;
-    if (lanes > 0) body.lanes = lanes;
-    if (timeoutMin > 0) body.timeoutMs = Math.round(timeoutMin * 60000);
-    if (Number.isFinite(waitLogin) && waitLogin >= 0) body.waitLoginSec = waitLogin;
-
     stopPolling();
     state.jobId = "";
     state.lastLogs = "";
@@ -457,11 +452,9 @@
     api("config")
       .then(function (data) {
         var d = (data && data.defaults) || {};
-        $("max").value = d.max || 80000;
-        $("lanes").value = String(d.lanes || 3);
-        $("timeout").value = Math.max(1, Math.round((Number(d.timeoutMs) || 1800000) / 60000));
-        $("waitLogin").value = d.waitLoginSec == null ? 180 : d.waitLoginSec;
-        $("clearBefore").checked = d.clearBefore === true;
+        // v0.9.10：目标条数 / 顶层路数 / 总超时 / 等扫码 / 补采回复等高级参数不再展示，一律走后端默认值。
+        // 关键词模式的默认视频条数
+        if ($("videoCount")) $("videoCount").value = Math.max(1, Math.min(100, Number(d.keywordVideoCount) || 10));
         $("version").textContent = "v" + (data.version || "—");
         var out = $("outDir");
         out.textContent = data.outDir ? "输出：" + shortPath(data.outDir) : "";
@@ -469,10 +462,6 @@
       })
       .catch(function (err) {
         toast("读取配置失败（使用默认值）：" + err.message, true);
-        $("max").value = 80000;
-        $("lanes").value = "3";
-        $("timeout").value = 30;
-        $("waitLogin").value = 180;
       });
   }
 
@@ -666,6 +655,17 @@
       var avatar = document.createElement("span");
       avatar.className = "fav-avatar";
       avatar.textContent = initialsOf(user.nickname);
+      // v0.9.10：收藏记录带 avatar 时显示真实头像（服务端会从最近导出数据里给老收藏补头像）
+      if (user.avatar) {
+        var avatarImg = new Image();
+        avatarImg.className = "fav-avatar-img";
+        avatarImg.loading = "lazy";
+        avatarImg.referrerPolicy = "no-referrer";
+        avatarImg.alt = "";
+        avatarImg.src = String(user.avatar);
+        avatarImg.addEventListener("error", function () { avatarImg.remove(); });
+        avatar.appendChild(avatarImg);
+      }
       row.appendChild(avatar);
 
       var main = document.createElement("div");
@@ -800,6 +800,46 @@
     $("url").addEventListener("keydown", function (event) {
       if (event.key === "Enter") startCollection();
     });
+    // v0.9.14：粘贴分享文案 / v.douyin.com 短链时自动还原成作品页链接（失败就保留原文，提交时后端还会再解析一次）
+    // v0.9.16：多条链接（逗号 / 空格 / 换行分隔）保留原文，只提示「识别到 N 条」，提交时由后端拆成数组逐条采集
+    var resolveUrlField = function () {
+      var input = $("url");
+      var raw = input.value.trim();
+      if (!raw || !/https?:\/\//.test(raw)) return;
+      // 已经是标准作品页直链（可能带查询参数）就不用再解析；带整段分享文案的会走解析器抽链接
+      if (/^https?:\/\/(?:www\.)?douyin\.com\/(?:video|note)\/\d{15,25}\/?(?:[?#][^\s]*)?$/.test(raw)) return;
+      api("resolve", { method: "POST", body: JSON.stringify({ text: raw }) })
+        .then(function (data) {
+          if (!data) return;
+          if (Number(data.count) > 1) {
+            toast("识别到 " + data.count + " 条链接，将逐条采集");
+            return;
+          }
+          if (data.url) {
+            input.value = data.url;
+            toast("已识别视频 " + (data.videoId || ""));
+          }
+        })
+        .catch(function (err) { toast("链接解析失败：" + err.message, true); });
+    };
+    $("url").addEventListener("paste", function () { setTimeout(resolveUrlField, 80); });
+    $("url").addEventListener("blur", resolveUrlField);
+    // v0.9.0：关键词模式 —— 填了关键词才显示条数/筛选行
+    // v0.9.10：高级参数（总超时等）不再展示，默认值由后端决定
+    var syncKeywordUi = function () {
+      var on = !!($("keyword") && $("keyword").value.trim());
+      var row1 = $("keywordRow1");
+      var row2 = $("keywordRow2");
+      if (row1) row1.hidden = !on;
+      if (row2) row2.hidden = !on;
+    };
+    if ($("keyword")) {
+      $("keyword").addEventListener("input", syncKeywordUi);
+      $("keyword").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") startCollection();
+      });
+    }
+    syncKeywordUi();
   }
 
   bind();

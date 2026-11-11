@@ -113,6 +113,10 @@ body {
   transition: border-color .15s, background .15s, color .15s;
 }
 .btn:hover { border-color: #55555c; color: var(--ink); background: #17171a; }
+/* v0.9.10 修订：浅色主题下 hover 不能用上面硬编码的深底（深底 + 深字 = 一条看不见字的黑块） */
+[data-theme="light"] .btn:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--ink); }
+[data-theme="light"] .btn.primary:hover { background: #2a3342; border-color: #2a3342; color: #fff; }
+[data-theme="light"] .btn.ghost:hover { background: var(--surface-2); border-color: transparent; color: var(--ink); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn:focus-visible, .select:focus-visible, .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -326,6 +330,12 @@ tbody tr:hover { background: #17171a; }
 td.muted { white-space: nowrap; }
 .col-level { width: 68px; }
 td.num { text-align: right; color: var(--ink); }
+/* v0.9.11：点赞/回复/属地/时间/层级/情感这些短列统一水平居中 + 垂直居中 */
+thead th.col-num, thead th.col-ip, thead th.col-time, thead th.col-level, thead th.col-sent { text-align: center; }
+tbody td:nth-child(n + 3):nth-child(-n + 8) { text-align: center; vertical-align: middle; }
+/* v0.9.12：用户列也跟着纵向居中（头像/昵称/ID/星标整体对齐到长评论行的垂直中间） */
+tbody td:nth-child(2) { vertical-align: middle; }
+tbody td:nth-child(3), tbody td:nth-child(4), tbody td:nth-child(6) { font-variant-numeric: tabular-nums; }
 td .txt { white-space: pre-wrap; word-break: break-word; color: var(--ink); }
 td .txt .hl { background: #4a3a17; color: #f0cd8f; border-radius: 2px; padding: 0 2px; }
 .video-link { color: var(--meta); text-decoration: none; }
@@ -351,7 +361,10 @@ td .txt .hl { background: #4a3a17; color: #f0cd8f; border-radius: 2px; padding: 
   font-size: 11px; font-weight: 600;
   background: #232327;
   color: #c9c9ce;
+  position: relative; overflow: hidden;
 }
+/* v0.9.10：能拿到真头像就直接盖在首字占位上面；加载失败时 onerror 移除 img，露出首字 */
+.avatar .av-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; background: var(--surface-3); }
 .user-meta { min-width: 0; }
 .user-name {
   display: block;
@@ -910,20 +923,22 @@ body.is-loading #insights { opacity: 0.45; pointer-events: none; }
 /* v0.8.2：改成跟其它面板一样左右留白，内部用紧凑的多列网格，不再整条拉满整屏 */
 .region-panel { margin: 14px var(--pad-x) 0; }
 .region-dist {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
-  gap: 2px 10px; padding: 8px 10px 12px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2px 8px; padding: 8px 10px 12px;
 }
 .region-row {
   display: flex; align-items: center; gap: 8px; min-width: 0;
   width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 8px;
   background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  overflow: hidden;
 }
 .region-row:hover { background: var(--surface-2); border-color: var(--line-strong); }
 .region-row.on { border-color: var(--accent); background: var(--accent-soft); }
-.region-name { flex: 0 0 52px; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.region-track { position: relative; flex: 1 1 auto; min-width: 24px; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.region-name { flex: 0 0 48px; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.region-track { position: relative; flex: 1 1 auto; min-width: 20px; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .region-track > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); opacity: 0.9; }
-.region-num { flex: 0 0 auto; font-size: 11.5px; color: var(--meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* v0.9.10 修订：窄列时「102 条 · 80 人」不能再顶出卡片/压住下一列 —— 允许收缩并省略 */
+.region-num { flex: 0 0 auto; width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; letter-spacing: -0.2px; color: var(--meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fav-badge {
   display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px;
   background: rgba(224, 169, 74, 0.16); border: 1px solid rgba(224, 169, 74, 0.35); color: var(--accent);
@@ -935,6 +950,11 @@ body.is-loading #insights { opacity: 0.45; pointer-events: none; }
 }
 .fav-star:hover { color: var(--accent); }
 .fav-star.on { color: var(--accent); }
+/* v0.9.20：收藏星标从「用户列」挪到最右侧独立一列，不再和昵称/ID 挤在一起 */
+.col-star { width: 48px; }
+thead th.col-star { text-align: center; }
+td.cell-star { text-align: center; vertical-align: middle; }
+td.cell-star .fav-star { margin-left: 0; }
 
 .modal { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .modal.hidden { display: none; }
@@ -951,6 +971,10 @@ body.is-loading #insights { opacity: 0.45; pointer-events: none; }
   background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
 .group-chips .chip.on { color: var(--accent); border-color: var(--accent); background: rgba(224, 169, 74, 0.08); }
+/* v0.9.10 修订：分组弹层的地域筛选从「一排 chip」改成下拉框 */
+.group-filter { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-strong); }
+.group-filter-label { flex: 0 0 auto; font-size: 12.5px; color: var(--muted); }
+.group-filter .select { min-width: 240px; max-width: 100%; }
 .group-body { overflow: auto; padding: 10px 16px 18px; }
 .group-block { margin-bottom: 18px; }
 .group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--line-strong); }

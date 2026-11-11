@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { collectDouyinComments, DEFAULTS, resolveOutDir, sessionWorkspaceCwd } from './collector.mjs';
+import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, resolveDouyinVideoInputs, DEFAULTS, describeSearchOptions, normalizeSearchOptions, resolveOutDir, sessionWorkspaceCwd } from './collector.mjs';
+import { EntitlementError, activate, entitlementEnabled, issueKey, machineId, status as entitlementStatus, textOf } from './entitlement.mjs';
 import { CONSOLE_PREFIX, createConsole, rememberOutDir } from './console.mjs';
 import { VIEWER_PREFIX, createViewerHandler } from './viewer.mjs';
 
@@ -145,11 +146,21 @@ export const Config = Schema ? Schema.object({
     .description('顶层列表路数：错峰多路推进（默认 3，每路错开 200ms）；1 = 单路。0.5.13 起真正生效——2026-10-07 实测扫完 21 页单路 15.8s vs 错峰 7.7s，唯一条数一样多')
     .default(3).min(1).max(8).step(1)),
   timeoutMs: vol(Schema.number()
-    .description('单次采集总超时毫秒（默认 1800000 = 30 分钟）；到点也会把已采到的评论落盘')
+    .description('单次采集总超时毫秒（默认 1800000 = 30 分钟）；到点也会把已采到的评论落盘。关键词模式下它是「单条视频」的超时，整个任务用 keywordTimeoutMs')
     .default(1800000).min(60000).max(14400000).step(1000)),
+  keywordVideoCount: vol(Schema.number()
+    .description('v0.9.0 关键词搜索模式：默认取前多少条视频（默认 10；工具参数 videoCount 优先）。每条视频的评论默认全采（不设单视频上限）')
+    .default(10).min(1).max(100).step(1)),
+  keywordTimeoutMs: vol(Schema.number()
+    .description('v0.9.0 关键词模式的整体时间预算毫秒（默认 14400000 = 4 小时）；预算用尽就停止采剩下的视频并把已采的落盘。单条视频仍用 timeoutMs')
+    .default(14400000).min(120000).max(86400000).step(1000)),
   waitLoginSec: vol(Schema.number()
     .description('检测到未登录时，等你在浏览器窗口里扫码的秒数（默认 180；0 = 不等，直接返回 need-login 并把窗口留着）')
     .default(180).min(0).max(1800).step(1)),
+  // v0.9.1：撞到人机验证（风控）时不再立刻失败，而是在浏览器窗口里等你过验证，通过了自动接着采。
+  verifyWaitSec: vol(Schema.number()
+    .description('撞到人机验证（验证码/安全验证）时，采集器暂停并在浏览器窗口里等你手动过验证的秒数（默认 900 = 15 分钟；每 2.5 秒轮询一次，通过后自动点「开始采集」接着采；0 = 不等，直接收工并把窗口留着）')
+    .default(900).min(0).max(7200).step(1)),
   clearBefore: vol(Schema.boolean()
     .description('采集前是否清空扩展缓存（默认 false）。清空会重置去重表和游标、毁掉「断点续采」进度，所以默认不清；不清空时靠 cid 差集保证只交付本轮新采')
     .default(false)),
@@ -210,7 +221,12 @@ export function readSettings(config) {
     max: readCfg(cfg, 'max', Number(DEFAULTS.max) > 0 ? Number(DEFAULTS.max) : 80000),
     lanes: Math.max(1, Math.min(8, Math.round(readCfg(cfg, 'lanes', Number(DEFAULTS.lanes) > 0 ? Number(DEFAULTS.lanes) : 3)))),
     timeoutMs: readCfg(cfg, 'timeoutMs', Number(DEFAULTS.timeoutMs) > 0 ? Number(DEFAULTS.timeoutMs) : 1800000),
+    // v0.9.0：关键词搜索模式的两个独立预算（视频条数 + 整个任务时长）
+    keywordVideoCount: Math.max(1, Math.min(100, Math.round(readCfg(cfg, 'keywordVideoCount', Number(DEFAULTS.keywordVideoCount) > 0 ? Number(DEFAULTS.keywordVideoCount) : 10)))),
+    keywordTimeoutMs: Math.max(120000, Math.round(readCfg(cfg, 'keywordTimeoutMs', Number(DEFAULTS.keywordTimeoutMs) > 0 ? Number(DEFAULTS.keywordTimeoutMs) : 14400000))),
     waitLoginSec: Math.max(0, Math.round(readCfg(cfg, 'waitLoginSec', Number.isFinite(Number(DEFAULTS.waitLoginSec)) ? Number(DEFAULTS.waitLoginSec) : 180))),
+    // v0.9.1：撞人机验证时等你手动过验证的秒数（0 = 不等）
+    verifyWaitSec: Math.max(0, Math.min(7200, Math.round(readCfg(cfg, 'verifyWaitSec', Number.isFinite(Number(DEFAULTS.verifyWaitSec)) ? Number(DEFAULTS.verifyWaitSec) : 900)))),
     clearBefore: readCfgBool(cfg, 'clearBefore', !!DEFAULTS.clearBefore),
     replyLanes: Math.max(1, Math.min(8, Math.round(readCfg(cfg, 'replyLanes', Number(DEFAULTS.replyLanes) > 0 ? Number(DEFAULTS.replyLanes) : 4)))),
     // v0.5.11：回复请求全局限速（0 = 用扩展内置的 250ms）
@@ -244,12 +260,14 @@ export function apply(ctx, config = {}) {
   const dispose = ctx.tools.register(defineTool({
     name: 'douyin_comments',
     description: [
-      '采集一个抖音视频的公开评论，导出 CSV（UTF-8 BOM，Excel 直接打开）和 JSON，返回文件路径与条数。',
+      '采集抖音公开评论，导出 CSV（UTF-8 BOM，Excel 直接打开）和 JSON，返回文件路径与条数。两种用法：①给 url 采一条视频/图文的评论；②给 keyword 按关键词搜索视频，再采前 videoCount 条（默认 10，每条视频的评论全采）的评论，合并成一份 CSV/JSON + 一份视频清单。',
+      '关键词模式可带筛选（都可选，默认不限）：sortType=综合排序/最新发布/最多点赞；publishTime=不限/一天内/一周内/半年内；duration=不限/1分钟以下/1-5分钟/5分钟以上；contentType=不限/视频/图文。网页版没有「内容形式」这个原生筛选项：视频走视频搜索接口，图文走综合搜索并只保留图文帖（aweme_type=68），不限=视频接口。搜索做法是打开搜索页、拿页面自己发出的带签名请求在页面内重放（只改 offset/翻页数与筛选参数、并置 is_filter_search=1），不点筛选浮层、不改扩展、不计算签名。整个关键词任务的时间预算是 keywordTimeoutMs（默认 4 小时），单条视频仍用 timeoutMs（默认 30 分钟）。',
       'CSV/JSON **默认写到当前会话的工作区**（<工作区>/douyin-comments/），调用方直接用返回值里的 csvPath/jsonPath 就能引用；要换位置用 outDir。',
       '自带 Chrome 扩展（抖音评论采集器）：第一次调用时会自动把扩展装进它启动的浏览器，无需手动安装。',
       '走本机 Chromium（有头窗口）+ 页面真实签名分页重放，约 10~60 秒；只读公开评论，不发帖/不点赞/不关注。',
       '浏览器用持久化 profile（默认 ~/.dsh/douyin-collector/chrome-profile）保存抖音登录态。',
       '没登录时**不会开始采集**：会在浏览器窗口里留出登录二维码，等使用者扫码（默认最多等 180 秒，可用 waitLoginSec 调整）。',
+      'v0.9.1 起撞到**人机验证**（验证码/安全验证，服务端风控 VERIFY_REQUIRED）也不立刻失败：扩展停下后采集器每 2.5 秒轮询一次，在浏览器窗口里等你手动过验证（默认最多等 900 秒，可用 verifyWaitSec 调整；0 = 不等）；验证通过后自动点「开始采集」接着采，这一条采完继续下一条。等到超时就会收工（返回 phase=paused、endedBy=verify-wait），窗口保持打开，过完验证再调用一次可断点续采。',
       '若返回 phase=need-login，说明等不到登录：把返回的 error 原样转达给使用者，让他在那个（已保持打开的）浏览器窗口里用抖音 App 扫码，扫完再调用一次；不要重复空转，也不要另开窗口。',
       '只交付本次新采的数据：默认不清空扩展缓存（清空会毁掉断点续采进度），结束时按 cid 差集剔除旧数据；一条新数据都没有就返回失败并说明原因。要强制清空就把 clearBefore 设为 true。',
       'max 是「一级评论」的目标值：到量就**停止顶层扫描、继续把二级回复补完**再收工（0.5.11 起真正生效：下发给扩展 maxCount，旧版既不封一级、又会在回复阶段点暂停）。实际条数通常多于 max，返回值 count 是真实条数。',
@@ -259,8 +277,31 @@ export function apply(ctx, config = {}) {
     parameters: {
       url: {
         type: 'string',
-        required: true,
-        description: '抖音视频链接（https://www.douyin.com/video/<id>、带 modal_id 的浮层链接，或直接给 15~25 位 aweme id）。',
+        description: 'v0.9.16：抖音作品链接，也可以直接粘整段分享文案/短链；**多条链接用逗号或空格（换行也行）隔开**时逐条采集、合并导出成一份 CSV/JSON（videoCount 会返回实际条数）。与 keyword 至少填一个；同时填时 keyword 优先（走关键词搜索模式）。',
+      },
+      keyword: {
+        type: 'string',
+        description: 'v0.9.0：搜索关键词。填了就走「关键词搜索视频 → 采前 videoCount 条视频的评论」模式，url 不用填。',
+      },
+      videoCount: {
+        type: 'integer',
+        description: 'v0.9.0 关键词模式：取前多少条视频（默认用插件设置 keywordVideoCount，出厂 10；1~100）。每条视频的评论默认全部采。',
+      },
+      sortType: {
+        type: 'string',
+        description: 'v0.9.0 关键词模式：排序依据。可传 综合排序/最新发布/最多点赞（也接受接口值 0/2/1），默认综合排序。',
+      },
+      publishTime: {
+        type: 'string',
+        description: 'v0.9.0 关键词模式：发布时间。可传 不限/一天内/一周内/半年内（也接受接口值 0/1/7/180），默认不限。',
+      },
+      duration: {
+        type: 'string',
+        description: 'v0.9.0 关键词模式：视频时长。可传 不限/1分钟以下/1-5分钟/5分钟以上（也接受接口值 ""/"0-1"/"1-5"/"5-10000"），默认不限。图文模式忽略此项。',
+      },
+      contentType: {
+        type: 'string',
+        description: 'v0.9.0 关键词模式：内容形式。可传 不限/视频/图文，默认不限（=视频搜索接口）。选图文会走综合搜索并只保留图文帖。',
       },
       account: {
         type: 'string',
@@ -272,6 +313,7 @@ export function apply(ctx, config = {}) {
       clearBefore: { type: 'boolean', description: '本次是否先清空扩展里该视频的旧数据（默认 false = 不清空，保留断点续采，结束时按 cid 差集只交付新采的）。' },
       timeoutMs: { type: 'integer', description: '本次总超时毫秒（不传 = 用插件设置里的值，出厂默认 1800000 = 30 分钟），到点也会把已采到的评论落盘。' },
       waitLoginSec: { type: 'integer', description: '检测到未登录时，等使用者在浏览器窗口里扫码登录的秒数（不传 = 用插件设置里的值，出厂默认 180；显式传 0 = 不等，直接返回 need-login 并把窗口留着）。' },
+      verifyWaitSec: { type: 'integer', description: 'v0.9.1：撞到人机验证（验证码/安全验证）时，采集器暂停并在浏览器窗口里等你手动过验证的秒数（不传 = 用插件设置里的值，出厂默认 900 = 15 分钟；期间每 2.5 秒轮询，通过后自动继续采集；0 = 不等，直接收工并把窗口留着）。' },
       outDir: { type: 'string', description: '输出目录（默认：当前会话工作区下的 douyin-comments/ 子目录；取不到工作区时退回 ~/.dsh/douyin-collector/out）。' },
       keepOpen: { type: 'boolean', description: '调试用：采完不关浏览器窗口（默认 false）。' },
       failSnapshot: { type: 'boolean', description: '本次失败/没采完时是否存现场快照（截图 + 页面 HTML + 状态 JSON + 日志副本，默认用插件设置 true）；日志文件每次运行都会写。' },
@@ -291,6 +333,7 @@ export function apply(ctx, config = {}) {
           jsonPath: { type: 'string', required: true },
           htmlPath: { type: 'string', required: true, description: '交互词云 HTML 路径（v0.5.38 起；没勾 cloud 或导出失败时为空串）' },
           phase: { type: 'string', required: true, description: '收工时的扩展状态' },
+          endedBy: { type: 'string', required: true, description: 'v0.9.1：收工原因（done/max-cap/top-done/stall/timeout/abort/verify-wait；verify-wait = 等人机验证超时，窗口留给你过验证后重跑可断点续采）' },
           lanes: { type: 'integer', required: true, description: '顶层列表实际用的路数（扩展写回的 dts_settings_effective；v0.5.13 起 = 设置值或检测到同页后自降的 1，读不到时为本次请求值）' },
           note: { type: 'string', required: true, description: '扩展面板的说明文字' },
           durationSec: { type: 'number', required: true },
@@ -300,9 +343,46 @@ export function apply(ctx, config = {}) {
           sample: { type: 'array', required: true, items: { type: 'string' }, description: '前 5 条预览' },
           logPath: { type: 'string', required: true, description: '本次运行日志文件路径（每次调用都写，含全过程与收工原因；排查时先看它）' },
           snapshotDir: { type: 'string', required: true, description: '失败现场目录（截图/页面 HTML/状态 JSON/日志副本）；成功且采完时为空串' },
+          keyword: { type: 'string', required: true, description: 'v0.9.0：关键词模式实际用的关键词（单视频模式为空串）' },
+          videoCount: { type: 'integer', required: true, description: 'v0.9.0：关键词模式实际采了多少条视频（单视频模式为 1）' },
+          videoListPath: { type: 'string', required: true, description: 'v0.9.0：关键词模式的视频清单 CSV（一行一个视频，含采集状态/条数/分片文件；单视频模式为空串）' },
+          videos: { type: 'array', required: true, items: { type: 'string' }, description: 'v0.9.0：关键词模式的视频摘要（每条形如「✓ [1] <id> <标题>（N 条）」；单视频模式为空数组）' },
         },
       },
       render(_args, value) {
+        // v0.9.0：关键词搜索模式的结果文案（与单视频模式分开写，字段含义不同）
+        if (value && value.keyword) {
+          const kwErr = String(value.error || '');
+          const kwTail = [];
+          if (value.logPath && !kwErr.includes(value.logPath)) kwTail.push(`运行日志：${value.logPath}`);
+          const kwSuffix = kwTail.length ? '\n' + kwTail.join('\n') : '';
+          if (value.ok === false && value.phase === 'need-login') {
+            return [{
+              type: 'text',
+              text: '搜索需要先登录抖音（关键词搜索对未登录用户是登录墙）：\n' + kwErr
+                + '\n→ 让使用者在已经打开的浏览器窗口里用抖音 App 扫码；扫完再调用一次 douyin_comments（带上同样的 keyword）就会接着搜。',
+            }];
+          }
+          if (!value.ok) {
+            return [{ type: 'text', text: `关键词采集未成功：${kwErr}${kwSuffix}` }];
+          }
+          const kwLines = [
+            `关键词「${value.keyword}」：采了 ${value.videoCount} 条视频，共 ${value.count} 条公开评论，用时 ${value.durationSec}s`,
+            `合并 CSV（每行 = 视频信息 + 一条评论）：${value.csvPath}`,
+            `合并 JSON：${value.jsonPath}`,
+            `视频清单（一行一个视频，含采集状态）：${value.videoListPath}`,
+          ];
+          if (value.note) kwLines.push(`注意：${value.note}`);
+          if (value.endedBy === 'verify-wait') {
+            kwLines.push('⚠️ 撞到人机验证且等待超时：先停在这里。浏览器窗口还开着 —— 让使用者在窗口里完成页面上的验证，然后重新调用一次 douyin_comments（带同样的 keyword），会从断点接着采。');
+          }
+          if (kwTail.length) kwLines.push(kwTail.join('\n'));
+          if (Array.isArray(value.videos) && value.videos.length > 0) {
+            kwLines.push('视频：');
+            value.videos.forEach((s) => kwLines.push('  ' + s));
+          }
+          return [{ type: 'text', text: kwLines.join('\n') }];
+        }
         // 错误文本里通常已经带了「运行日志 / 失败现场」的路径（collector 拼的）；
         // 这里只在没有的时候补一行，避免同一路径打印两遍。
         const errText = String(value.error || '');
@@ -328,6 +408,9 @@ export function apply(ctx, config = {}) {
         const lines = [head, `CSV：${value.csvPath}`, `JSON：${value.jsonPath}`];
         if (value.htmlPath) lines.push(`词云：${value.htmlPath}（双击打开；自包含 HTML，可发给别人）`);
         if (value.note) lines.push(`面板：${value.note}`);
+        if (value.endedBy === 'verify-wait') {
+          lines.push('⚠️ 撞到人机验证且等待超时：先停在这里。浏览器窗口还开着 —— 在窗口里完成页面上的验证，然后重新调用一次 douyin_comments（同一个 url），会从断点接着采。');
+        }
         if (value.snapshotDir) lines.push(`⚠️ 本轮没采完（超时/无进展/被取消），现场快照：${value.snapshotDir}`);
         if (value.logPath) lines.push(`运行日志：${value.logPath}`);
         if (Array.isArray(value.sample) && value.sample.length > 0) {
@@ -342,17 +425,54 @@ export function apply(ctx, config = {}) {
     // 有意不声明 timeoutMs：采集本身可能跑几分钟，用参数 timeoutMs 自己控制时长。
     async execute(args, exec) {
       const url = String(args.url || '').trim();
-      if (!url) throw new Error('douyin_comments: url 必填');
+      const keyword = String(args.keyword || '').trim();
+      if (!url && !keyword) throw new Error('douyin_comments: url 或 keyword 至少填一个（keyword = 按关键词搜索视频再采评论）');
       if (exec && exec.signal && exec.signal.aborted) throw new Error('douyin_comments: 已被调用方取消');
+
+      // v0.9.21：NovaFlow 授权模式下，每次采集前必须已激活且能换到运行凭据。
+      // 独立运行/开发模式（没配 relay）不启用，保持旧行为。
+      if (entitlementEnabled()) {
+        try {
+          const st = await entitlementStatus();
+          if (!st || st.activated !== true) throw new EntitlementError((st && st.code) || 'NOT_ACTIVATED');
+        } catch (e) {
+          const code = (e && e.code) || 'NOT_ACTIVATED';
+          throw new Error('douyin_comments: ' + textOf(code));
+        }
+        try {
+          await issueKey({ force: true });
+        } catch (e) {
+          throw new Error('douyin_comments: ' + textOf((e && e.code) || 'SERVICE_UNAVAILABLE'));
+        }
+      }
 
       // 设置每次调用现读一遍：在「设置 → 插件」里改完，下一次调用就生效（不用重启 dsh）。
       // 工具参数只覆盖当次，不改设置。
       const settings = readSettings();
       const maxUsed = Number(args.max) > 0 ? Number(args.max) : settings.max;
       const timeoutMsUsed = Number(args.timeoutMs) > 0 ? Number(args.timeoutMs) : settings.timeoutMs;
+      // v0.9.0：关键词模式（keyword 优先）：整体时间预算 + 视频条数两个独立预算；
+      // 工具参数 timeoutMs 在关键词模式下被当成「整个关键词任务」的预算。
+      const isKeyword = keyword !== '';
+      const keywordTimeoutMsUsed = Number(args.timeoutMs) > 0 ? Number(args.timeoutMs) : settings.keywordTimeoutMs;
+      const videoCountUsed = Number(args.videoCount) > 0
+        ? Math.min(100, Math.max(1, Math.round(Number(args.videoCount))))
+        : settings.keywordVideoCount;
+      const searchCfg = isKeyword ? normalizeSearchOptions({
+        keyword,
+        videoCount: videoCountUsed,
+        sortType: args.sortType,
+        publishTime: args.publishTime,
+        duration: args.duration,
+        contentType: args.contentType,
+      }) : null;
       const waitLoginSecUsed = (args.waitLoginSec === undefined || args.waitLoginSec === null)
         ? settings.waitLoginSec
         : Number(args.waitLoginSec);
+      // v0.9.1：撞人机验证时等你过验证的秒数
+      const verifyWaitSecUsed = (args.verifyWaitSec === undefined || args.verifyWaitSec === null)
+        ? settings.verifyWaitSec
+        : Math.max(0, Number(args.verifyWaitSec));
       const lanesUsed = Number(args.lanes) > 0 ? Number(args.lanes) : settings.lanes;
       const clearBeforeUsed = args.clearBefore === undefined ? settings.clearBefore : args.clearBefore === true;
       const replyLanesUsed = settings.replyLanes;
@@ -378,38 +498,119 @@ export function apply(ctx, config = {}) {
       rememberOutDir(outDir);
       onLog('输出目录：' + outDir
         + (args.outDir ? '（显式指定）' : sessionWorkspaceCwd(exec) ? '（当前会话工作区）' : '（全局默认：本会话没带工作区）'));
-      onLog('本次设置：max=' + maxUsed + '，顶层列表路数=' + lanesUsed + (lanesUsed > 1 ? '（错峰多路，每路错开 200ms）' : '（单路）') + '，超时=' + timeoutMsUsed + 'ms，等扫码=' + waitLoginSecUsed + 's'
+      onLog('本次设置：max=' + maxUsed + '，顶层列表路数=' + lanesUsed + (lanesUsed > 1 ? '（错峰多路，每路错开 200ms）' : '（单路）') + '，超时=' + timeoutMsUsed + 'ms，等扫码=' + waitLoginSecUsed + 's，等人机验证=' + (verifyWaitSecUsed > 0 ? verifyWaitSecUsed + 's' : '不开')
         + '，先清空=' + (clearBeforeUsed ? '是' : '否') + '，回复并发=' + replyLanesUsed
         + '，回复全局限速=' + (replyGlobalGapMsUsed > 0 ? replyGlobalGapMsUsed + 'ms' : '扩展内置 250ms')
         + '，回复限流等待=' + replyThrottleSecUsed + 's，回复无进展收工=' + replyNoProgressSecUsed + 's'
         + '，失败现场快照=' + (failSnapshotUsed ? '开' : '关') + '（最多留 ' + keepSnapshotsUsed + ' 份）'
         + '（设置 → 插件 → dsh-douyin-comments 可改，改完立即生效）');
+      if (isKeyword) {
+        onLog('关键词模式：关键词「' + keyword + '」，取前 ' + videoCountUsed + ' 条视频的评论'
+          + '，筛选=' + describeSearchOptions(searchCfg)
+          + '，整体预算=' + keywordTimeoutMsUsed + 'ms（单条视频超时=' + timeoutMsUsed + 'ms）');
+        onLog('提示：关键词模式会先搜视频、再逐条采评论；每条视频之间要重开扩展窗口，'
+          + '总耗时随 videoCount 线性增长。中途可以用 keepOpen=true 保留窗口排查。');
+      }
 
       let res;
+      let urlUsed = url;
+      let multiLinks = [];
       try {
-        res = await collectDouyinComments({
-          url,
-          account: String(args.account || '').trim(),
-          max: maxUsed,
-          lanes: lanesUsed,
-          replies: args.replies,
-          timeoutMs: timeoutMsUsed,
-          waitLoginSec: waitLoginSecUsed,
-          clearBefore: clearBeforeUsed,
-          replyLanes: replyLanesUsed,
-          replyGlobalGapMs: replyGlobalGapMsUsed,
-          replyThrottleSec: replyThrottleSecUsed,
-          replyNoProgressSec: replyNoProgressSecUsed,
-          failSnapshot: failSnapshotUsed,
-          keepSnapshots: keepSnapshotsUsed,
-          outDir,
-          keep: args.keepOpen === true,
-          cloud: args.cloud === true,
-          onLog,
-          signal: exec ? exec.signal : undefined,
-        });
+        if (!isKeyword && url) {
+          // v0.9.14：url 可以是视频页链接、整段分享文案或 v.douyin.com 短链，先统一解析成标准作品页
+          // v0.9.16：粘多条链接（逗号/空格分隔）时逐条采集并合并导出
+          const resolvedList = await resolveDouyinVideoInputs(url, { log: (line) => onLog('[链接] ' + line) });
+          if (!resolvedList.ok) throw new Error('视频链接无效：' + (resolvedList.errors.join('；') || '没认出抖音链接'));
+          multiLinks = resolvedList.targets.map((t) => t.url);
+          if (multiLinks.length > 1) {
+            onLog('识别到 ' + multiLinks.length + ' 条链接：逐条采集后合并成一份 CSV/JSON');
+            onLog('  ' + multiLinks.slice(0, 8).join('\n  ') + (multiLinks.length > 8 ? '\n  …共 ' + multiLinks.length + ' 条' : ''));
+          } else {
+            urlUsed = multiLinks[0] || urlUsed;
+            if (resolvedList.targets[0] && resolvedList.targets[0].source !== 'direct') onLog('分享链接已还原成作品页：' + urlUsed);
+          }
+        }
+        if (isKeyword) {
+          res = await collectDouyinKeyword({
+            keyword,
+            videoCount: videoCountUsed,
+            sortType: searchCfg.sortType,
+            publishTime: searchCfg.publishTime,
+            duration: searchCfg.duration,
+            contentType: searchCfg.contentType,
+            account: String(args.account || '').trim(),
+            max: maxUsed,
+            lanes: lanesUsed,
+            replies: args.replies,
+            timeoutMs: keywordTimeoutMsUsed,
+            waitLoginSec: waitLoginSecUsed,
+            verifyWaitSec: verifyWaitSecUsed,
+            clearBefore: clearBeforeUsed,
+            replyLanes: replyLanesUsed,
+            replyGlobalGapMs: replyGlobalGapMsUsed,
+            replyThrottleSec: replyThrottleSecUsed,
+            replyNoProgressSec: replyNoProgressSecUsed,
+            failSnapshot: failSnapshotUsed,
+            keepSnapshots: keepSnapshotsUsed,
+            outDir,
+            keep: args.keepOpen === true,
+            onLog,
+            signal: exec ? exec.signal : undefined,
+          });
+        } else if (multiLinks.length > 1) {
+          // v0.9.16：多条链接 → 逐条采集后合并导出（整体时间预算沿用 timeoutMs，单条视频超时由核心控）
+          res = await collectDouyinLinks({
+            urls: url,
+            account: String(args.account || '').trim(),
+            max: maxUsed,
+            lanes: lanesUsed,
+            replies: args.replies,
+            timeoutMs: timeoutMsUsed,
+            waitLoginSec: waitLoginSecUsed,
+            verifyWaitSec: verifyWaitSecUsed,
+            clearBefore: clearBeforeUsed,
+            replyLanes: replyLanesUsed,
+            replyGlobalGapMs: replyGlobalGapMsUsed,
+            replyThrottleSec: replyThrottleSecUsed,
+            replyNoProgressSec: replyNoProgressSecUsed,
+            failSnapshot: failSnapshotUsed,
+            keepSnapshots: keepSnapshotsUsed,
+            outDir,
+            keep: args.keepOpen === true,
+            onLog,
+            signal: exec ? exec.signal : undefined,
+          });
+        } else {
+          res = await collectDouyinComments({
+            url: urlUsed,
+            account: String(args.account || '').trim(),
+            max: maxUsed,
+            lanes: lanesUsed,
+            replies: args.replies,
+            timeoutMs: timeoutMsUsed,
+            waitLoginSec: waitLoginSecUsed,
+            verifyWaitSec: verifyWaitSecUsed,
+            clearBefore: clearBeforeUsed,
+            replyLanes: replyLanesUsed,
+            replyGlobalGapMs: replyGlobalGapMsUsed,
+            replyThrottleSec: replyThrottleSecUsed,
+            replyNoProgressSec: replyNoProgressSecUsed,
+            failSnapshot: failSnapshotUsed,
+            keepSnapshots: keepSnapshotsUsed,
+            outDir,
+            keep: args.keepOpen === true,
+            cloud: args.cloud === true,
+            onLog,
+            signal: exec ? exec.signal : undefined,
+          });
+        }
       } catch (e) {
-        res = { ok: false, error: String((e && e.message) || e), videoId: '', title: '', count: 0, csvPath: '', jsonPath: '', htmlPath: '', phase: 'error', note: '' };
+        res = {
+          ok: false, error: String((e && e.message) || e),
+          videoId: '', title: '', keyword: isKeyword ? keyword : '',
+          videoCount: (isKeyword || multiLinks.length > 1) ? 0 : 1, videoListPath: '', videos: [],
+          count: 0, csvPath: '', jsonPath: '', htmlPath: '', phase: 'error', endedBy: '', note: '',
+        };
       }
 
       const ext = res.extension || {};
@@ -418,11 +619,17 @@ export function apply(ctx, config = {}) {
         error: String(res.error || ''),
         videoId: String(res.videoId || ''),
         title: String(res.title || ''),
+        keyword: String(res.keyword || (isKeyword ? keyword : '')),
+        videoCount: (isKeyword || multiLinks.length > 1) ? (Number(res.videoCount) || 0) : 1,
+        videoListPath: String(res.videoListPath || ''),
+        videos: Array.isArray(res.videos) ? res.videos.map((s) => String(s)) : [],
         count: Number.isFinite(res.count) ? Number(res.count) : 0,
         csvPath: String(res.csvPath || ''),
         jsonPath: String(res.jsonPath || ''),
         htmlPath: String(res.htmlPath || ''),
         phase: String(res.phase || ''),
+        // v0.9.1：收工原因（done/max-cap/top-done/stall/timeout/abort/verify-wait）
+        endedBy: String(res.endedBy || ''),
         lanes: Number(res.extLanes) > 0 ? Number(res.extLanes) : lanesUsed,
         note: String(res.note || ''),
         durationSec: Number(res.durationSec) || 0,
@@ -436,8 +643,89 @@ export function apply(ctx, config = {}) {
     },
   }));
 
+  // v0.9.21：授权查询/激活（只在 NovaFlow 收费模式下有用；独立运行模式直接告知未启用）。
+  const disposeEnt = ctx.tools.register(defineTool({
+    name: 'douyin_entitlement',
+    description: '查询抖音采集订阅状态，或用激活码激活。NovaFlow 收费版里采集前必须先激活（一码绑一个 NovaFlow 账号，最多 2 台设备，199 元/月）。独立运行模式会返回「未启用」。',
+    parameters: {
+      action: {
+        type: 'string',
+        description: 'status = 查询订阅状态（默认）；activate = 用激活码激活（需要同时给 code）。',
+      },
+      code: {
+        type: 'string',
+        description: '激活码（action=activate 时必填），形如 NOVA-DY-XXXX-XXXX。',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          activated: { type: 'boolean', required: true },
+          expiresAt: { type: 'string', required: true },
+          remainingDays: { type: 'number', required: true },
+          devices: { type: 'number', required: true },
+          deviceLimit: { type: 'number', required: true },
+          purchaseUrl: { type: 'string', required: true },
+          machineId: { type: 'string', required: true },
+          message: { type: 'string', required: true },
+        },
+      },
+      render: (out) => {
+        const lines = ['抖音采集订阅：' + (out.activated ? '已激活' : '未激活')];
+        if (out.expiresAt) lines.push('到期时间：' + out.expiresAt + (out.remainingDays ? '（剩余 ' + out.remainingDays + ' 天）' : ''));
+        if (out.devices !== undefined) lines.push('设备：' + out.devices + ' / ' + (out.deviceLimit || 2) + ' 台');
+        if (out.machineId) lines.push('本机设备号：' + out.machineId);
+        if (out.purchaseUrl) lines.push('续费/购买：' + out.purchaseUrl);
+        if (out.message) lines.push(out.message);
+        return [{ type: 'text', text: lines.join('\n') }];
+      },
+    },
+    isConcurrencySafe: () => true,
+    async execute(args) {
+      if (!entitlementEnabled()) {
+        return { ok: true, activated: false, message: '当前是独立运行/开发模式，未启用 NovaFlow 订阅（不需要激活）。' };
+      }
+      const action = String(args.action || 'status').trim().toLowerCase();
+      try {
+        if (action === 'activate') {
+          const code = String(args.code || '').trim();
+          if (!code) throw new EntitlementError('CODE_INVALID');
+          const r = await activate(code);
+          return {
+            ok: true,
+            activated: true,
+            expiresAt: String(r.expiresAt || ''),
+            remainingDays: Number(r.remainingDays) || 0,
+            devices: Number(r.devices) || 0,
+            deviceLimit: Number(r.deviceLimit) || 2,
+            purchaseUrl: String(r.purchaseUrl || ''),
+            machineId: machineId(),
+            message: '激活成功。',
+          };
+        }
+        const st = await entitlementStatus();
+        return {
+          ok: true,
+          activated: st.activated === true,
+          expiresAt: String(st.expiresAt || ''),
+          remainingDays: Number(st.remainingDays) || 0,
+          devices: Number(st.devices) || 0,
+          deviceLimit: Number(st.deviceLimit) || 2,
+          purchaseUrl: String(st.purchaseUrl || ''),
+          machineId: machineId(),
+          message: st.activated === true ? '' : '输入激活码后即可采集：douyin_entitlement action=activate code=NOVA-DY-XXXX-XXXX',
+        };
+      } catch (e) {
+        return { ok: false, message: textOf((e && e.code) || 'SERVICE_UNAVAILABLE') };
+      }
+    },
+  }));
+
   // 插件卸载时精确注销这个工具。
-  if (typeof ctx.effect === 'function') ctx.effect(() => () => dispose());
+  if (typeof ctx.effect === 'function') ctx.effect(() => () => { dispose(); disposeEnt(); });
 
   // DSH Web 控制台 + 评论词云（v0.6.0 合并后一起挂载）：只在有 webServer 的宿主里挂；
   // headless / 纯工具模式没有这个服务，嵌套 inject 不会执行，原来的 douyin_comments 工具完全不受影响。
@@ -447,7 +735,11 @@ export function apply(ctx, config = {}) {
       // 词云的接口与静态页都挂在它下面的 /viewer 路径，由这里统一分发。这样不依赖宿主对
       // 「两个互含前缀」的匹配优先级（/plugins/dsh-douyin-comments 与 .../viewer 谁先匹配）。
       const consoleApi = createConsole({
-        collect: collectDouyinComments,
+        // v0.9.0：按输入里有没有 keyword 分发到「关键词搜索模式」或「单视频模式」。
+        // v0.9.16：控制台把「多条链接」解析成 urls 数组，这里也要分发到多链接模式，
+        //          否则会退化成单视频模式（url 为空）而与自动识别结果「打架」。
+        collect: (opts) => (opts && opts.keyword ? collectDouyinKeyword(opts)
+          : (opts && Array.isArray(opts.urls) && opts.urls.length > 1 ? collectDouyinLinks(opts) : collectDouyinComments(opts))),
         getSettings: () => readSettings(),
         getOutDir: () => DEFAULTS.outDir,
       });
@@ -476,6 +768,7 @@ export function apply(ctx, config = {}) {
     const s = readSettings();
     ctx.logger.info('[douyin] douyin_comments 工具已注册（自带扩展副本，运行时自动装进浏览器）；'
       + '当前设置：max=' + s.max + '，顶层列表路数=' + s.lanes + (s.lanes > 1 ? '（错峰多路）' : '（单路）') + '，超时=' + s.timeoutMs + 'ms，等扫码=' + s.waitLoginSec + 's'
+      + '，等人机验证=' + (s.verifyWaitSec > 0 ? s.verifyWaitSec + 's' : '不开')
       + '，先清空=' + (s.clearBefore ? '是' : '否') + '，回复并发=' + s.replyLanes
       + '，回复全局限速=' + (s.replyGlobalGapMs > 0 ? s.replyGlobalGapMs + 'ms' : '扩展内置 250ms')
       + '，回复限流等待=' + s.replyThrottleSec + 's，回复无进展收工=' + s.replyNoProgressSec + 's'

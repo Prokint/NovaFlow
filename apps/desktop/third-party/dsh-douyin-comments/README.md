@@ -1,7 +1,201 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.8.6；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.55`。）
+（插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.22 变更**（2026-11-10）：**修 NovaFlow 内置包缺文件的问题**——`package.json` 的 `files` 白名单一直没加 `entitlement.mjs`，pnpm 按白名单打包 file: 依赖时把它漏掉了，导致 CI 出来的安装包里插件一 import 就崩（授权/采集都不可用）。
+- 修法：`dsh-douyin-comments/package.json` 的 `files` 加入 `entitlement.mjs`；插件版本升到 0.9.22。
+- 自检新增 `pkg-files-entitlement`，以后白名单再漏文件会被 341 项自检抓到。
+- 说明：只改打包白名单，插件运行逻辑不变。
+
+**0.9.21 变更**（2026-11-09，进行中）：**接入 NovaFlow 收费授权（v3.1 设计）**——采集不再只靠本地安装，改为「激活码 + 设备绑定 + 每次运行向服务端换运行凭据」。
+- 服务端（新目录 `novaflow-collect/`，Node 24 + 内置 `node:sqlite`，无第三方依赖）：注册码/权益/设备/material/nonce 六张表；`POST /v1/activate`（Bearer 令牌 + code + machineId）、`GET|POST /v1/status`、`POST /v1/keys/issue`（签发 material + lease）、`POST /v1/devices/remove`；规则：一码绑一个 Now API `user_id`、同用户最多 **2 台设备**、有效期从激活时算起、nonce 防重放、按用户/IP 限流、版本白名单、material 版本可轮换（`cli.mjs material set/retire`）；`test/smoke.mjs` **17/17** 通过；本地已实跑 `material current` / `codes create`。
+- 插件侧：新增 `entitlement.mjs`（`entitlementEnabled()` 只在配置了 `NOVAFLOW_RELAY_URL` 或 `NOVAFLOW_COLLECT_BASE` 时启用，独立运行/开发模式行为不变；`status/activate/removeDevice/issueKey`；relay 模式走 `/novaflow/collect/*` 并带 `x-novaflow-capability`）；`collector.mjs` 的 `keyMaterial()` 优先用服务端签发的 material（仅内存、不落盘），其次 `DYC_MATERIAL`、最后内置常量；`build-encrypted.mjs` 支持 `DYC_MATERIAL=<64hex>` 轮换；`index.js` 每次采集前校验订阅 + 强制换 key，新增 `douyin_entitlement` 工具（查询状态 / 用激活码激活）；词云面板新增 `/api/entitlement`、`/activate`、`/remove` 接口；`client/client.js` 在收费模式下隐藏「采集」tab、只留评论词云 + 订阅状态条。
+- 安全契约：服务端只存 64 hex material，客户端自行拼 `|dyc.v1` 再派生密钥；上线前必须 `node cli.mjs material set --version v1 --material <插件构建用的 64hex>`，否则 `core.enc` 解不开。
+- 本地联调（relay 模拟）：`NOVAFLOW_RELAY_URL=http://127.0.0.1:8900` + 桩 relay 注入令牌 → `status`（未激活）→ `activate('NOVA-DY-…')`（30 天）→ `status`（已激活/1 台设备）→ `issueKey`（material 与插件内置 64hex 一致、lease 正常）→ `collector.mjs` 用服务端 material 成功解密加载。
+- 待办：M3 NovaFlow 主进程 relay 桥接（需要 NovaFlow 源码仓库，本机只有 `novaflow-asar` 构建产物）、zpay 购买页、面板文案、部署文档与正式域名（`collect.lanjiaotrade.com`）。
+
+**0.9.20 变更**（2026-11-09）：**评论表的「收藏」星标挪到最右侧独立一列**——用户反馈星标挤在用户列（昵称/抖音号下面），要和用户信息分开。
+- 改法：`viewer/index.html` 表头新增 `<th class="col-star">收藏</th>`（放在「情感」之后）；`viewer/app.js` 把 `fav-star` 按钮从 `userCell` 移出，作为 `starBtn` 放进每行最后的 `<td class="cell-star">`；`viewer/styles.css` 新增 `.col-star`（48px）、表头/单元格居中、`td.cell-star .fav-star { margin-left: 0; }`。
+- 自检 **345/345**（新增 `table-star-col`）；本次只改前端，刷新词云页即可。
+
+**0.9.19 变更**（2026-11-09）：**「负评 Top3」改成「评价 Top3」**——用户反馈按点赞排出的负评 Top3 其实是高赞玩梗/感动类评论（`第一波生气纯是因为弹幕多说了一个敢[捂脸]`、`这波贪了，应该留到除夕夜看的[流泪]`、`独生子看哭了[流泪]`）。词典打分对这类「表面负词、实际正向」的评论仍会误判，所以这个榜单不再按情感筛。
+- 改法（`viewer/app.js`）：`negTop` → `topComments`（只过滤有文字的评论，按 `digg` 降序取前 3），标题「评价 TopN（按点赞）」；每行 tooltip 显示「按点赞排序的 TopN 条评价 · 情感倾向：正向/中性/负向（词典打分 x）」；点击提示里仍标出该条的情感倾向。
+- 情感统计条（正向/中性/负向占比）保留不变，本版只改这个榜单的口径。
+- 自检 **344/344**（`sentiment-v2` 断言改为 `const topComments = list` / `评价 Top${topComments.length}（按点赞）`）；本次只改前端，重新加载导出并刷新词云页即可。
+
+**0.9.18 变更**（2026-11-09）：**修「链接后面粘着分享口令时识别不出来」**——用户粘贴 `<video 链接>,6.61 c@N.JI 04/24 …` 这类文本，链接正则把逗号后的口令也吞进 URL（`https://www.douyin.com/video/7705265840823941352,6.61`），`new URL()` 之后拿不到 videoId，整条就「不识别」。
+- 修法（`src-core/collector.src.mjs`）：`extractDouyinLink` / `splitDouyinInput` 的链接正则排除 `， , ; ； 、 |`（口令里的逗号在这里截断），并新增 `trimLinkTail()` 统一清掉粘在尾部的标点；`resolveDouyinVideoInput` 再加一层兜底——URL 解析不出 id 时直接从文本里捞 `/(video|note)/<id>`、`modal_id=<id>`。
+- 实测（用户原文）：`splitDouyinInput` → 两条干净链接；`resolveDouyinVideoInputs` → 2 条标准作品页（第二条 `v.douyin.com/7OHhOJSCEK0` Node 跟跳解析成 `https://www.douyin.com/video/7705767138686513382`）；真机两链接采集两条都成功（147 + 143 = 290 条评论，29s，合并 CSV 290 行）。
+- 自检 **344/344**（`multi-link-core` 增加 `trimLinkTail` / 分隔符断言）；`core.enc` 已重建（`250e8103…`），扩展未改（仍 0.5.65）。
+
+**0.9.17 变更**（2026-11-09）：**修「多条链接和自动识别打架」**——控制台已经把「多条链接」解析成 `urls` 数组，但 `index.js` 注册控制台时自带的 `collect` 分发只认 `keyword` / 单视频，`urls` 数组会退化成「单视频模式但 url 为空」，表现就是自动识别成功却启动失败（用户反馈「他现在会和自动识别撞」）。
+- 修法：`index.js` 里的控制台 `collect` 也按 `opts.urls.length > 1` 分发到 `collectDouyinLinks`，与 `console.mjs` 的默认分发保持一致；单条链接仍然走 `collectDouyinComments`。
+- 自检 **344/344**（`multi-link-wiring` 增加 index.js 控制台分发断言）。本次只改 `index.js` / 文档，无需重建 `core.enc` 与扩展。
+
+**0.9.16 变更**（2026-11-09）：**支持一次粘多条链接（逗号 / 空格 / 换行分隔），逐条采集后合并成一份 CSV/JSON**（用户 m04964：`多条链接中间可以用,或者空格隔开`）。
+- 核心（`src-core/collector.src.mjs`，`resolveDouyinVideoInput` 之后）：
+  - `splitDouyinInput(text)`：先从文本里抠出所有 `douyin.com` / `iesdouyin.com` 链接（分享文案里的链接会被抽出来）；文本里没有 http 链接时按 `空格 , ， ; ； 、 |` 拆 token（支持直接粘一串纯 id）。
+  - `resolveDouyinVideoInputs(text, opts)`：逐条走 `resolveDouyinVideoInput`（直链/短链/分享文案都行），按 url / videoId 去重，返回 `{ ok, targets, errors, count }`。
+  - `collectDouyinLinks(o)`：**没有搜索阶段**，直接逐条复用单视频采集（`collectDouyinComments`，沿用 v0.9.3 的中档回复参数与「视频之间 3~8s 随机停顿」），每条采完读分片 JSON 合并；产物 `douyin-links-<N>-<时间戳>.csv/json` + `douyin-videos-links-<时间戳>.csv`，JSON 里带 `links / videoCount / commentCount / videos / comments`（每条评论有 `video_index`、`video_id`、`video_title`、`video_url`、`video_kind`）。
+- 接线：`index.js` 的 `url` 参数先 `resolveDouyinVideoInputs`，>1 条时走 `collectDouyinLinks`（日志「识别到 N 条链接：逐条采集后合并成一份 CSV/JSON」）；`console.mjs` 的 `normalizeInput` 接受 `urls` 数组、`/api/resolve` 返回 `{count, urls, targets}`、`POST /api/jobs` 自动拆成 `body.urls`；采集页链接框粘贴多链接时只 toast「识别到 N 条链接，将逐条采集」保留原文，placeholder 改为「粘贴链接或分享文案（多条用逗号/空格隔开）」；词云分析台的文件过滤正则加入 `links`（`douyin-links-*.json` 可被列表/加载/删除）。
+- 真机验证（`_probe/e2e-links.mjs`，两条链接用空格分隔）：日志「识别到 2 条视频」→ 逐条采集、视频之间停顿 8s → 两条都 `成功`（105 + 145 = 250 条评论，24s），合并成 `douyin-links-2-2026-11-09T07-29-17.csv`（250 行）+ `douyin-videos-links-2026-11-09T07-29-17.csv`（2 行）；已采过的视频会提示「没有本轮新数据」并按 0 条入库，不影响合并导出。
+- 自检 **344/344**（新增 `multi-link-core`、`multi-link-wiring` 两项断言）；`core.enc` 已重建（`63fedb3e…`），扩展未改（仍 0.5.65）。
+
+**0.9.15 变更**（2026-11-09）：**采集核心也兜底解析分享文案**（用户报「采集未成功：扩展面板没出现」，实际是旧进程把整段分享文案当 URL，`page.goto` 报 `Cannot navigate to invalid URL`，等了 30s 才误报成扩展没生效）。
+- `src-core/collector.src.mjs` 的 `collectDouyinComments` 入口新增兜底：`url` 不以 `http(s)://` 开头时，先走 `resolveDouyinVideoInput` 提取/跟跳，得到标准作品页再打开；解析不出直接抛「视频链接无效：没认出抖音链接（请粘贴视频页链接或完整分享文案）」，不再把分享文案交给 `page.goto`。
+- 这样无论从工具参数、控制台、还是 MCP 直接调 collector，粘分享文案都不会再出现「扩展面板没出现」这种误导性报错。
+- 自检 **342/342**（新增 `collector-share-url` 断言）；`core.enc` 已重建，扩展未改（仍 0.5.65）。
+
+**0.9.14 变更**（2026-11-09）：**视频链接框支持整段分享文案 / 短链自动提取；采集页的说明文字精简**（用户 m04678 要求「这个介绍去掉，提示也不要这么具体，还有那个链接，搞成能识别分享链接，自动提取的」）。
+- `app/index.html`：视频链接 placeholder 改为「粘贴视频链接或分享文案」（不再放完整示例 URL 占位）；关键词标签从「关键词搜索（v0.9.0：填了就走「按关键词搜视频 → 采前 N 条视频的评论」，此时视频链接不用填）」改成简洁的「关键词搜索」，placeholder 改「输入关键词」。
+- 新增核心函数（`src-core/collector.src.mjs`，`douyinTargetFromUrl` 之后）：
+  - `extractDouyinLink(text)`：从任意文本里提取第一个 `douyin.com` / `iesdouyin.com` 链接；
+  - `resolveDouyinVideoInput(text, opts)`：直链/纯 id 直接标准化成 `https://www.douyin.com/<video|note>/<id>`（`source=direct`）；短链（如 `v.douyin.com/xxx`）先用 Node `fetch` 跟跳、从落地 URL 或 HTML 的 `aweme_id` / `modal_id` 里取 id（`source=share` / `share-html`）；Node 抓不到时**不阻断**，原样返回链接（`source=link-pending`），交给浏览器打开后由页面自己跳到 `/video/<id>`，扩展照样能认出 videoId。
+  - `POST /api/resolve`：控制台粘贴即解析（失败 400「没识别到视频链接」）；`POST /api/jobs` 在入队前也用同一解析器把 `body.url` 换成标准作品页。
+  - `app/app.js`：链接框在 **paste / blur / Enter** 时自动调用 `/api/resolve` 回填标准链接（成功 toast「已识别视频 &lt;id&gt;」），失败只 toast 提示、不丢原文。
+  - `index.js`：工具调用（`url` 参数）同样先走 `resolveDouyinVideoInput`，日志里会打「分享链接已还原成作品页」。
+- 实测（`_probe/check-resolve.mjs`）：直链 video / 直链 note / 纯数字 id / 整段分享文案 / `iesdouyin.com` 分享链接全部正确标准化；真实短链 `https://v.douyin.com/iRNBho6u/` 用 Node fetch 跟跳解析出 `https://www.douyin.com/video/7298145681699622182`；无链接文本报「没找到抖音链接（粘贴视频页链接或完整分享文案）」。
+- 自检 **341/341**（新增 `share-link-resolve-core`、`console-share-url` 两项断言）；`core.enc` 已重建（`71bb44ef…`），扩展未改（仍 0.5.65）。
+
+**0.9.13 变更**（2026-11-09）：**修「负评 Top3 里其实不是负评」（情感词典假阳性，用户 m04584 反馈）**。
+- 假阳性来源（用真实导出 `_probe/out-keyword-overlay2/…` 复现）：①`[抠鼻]` 被复制 9 次，旧版每次计 `-1.2` 合计 `-10.8`，把「你的作品非常优秀，你是最棒的」判成负评；②`Intl.Segmenter` 把「谢贵师传喜讯」切成 `谢|贵|师`，单字「贵」计 `-1` 造出假负评；③「不要制冰 求推荐」里「不要」跨空格否定到下一子句的「推荐」，把需求贴翻成负向。
+- 修法（`viewer/app.js` 的 `sentimentOf`）：①表情**按去重后的种类**计分（±0.6/种）并封顶 ±1.2；②按标点/空白切子句，否定词只在子句内生效；③新增整词短语表 `SENT_PHRASE_NEG`（不好用/差评/太贵/有点贵/一般般/踩雷/退货…）先扫描并删除命中片段，避免分词碎片重复计分；④单字弱负向词（贵/差/弱/水/坑/卡…）只有紧邻程度词/否定词或后接「了/啊/死/得/多/些」时才计分；⑤新增 `SENT_REQUEST_RE`，「求推荐/求链接/怎么买」里的「推荐/安利」不计正向。
+- 负评行现在可在悬停时看到 `词典打分 X，命中 N 个负向特征`（标题改为「负评 TopN（按点赞 · 词典打分）」），方便人工复核。
+- 实测：同一份导出负评从 2 条降到 1 条（剩下的「昨晚上拍那个视频找到很多人的反对，现在我删了。[流泪]」确属负向语境）；15 条单元样例全对（太贵了/有点贵/不贵/差评/不好用/一般般/很好/求推荐/垃圾别买…），脚本 `_probe/check-sent.mjs`。
+- 自检 **339/339**（新增 `sentiment-v2` 断言）。
+
+**0.9.11 / 0.9.12 变更**（2026-11-09）：**评论表后半段短列统一居中，用户列也纵向居中**（用户截图要求「居中一下后面的日期点赞等」「用户这一栏也上下居中一下」）。
+- `viewer/index.html`：表头这 5 列本来就带 `col-*` 类；`viewer/styles.css` 新增 `thead th.col-num / .col-ip / .col-time / .col-level / .col-sent { text-align: center; }`，表体用 `tbody td:nth-child(n + 3):nth-child(-n + 8)` 把「点赞 / 回复 / 属地 / 时间 / 层级 / 情感」六列统一 `text-align: center; vertical-align: middle;`（长评论行里数字和日期不再贴顶）。
+- 数字列（点赞 / 回复、时间）额外加 `font-variant-numeric: tabular-nums`，等宽数字对齐更整齐；评论内容保持左对齐。
+- 0.9.12：`tbody td:nth-child(2) { vertical-align: middle; }`，用户列（头像 + 昵称 + 抖音号 + ☆）整体垂直居中，长评论行里不再贴顶。
+- 自检仍 **339/339**；无头 Chromium 实测表头/单元格 `textAlign=center`、`verticalAlign=middle`（截图 `_probe/table-align.png`）。
+- 顺带把词云页底部 `#uiVer` 更新到当前版本（此前一直停在 `v0.9.0`）。
+
+**0.9.10 变更**（2026-11-09）：**采集页去掉高级参数展示 + 去掉深/浅主题切换（固定白色主题）**。
+- 用户要求（附采集页截图）：「这一部分都不要展示了，默认这些参数就行，以及那个主题也去掉，保留白色主题」。
+- 采集页（`app/`）不再展示这些高级参数，一律走后端默认值：目标条数（`max`=80000）、顶层路数（`lanes`=3）、总超时（30 分钟 / 关键词模式 4 小时）、等扫码（`waitLoginSec`=180）、补采二级回复（默认开）、先清空旧数据（默认关）、同时导出词云 HTML（默认关）。`app/index.html` 删掉这两行 field-row；`app/app.js` 的 `startCollection` 不再读取/下发这些字段，`loadConfig` 也不再回填。
+- 主题：控制台（`app/index.html`）与评论分析台（`viewer/index.html`）都删掉右上角深/浅切换按钮，两页在启动时固定 `data-theme="light"`（白色主题），`theme-color` 统一改为浅色 `#f5f6f8`；`app.js`/`viewer/app.js` 里的 `themeBoot`/`themeButton` 逻辑移除（CSS 里的深色 tokens 保留但不再启用，便于以后恢复）。
+- 自检：插件 0.9.10（扩展/MCP 仍 0.5.65）；`verify-tool.mjs` 新增 v0.9.10 断言（采集页不含上述 7 个 id、app.js 不读这些字段、控制台与词云页都固定 light、无 `btnTheme`、README），全绿 **338/338**。
+- 注：只改了 `app/`、`viewer/` 前端（不涉及 `src-core/` 与 `extension/`）→ 无需 `build-encrypted` / `sync-extension`；同步安装副本并退出重开 DSH 生效。
+- **0.9.10 修订（同日）**：修两个浅色主题下的样式回归（用户 m03861 附图）——①右上角按钮 hover 变「黑块」：`viewer/styles.css` 的 `.btn:hover` 硬编码了深色 `#17171a`，浅色主题下配深色字就看不见字，新增 `[data-theme="light"] .btn/…primary/…ghost:hover` 覆盖（hover 改为浅灰底 + 深色字，主按钮 hover 用深蓝底 + 白字）；②「地域分布」每行右侧 `102 条 · 80 人` 溢出行框/卡片：根因是 `viewer/styles.css` 旧 `.region-num` 带 `width: 52px` 固定宽（比实际文字 58~64px 窄），改为 `width: auto`，同时把地域网格列宽从 `minmax(272px,1fr)` 提到 `minmax(300px,1fr)`、地域名列 52→48px、行加 `overflow: hidden` 兜底。已用无头 Chromium 实测：hover 后按钮背景 `rgb(247,249,251)`、文字 `rgb(18,22,29)` 正常可见；12 个地域行右侧均比行框内收 9px，面板无横向溢出（`scrollWidth == clientWidth`）。
+- **0.9.10 修订（第二次）**：「按地域分组看客户 / 已收藏客户」弹层里那一排地域 chip 改成**下拉框**（用户 m03971 附图）。`viewer/index.html` 把 `<div id="groupChips" class="group-chips">` 换成 `.group-filter` 里的 `<select id="groupRegionSel" class="select small">`；`viewer/app.js` 的 `renderGrouped()` 两种模式（正常分组 / `__fav__` 收藏客户）都改为填充 `<option>` 并回选当前地域，`#groupChips` 的点击监听换成 `#groupRegionSel` 的 `change` 监听；样式新增 `.group-filter`（下拉最小宽 240px）。原先 chips 用的 `.group-chips` CSS 保留但已无引用。
+- **0.9.10 修订（第三次）**：词云页用户头像改为**优先显示抖音真实头像**（用户 m04046 附图问「这些用户头像能拿到吗」）。抖音评论接口的 `comment.user` 本来就带 `avatar_thumb/avatar_medium/avatar_larger`（`url_list[0]` 是 p3-pc.douyinpic.com 的头像 jpg），导出 JSON 里一直存着、只是分析台没读。现在 `viewer/app.js` 的 `normalizeUser()` 增加 `avatar: pickAvatarUrl(u)`（依次取 thumb/medium/larger/168x168/avatar），渲染用 `avatarHtml(user)` 输出 `<img class="av-img" referrerpolicy="no-referrer" onerror="this.remove()">` 盖在「首字 + 淡色底」占位上；加载失败 / 老数据 / 收藏列表没有头像时自动退回首字。评论表、按地域分组弹层、收藏客户弹层三处都生效。`viewer/styles.css` 加 `.avatar .av-img`（绝对定位铺满、`object-fit: cover`、圆形）。注意头像链接是抖音 CDN 直链（个别过期会 404，有首字兜底），导出 CSV 列结构没动。`verify-tool.mjs` 新增 `viewer-avatar` 断言，全绿 **338/338**；无头 Chromium 实测按真实头像渲染：评论表 50/50 行带头像、分组弹层 139 个头像中 25 个成功加载（其余在截图等待时间内未下完，失败会退回首字）。
+- **0.9.10 修订（第四次）**：**收藏客户列表也补上真实头像**（用户先反馈「收藏客户那里也没头像」→ 词云页弹层修好后又发采集页截图说「还是没头像」，说明两处都要修）。
+  - 词云页（`viewer/app.js`）：加 `uid/secUid → 头像` 内存索引（`normalizeUser()` 登记、`avatarOf(rec)` 查），收藏时 `favPayload()` 把 `avatar` 存进 `favorites.json`，老收藏用 `backfillFavoriteAvatars()` 从当前导出补；「已收藏客户」弹层渲染 `avatar: avatarOf(f)`。
+  - 采集页（`app/app.js` + `app/styles.css`）：`renderFavorites()` 的行加 `<img class="fav-avatar-img" referrerpolicy="no-referrer">` 盖在首字占位上，加载失败自动移除露首字；`.fav-avatar` 改相对定位 + 圆形裁剪。采集页本身拿不到评论数据，头像由服务端补。
+  - 服务端（`viewer.mjs`）：新增 `userAvatarUrl(raw)`（取 thumb/medium/larger 的 `url_list[0]`）、`avatarIndexFromExports(wanted)`（从最近导出 JSON 建索引：最多扫 40 个文件、80MB 以上跳过、凑齐 `wanted` 就提前停、结果缓存 60s）、`enrichFavoriteAvatars(store)`（给缺头像的收藏补上并写回 `favorites.json`）；`/api/favorites` 的 GET 与 POST 都会先补一次，所以老收藏一打开采集页就有头像（不依赖先开词云页）。
+  - 实测：3 条不带头像的老收藏 → 词云弹层 3/3 真实头像加载成功；采集页用 1 条无头像收藏 + 真实 CDN 链接 → `rows=1, imgs=1, loaded=1, broken=0`（截图 `_probe/fav-console-avatar.png`）。`verify-tool.mjs` **338/338** 全绿（新增 `favorites-avatar-server`、`fav-avatar-app` 两项断言）。
+
+**0.9.9 变更**（2026-11-09）：**采集结束后自动关闭浏览器窗口，不再把窗口留在屏幕上**。
+- 背景（用户 m03610，问「现在采集完不会自动关闭浏览器吗」）：0.9.7 起「静默风控」收工时为了让人工介入保留了窗口，但静默风控其实**不需要人工介入**（页面没有验证 UI）→ 窗口白白留开，还容易在下一轮采集时撞 profile 占用（就是 0.9.8 那个 `Failed to launch` 的来源）。
+- 修复（`src-core/collector.src.mjs`）：`risk-silent` 收工分支不再 `keepForLogin = true`，照常走 `shutdownDouyinBrowser()` 关窗口（已采数据在扩展存储里，重跑仍可断点续采、只交付新增部分）。
+- **仍会保留窗口的只有三种情况**：①真·人机验证（页面上确实出现验证浮层，`endedBy=verify-wait`，需要你在窗口里过验证）；②没登录（需要你扫码，`phase=need-login`）；③显式 `keep=true`（调试用，采完不关）。
+- 关键词模式说明：任务执行**期间**每个视频采完窗口会保持打开（内部 `keep:true`，避免反复重开浏览器触发风控），整个任务结束/取消/出错时统一关闭。
+- 自检：插件 0.9.9（扩展/MCP 仍 0.5.65）；`verify-tool.mjs` 新增 v0.9.9 断言（risk-silent 分支不含 `keepForLogin = true`、日志含「浏览器窗口会自动关闭」、README），全绿 **332/332**。
+- 注：只改了 `src-core/collector.src.mjs` → 需要 `node build-encrypted.mjs`（扩展未变，无需 sync-extension），同步安装副本并退出重开 DSH 生效。
+
+**0.9.8 变更**（2026-11-09）：**修复「采集未成功：browserType.launchPersistentContext: Failed to launch the browser process … 已在运行的浏览器会话中打开」**。
+- 背景（用户报错）：启动采集直接失败，Chromium 一启动就退出；原因是浏览器 profile（`~/.dsh/douyin-collector/profiles/acc_…`）被**上一轮残留的浏览器窗口**占着 —— 同一个 profile 不能再开第二个进程。
+- 为什么旧版没接管下来：`attachRunningBrowser()` 只认「URL 以 `https://www.douyin.com/` 开头的 page」，残留窗口当时停在扩展页/空白页（或结果页外的页面）→ 误判「没有旧窗口」→ 直接去 launch → profile 被锁 → 失败。
+- 修复（`src-core/collector.src.mjs`）：
+  - `attachRunningBrowser(chromium, log, { extId, profile })` 识别条件放宽：**端口上有浏览器（`/json/version` 有响应）且目标里带我们的扩展页（`chrome-extension://<extId>/…`）、或有抖音页**就接管；没有 page 时用 `ctx.newPage()` 补一个；并用上次启动记录里的 `profile` 校验「这个窗口是不是这次的 profile」，不是就不接管。
+  - 新增 `killStaleProfileBrowsers(profile, log)`：只杀「命令行里带同一个 `--user-data-dir=<profile>`」的 `chrome.exe` 进程，顺手删 `SingletonLock/SingletonCookie/SingletonSocket`（非 Windows 平台只提示手动清理）。
+  - 新增 `launchPersistentContextWithRecover(chromium, profile, options, log)`：launch 报错且像是 profile 被占用（`Failed to launch the browser process` / `已在运行的浏览器会话中打开` / `already in use` / `SingletonLock`）时，**自动清理残留进程、等 1.5s 再重试一次**；仍失败给出明确提示（手动关窗口或 `DOUYIN_PROFILE` 换目录）。采集与搜索两个启动入口都改用它。
+- 自检/版本：插件 0.9.8（扩展/MCP 仍 0.5.65）；`verify-tool.mjs` 新增 v0.9.8 一组断言（接管指纹、`/json/version` + profile 校验、清理 helper、两个入口都走 recover 版 launch、README），全绿 **330/330**。
+- 注：改了 `src-core/collector.src.mjs` → 需要 `node build-encrypted.mjs`（扩展未变，无需 sync-extension），并同步安装副本、退出重开 DSH。
+
+**0.9.7 变更**（2026-11-09）：**区分「真·人机验证」与「服务端静默风控」——不再把静默风控说成「撞人机验证」并反复点「开始采集」刷屏**。
+- 背景（用户 m03295，附日志截图）：「他老说撞风控，其实没撞」。日志里连续三组 `撞到人机验证（风控）：扩展已停下…最多等 900s` → `页面上已看不到验证浮层，点「开始采集」继续（第 1 次）` → `已恢复采集（phase=replies）`，但浏览器页面上根本没有验证浮层。
+- 根因：扩展 `hook.js:74` 只要响应头带 `x-vc-bdturing-parameters` / `bdturing-verify` 就报 `VERIFY_REQUIRED`（**服务端静默风控，没有验证 UI**）；旧版 `content.js` 把它当成「真验证」永久 `setPhase('paused', '服务端要求完成验证（风控）…')`；采集器 `VERIFY_PAUSE_RE` 匹配到这句文案 → `waitOutVerification()` 一直等一个不存在的浮层 → 每 ~20s 点一次「开始采集」→ 扩展立刻又被拒 → 日志无限刷「撞到人机验证」。
+- 扩展做法（`D:\dycopy\douyin-collector\content.js`）：新增 `captchaOverlayVisible()`（title / 正文前 1600 字 / `#captcha_container`、`.captcha_verify_container`、`.vc-captcha`、`[class*="captcha_verify"]`、`iframe[src*="/verify"]` 可见才判定为真有验证浮层）；新增 `silentVerifyHits`（补采）/ `silentVerifyTop`（顶层列表）计数：页面没有验证浮层时不再永久停下，而是**降速到单路 + 冷却 20 秒自动重试一波，最多 2 次**，仍被拒才如实 `setPhase('paused', '服务端静默风控（VERIFY_REQUIRED，页面没有验证浮层，不是人机验证）…')`；文案里明确写「不是人机验证」。
+- 采集器做法（`src-core/collector.src.mjs`）：`waitOutVerification()` 先 `verifyOverlayPresent()` 判断页面到底有没有浮层；**没有浮层 = 静默风控**：不去等验证、不按 20s 节奏点「开始采集」刷屏，改为退避（10s/20s/30s）最多试 3 次「开始采集」，仍不行就收工并如实记日志；主轮询新增早退：状态文案含「静默风控 / 不是人机验证」时直接 `endedBy='risk-silent'` 收工（窗口保留、已采数据落盘、稍后重跑可断点续采）。
+- 自检/版本：插件 0.9.7、扩展 0.5.65、MCP 0.5.65（三处一致）；`verify-tool.mjs` 新增 v0.9.7 一组断言（扩展有 `captchaOverlayVisible` / `silentVerifyHits`+`silentVerifyTop` / 文案「不是人机验证」；采集器有 `risk-silent` 早退、`sawOverlay` 判断、3 次退避），全绿 **325/325**。
+- 注：扩展与采集器都改了 → 需要 `node sync-extension.mjs` + `node build-encrypted.mjs`，并同步安装副本、退出重开 DSH。
+
+**0.9.6 变更**（2026-11-09）：**扩展全程「自然巡航」——边采集边滚评论区，让页面自己持续发签名请求（把团队 `clicker3` 的「滚动解风控」思路做成扩展内的正确落地版）**。
+- 背景（用户 m03064）：不能等「卡住」再滚 —— 等卡住时通常已经触发人机验证，再补救没用；要自始至终在后台同路跑。
+- 关键实测（`_probe/probe-natural-nudge.mjs`，搜索结果浮层；扩展只能发合成事件）：只改 `scrollTop` → 评论不加载、0 请求；**合成 `WheelEvent` 派发到 `comment-list`（`bubbles:true`）** → items 11→45、scrollHeight 1680→6934，页面自己发出 3 条带 `a_bogus` 的 `comment/list` 请求；合成点击「展开N条回复」无效（真鼠标才行），所以不依赖它。
+- 做法（`D:\dycopy\douyin-collector\content.js`）：新增 `startCruise()/cruiseTick()/stopCruise()`：`setPhase` 在 `collecting/replies/waiting-sign` 三个阶段自动挂上；每 `cruiseMs`（默认 2600 + 0~900ms 随机）交替在 `comment-list` 上「滚到底 / 回拉一屏」（用 `persistScroll` 的合成 wheel）；评论区没开时最多点 2 次入口打开；**每个 tick 校验 `videoId` 与 `pageViewId()`，一变立刻停**（防止在结果页把下一条视频滚出来导致切条/落错桶）；`CRUISE_MAX=800` 次上限；`dts_settings`（或面板用户设置）可 `naturalCruise: 0` 关闭、`cruiseMs` 调间隔。
+- 为什么更轻：评论是页面自己滚出来的，签名请求也由页面自己发，扩展只是顺手收「顺路数据」，不用在卡住时集中重放。
+- 自检/版本：扩展 0.5.64（扩展源 / MCP / 安装副本三处一致），插件 0.9.6；`verify-tool.mjs` 新增 v0.9.6 一组断言（含扩展与安装后 content.js 都带巡航函数），全绿 **318/318**。
+- 真机验证（2026-11-09）：关键词 E2E 仍 `deepLinkFallback=0 overlayOpened=2`（247 条、64s）；旁路读扩展 `status.autoOpenLog` 观测到 `cruise#1…#16`，全程 `videoId=7694662199454196721` 不变、可见评论 122→291，收工 `cruise-stop:phase:done`；巡航日志只进 `autoOpenLog` 诊断轨迹，不再往采集日志里刷屏。
+- 注：本轮改的是扩展 `douyin-collector/content.js` → 需要 `node sync-extension.mjs` + `node build-encrypted.mjs`。
+
+**0.9.5 变更**（2026-11-07）：**关键词采集不再走 `/video/<id>` 深链（卡片找不到先重建搜索结果页）+ 防连播只关一次**。
+- 背景（用户反馈）：①「自动连播关闭一次就行了，每次采集前关闭，我看日志一直输出关闭」——0.9.4 每 5 秒巡检一次会反复刷屏，也反复点开关；②「为什么现在还是深链」——真实日志里第 1 条视频报 `搜索结果页里没找到这条视频的卡片（id），兜底打开详情页`，直接 `page.goto('https://www.douyin.com/video/<id>')` 走了深链。
+- 做法：①删掉每 5 秒巡检（`pinTicks` / `pinVideoNotAdvance('巡检')`），只在每条视频点「开始采集」前调一次 `pinVideoNotAdvance('开始前')`；②新增 `rebuildSearchResultsPage(page, { searchKeyword, general, log, aborted })`：卡片找不到时重新走「抖音首页搜索框 → 搜索结果页 → 视频 tab」，重建后再找卡片；`openSearchOverlayVideo` 新增 `searchKeyword/general` 入参，卡片找不到、或退不回搜索页时都先重建结果页，**只有重建也失败才兜底详情页**；③`collectDouyinComments` 新增 `searchKeyword/searchGeneral` 透传，`collectDouyinKeyword` 每条视频传入同一关键词。
+- 为什么会缺卡片：关键词采集会「接上上一次留下的浏览器窗口（CDP :9510）」复采，那个窗口可能停在一份过期/别的搜索结果页上，本次搜到的视频卡片不在当前网格里；直接跳详情页是最稳但也最容易触发风控的兜底，改成先重建搜索页。
+- 自检：`verify-tool.mjs` 新增 v0.9.5 一组断言（版本 0.9.5、无 `pinTicks`/无巡检、`rebuildSearchResultsPage` 存在、浮层函数签名带 `searchKeyword`、卡片缺失先重建、关键词透传、README）。
+- 0.9.5 修订（真机 E2E 后补的根因）：**Chrome 用持久化 profile 启动时会把上次的标签页恢复出来**，`ctx.pages()[0]` 有时是恢复出来的旧标签（停在旧搜索页/旧 `?modal_id=`），于是 `collectDouyinComments` 拿错页面 → 误判「当前浮层是别的视频」→ 下滑/Esc/goBack 全无效 → 重建结果页时又撞验证码 → 最后只能兜底走 `/video` 深链。修法：`collectDouyinComments` 在关键词模式下从 `ctx.pages()` 里挑出「本次关键词的搜索页」标签（日志「切到本次的搜索结果页标签（不是恢复出来的旧标签）」）；`openSearchOverlayVideo` 发现当前不在搜索页时也先重建结果页，不在错误页面上瞎找卡片。真机 E2E（关键词「咖啡」2 条视频、`max=40`、`replies=false`）：**`deepLinkFallback=0 pinBefore=2 pinPatrol=0 overlayOpened=2`**，全程停在 `?modal_id=` 浮层，222 条评论、58s。
+- 注：本轮改了 `src-core/collector.src.mjs`，需要重跑 `node build-encrypted.mjs` 重建 `core.enc`；扩展当时未变（0.9.5 时仍 0.5.63，0.9.6 起升到 0.5.64）。
+- 0.9.5 另一个修复（用户反馈「关键词采集好像只会导出最后一条视频」）：分析台（`viewer.mjs` 的 `/api/list` / `/api/latest`）只认 `douyin-comments-*.json` 分片，**看不到 `douyin-keyword-*.json` 合并文件** → 采集完成后自动打开的「最新一份」永远是最后一条视频的分片。现在：①列表/最新一份都认 `douyin-(comments|keyword)-*.json`，合并文件按 `commentCount` 读条数、标题显示「关键词「kw」· 本次全部视频」；②`viewer/app.js` 载入合并 JSON 时按每条评论的 `video_id/video_title` 登记全部视频；③批量删除也允许删 `douyin-keyword-*`。实测 `/api/latest` 现在返回 `douyin-keyword-猫咪-…json`（count=1157、标题「关键词「猫咪」· 本次全部视频」），而不是最后那条 42 条的分片。
+
+**0.9.4 变更**（2026-11-07）：**采集期间关掉「自动连播」—— 视频播完不再自动滑到下一条**。
+- 背景：抖音播放器开着「自动连播」时，视频一播完就会滑到下一条视频。搜索结果页浮层采集长视频时如果碰上这个，页面会自己切走，正在采的评论会落进下一条的桶里（0.9.3 实验里 A 配置丢的第 1 条就是这个现象）。
+- 做法：新增 `pinVideoNotAdvance()`（`collectDouyinComments` 内，`settle` 之前）：
+  1. 页面内把可见 `video` 元素的 `loop` 置 `true` —— loop 时不会触发 `ended`，播放器就拿不到「播完了」的信号，不会自动切下一条（不暂停视频，不影响页面正常显示和评论加载）；
+  2. 顺手找页面上的「自动连播」开关（文本 `自动连播/连播/自动播放` 旁边 `aria-checked=true` 或 `input[type=checkbox]:checked`），开着就点掉；找不到不报错，只靠 `loop` 兜底。
+  3. 调用时机（0.9.5 起）：**只在每条视频点「开始采集」之前一次**（日志「防连播（开始前）：N 个视频 loop=true…」），不再每 5 秒巡检。
+- 效果：即使开着自动连播，采集过程中页面也不会因为视频播完而换条；采集完成/暂停后 loop 会随页面恢复正常（`loop` 只是运行期临时设置，不改账号设置）。
+- 自检：`verify-tool.mjs` 新增 v0.9.4 一组断言（`pinVideoNotAdvance` 函数、`loop = true`、自动连播开关检测、开始前调用一次、README）。
+- **注意**：本轮改了 `src-core/collector.src.mjs`，已跑 `node build-encrypted.mjs` 重建 `core.enc`（sha256=`ccba3cab…`；扩展未变，仍 0.5.63，不需要 sync-extension）；自检 `verify-tool.mjs` **302/302**、`verify-encrypted.mjs` 全部通过；真机 E2E：关键词「夕阳」2 条视频（复采老视频，扩展桶里已有数据 → 本轮判「没有新数据」属正常）、关键词「钓鱼」1 条新视频 → **113 条评论、23s**，日志确认「防连播（开始前）：N 个视频 loop=true，已点掉「自动连播」开关」。安装副本已同步到 `desktop` / `web` 两个 profile（version=0.9.4、core.enc 同 hash），**需退出重开 DSH 生效**。
+**0.9.3 变更**（2026-11-07）：**风控节奏参数实测与收敛 —— 视频间随机停顿 + 关键词模式稳健二级回复档 + 搜索翻页放慢**。
+- 背景：用户要求「除 max 外，lanes / replies / replyLanes / replyGlobalGapMs / replyWarmupSec / replyThrottleSec / timeoutMs / clearBefore / verifyWaitSec / videoCount 都试一遍，找最优档位」。做了真机 benchmark（`D:\dycopy\_probe\risk-bench.mjs`，指标 = 面板「风控 N 次」差值、`phase=paused` 次数、撞验证次数、总条数、总耗时、每条视频是否 `phase=done`）。
+- **实测结论（2026-11-07，登录态正常、视频模式、综合排序、每条视频 max 不设限）**：
+  | 配置 | 关键词/视频 | 参数 | 条数 | 耗时 | 风控差值 | 完整性 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | A 默认 | citywalk / 2 条 | lanes=3，其余默认（二级回复 4 路/250ms/预热 10s/限流 120s） | 558 | 163s | 0 | ❌ 第 1 条（27s 视频、1.4 万评论目标）只采到 3490 条后中断，数据落进了下一条的桶 |
+  | B 很保守 | 露营 / 2 条 | lanes=1、replyLanes=2、gap 1200、warmup 60、throttle 600 | 2010 | 512s | 0 | ⚠ 2 条都在 120s 无新增后 stall，1 条判「没采全」 |
+  | C 中档 | 公园 / 2 条 | lanes=2、replyLanes=2、gap 800、warmup 30、throttle 300 | 1637 | 618s | 0 | ✅ 2 条都 phase=done |
+  | A2 复测 | citywalk / 2 条 | lanes=3，其余默认 | 553（新采 59+494） | 120s | 0 | ✅ 2 条都 phase=done（首条是 212s 视频） |
+- **解读**：这三组体量下**风控事件全部为 0**（面板计数没有增加、没有撞验证）——也就是说「放慢」在这些数据量上并没有换来控制风险，纯粹变慢；真正的差别是**二级回复爆发时的稳定性**（默认 4 路 + 250ms 全局间隔在大评论量视频上更容易被限流/中途换条），以及**搜索首条不稳定**（同一关键词两次跑，结果页第一条会变，实验要按实际采到的视频解读）。
+- 因此 0.9.3 落地的改动都很小、只针对「节奏」与「稳定性」：
+  1. **视频之间随机停顿 3~8s**（`collectDouyinKeyword` 循环里，第 2 条起；`phase=video-gap` 会推给前端），避免「上一条刚收工→下一条立刻打接口」的机器人节奏。
+  2. **关键词模式的二级回复参数默认改成 C 档**（`replyLanes=2`、`replyGlobalGapMs=800`、`replyWarmupSec=30`、`replyThrottleSec=300`）；显式传参会覆盖（单视频模式默认不变）。
+  3. **搜索翻页最小间隔 900ms → 1500ms**（`SEARCH_PAGE_GAP_MS`，另加 0~500ms 抖动）。
+- 参数建议（不改默认、按需传）：第一次跑某个关键词/大批量时用 `lanes=2`、`videoCount=3~5`、先 `replies=false` 跑一遍再开 `replies=true` 补采；`clearBefore` 保持 `false`（开清空会触发刷新页面自愈，浮层会丢）；`verifyWaitSec` 保持 ≥900；`max` 本次实验全程未动。
+- 已知遗留（**未修**）：搜索结果页浮层采集时，极少数情况下页面会自己滑到下一条视频（A 的第 1 条就是这样丢的；离线探针 `probe-loop2.mjs` 复现不出，怀疑与「等签名时扩展的合成 wheel / 面板开合」在特定页面状态下触发 swiper 有关）。目前采集器会**检测到换条并报「没有本轮新数据：页面已切换到别的视频…」**（不会把旧数据当新数据交给你），但那条视频的数据会留在错误 videoId 的桶里，重跑时计数会被污染。
+- **注意**：本轮改了 `src-core/collector.src.mjs`，已跑 `node build-encrypted.mjs` 重建 `core.enc`（sha256=`9b47d13f…`；`extension.enc` 未变，扩展仍 0.5.63，不需要 sync-extension）；自检 `verify-tool.mjs` **298/298**、`verify-encrypted.mjs` / `verify-merged.mjs`(28) / `verify-console.mjs` / `verify-client.mjs` 全过；真机 E2E（关键词「夕阳」+ 2 条视频 + 视频间停顿 4s）→ 110 条评论、64s、全程浮层采集。安装副本已同步到 `desktop` / `web` 两个 profile（version=0.9.3、core.enc 同 hash），**需退出重开 DSH 生效**。
+
+- 自检：`verify-tool.mjs` 新增 v0.9.3 一组断言（版本 0.9.3、视频间停顿、关键词二级回复默认档、搜索翻页 1500）；重新跑全量自检后仍全绿。
+
+**0.9.2 变更**（2026-11-07）：**关键词模式不再走深链 —— 在搜索结果页里点开卡片、在浮层里采，采完下滑下一条**。
+- 背景：0.9.0/0.9.1 对每条视频是 `page.goto('https://www.douyin.com/video/<id>')`。用户的实际操作是「搜出来 → 点开第一个 → 采集 → 往下滑就是第二条」，希望照着页面的自然路径来，不要一条条跳 `/video/<id>` 深链（也少一点「像脚本」的特征）。
+- 做法：新增 `openSearchOverlayVideo()`（`src-core/collector.src.mjs`，在 `pageTrappedByCaptcha` 之后）——采集每条视频前先确认当前浮层：
+  - 浮层已经是目标视频（`modal_id` 相同）→ 直接采；
+  - 浮层开着别的视频 → `page.mouse.wheel(0, 1000)` **下滑找目标**（用户说的「下滑下一条」就是这一步；实测下滑 1 次就到第二条）；
+  - 下滑没找到 → `Escape` 关浮层，若落到详情页就 `page.goBack()` 退回搜索页，然后在结果网格里按 `a[href*="/video/<id>"]`（图文用 `/note/`）找卡片；
+  - **点卡片先用页面内的 `a.click()`**：面板抽屉会挡住左边第一列卡片，Playwright 的 `force:true` 点击在被遮挡时**不报错但什么也没发生**（实测踩到的坑），脚本点击绕过命中测试、稳定能打开浮层；脚本点击没开才退回 Playwright 真实点击；
+  - 全部失败才兜底 `page.goto(fallbackUrl)`（正常路径不会走到）。
+- 两个配套修正：①浮层切换视频后，扩展可能还停在上一集的 `videoId`/`phase=paused` —— 采集器现在最多等 12s 让它认到目标 `videoId`，再最多等 15s 等它把状态复位成 `idle`（否则点「开始采集」等于「接着上一集采」，新视频的评论不进库）；②「开始前已有多少条」的 bucket 读取改成**优先用目标 awemeId**，不再用面板里可能过期的 `videoId`（否则会把上一集的计数当成这一集的起点，重复交付旧评论）。
+- 真机 E2E：关键词「夕阳」+ 综合排序 + 2 条视频 → **276 条评论、46s**，日志确认第 1 条是「脚本点击搜索结果卡片（绕开面板遮挡）→ 已点开目标视频浮层」，第 2 条是「下滑第 1 次就到了目标视频」，全程页面停在 `/jingxuan/search/<kw>?modal_id=…`，**没有访问 `/video/<id>`**。
+- 自检：`verify-tool.mjs` 新增 v0.9.2 一组断言（浮层点开函数、脚本点击优先、下滑找目标、`goBack` 退回、`overlayAwemeId` 透传、bucket 用目标 id）。
+- **注意**：本轮改了 `src-core/collector.src.mjs`，**已跑 `node build-encrypted.mjs` 重建 `core.enc`**（sha256=`0e566ab7…`；`extension.enc` 未变，扩展仍 0.5.63、**不需要 sync-extension**）；安装副本已同步到 `C:\Users\mo\.dsh\profiles\desktop` 与 `web` 两个 profile，**需退出重开 DSH 生效**。
+
+**0.9.1 变更**（2026-11-07）：**撞到人机验证不再直接失败 —— 暂停等你手动过验证，通过后自动继续采**。
+- 背景：抖音服务端风控会回 `x-vc-bdturing-parameters` / `bdturing-verify` 响应头，扩展识别成 `VERIFY_REQUIRED` 后立刻把状态置为 `paused`（不重试、不加重风控）。以前采集器看到 paused 就收工，使用者只能自己过完验证再手动重跑；现在多了一步「等人」。
+- **单视频模式**：轮询到 `paused` 且面板文案命中「要求完成验证 / 人机验证 / 安全验证 / 验证码 / VERIFY_REQUIRED」时，采集器进入等待流程 —— 每 2.5 秒轮询一次扩展状态和页面上的验证浮层（看 `#captcha_container`、`.captcha_verify_container`、`iframe[src*="/verify"]` 等，也看标题/正文里的「验证码中间页 / 请完成下列验证 / 拖动滑块完成拼图」）；确认浮层消失（连续两次看不到）且你已经在窗口里过完验证后，**自动点扩展面板上的「开始采集」断点续采**；又撞验证就回到等待。最多等 `verifyWaitSec`（默认 900 = 15 分钟，工具参数/插件设置都能改，0 = 不等）。
+- **关键词模式**：搜索阶段（首页搜索框被拦成「验证码中间页」、抓签名接口时被拦、翻页途中被拦）同样进入「等验证」；验证通过后自动重新打开首页搜索 / 继续等页面发请求 / 重试当前翻页，**不是整轮失败**。某条视频等到超时（`endedBy=verify-wait`）就停下后续视频、把窗口留给你，过完验证再调用一次会从断点续采（已采数据已落盘）。
+- **不改扩展**：等待完全是在采集器侧做（读扩展状态 + 点面板「开始采集」+ 看页面浮层），扩展仍然「只报 VERIFY_REQUIRED、不破解、不重试」。
+- 自检：`verify-tool.mjs` 新增 v0.9.1 一组断言（`DEFAULTS.verifyWaitSec`、等待/浮层检测/自动续采逻辑、关键词侧等待、`endedBy`、index.js 与 console.mjs 参数透传）。
+- **注意**：本轮改了 `src-core/collector.src.mjs`（+ `index.js` / `console.mjs`），**已跑 `node build-encrypted.mjs` 重建 `core.enc`**（sha256=`1b47c432…`；`extension.enc` 未变，扩展仍 0.5.63，**不需要 sync-extension**）；安装副本已同步到 `C:\Users\mo\.dsh\profiles\desktop` 与 `web` 两个 profile 的 `node_modules/dsh-douyin-comments`（version=0.9.1、core.enc 同 hash），**需退出重开 DSH 生效**（插件的 ESM 模块与工具 schema 都是进程启动时载入的，只 disable/enable 不够）。真机 E2E（关键词「咖啡」→ 1 条视频 46 条评论，25s）通过。
+
+**0.9.0 变更**（2026-11-07）：**按关键词搜索视频 → 采前 N 条视频的评论**（工具 `douyin_comments` 新增 `keyword` 模式，控制台同步支持）。
+- **用法**：`douyin_comments` 现在 `url` 与 `keyword` 二选一（都填走 keyword）。填 `keyword` 时先按关键词搜索视频，再对前 `videoCount` 条逐个跑原来的评论采集，最后合并成一份 CSV/JSON。新增参数：`keyword`、`videoCount`（1~100，默认 10；**每条视频的评论上限仍是 `max`，默认 80000 = 全部**）、`sortType`（综合排序 / 最新发布 / 最多点赞）、`publishTime`（不限 / 一天内 / 一周内 / 半年内）、`duration`（不限 / 1分钟以下 / 1-5分钟 / 5分钟以上）、`contentType`（不限 / 视频 / 图文）。关键词模式下 `timeoutMs` 的含义变成**整个任务的预算**（默认 4 小时，`keywordTimeoutMs`），单条视频仍按 `DEFAULTS.timeoutMs`（30 分钟）封顶。
+- **筛选值以服务端为准**（实测 2026-11-07 抖音网页版下发的 `global_doodle_config.filter_settings`）：`sort_type` 综合排序=0、**最新发布=2**、**最多点赞=1**；`publish_time` 不限=0、一天内=1、一周内=7、半年内=180；`filter_duration` 不限=""、1分钟以下=`0-1`、1-5分钟=`1-5`、5分钟以上=`5-10000`；搜索范围（没做 UI）`search_range` 不限=0、关注的人=3、最近看过=1、还未看过=2。
+- **「内容形式」网页版没有原生筛选项**：当前 PC 网页搜索只有上面 4 行「排序依据 / 发布时间 / 视频时长 / 搜索范围」，没有用户截图里的「内容形式（视频/图文）」。所以这里不是筛选参数，而是**两条搜索通道**：`视频` 走视频 tab 的 `/aweme/v1/web/search/item/`；`图文` 走综合 tab 的 `/aweme/v1/web/general/search/`，再把返回里 `aweme_type === 68` 的图文帖挑出来（`不限` 用视频 tab，不额外挑图文）。
+- **怎么做的不碰签名**：**先打开抖音首页**（`https://www.douyin.com/`），在首页搜索框里输入关键词回车 → 落到搜索结果页（图片/视频都落在 `/search/` 下）；视频模式再点一下「视频」tab，页面就会发出 `/aweme/v1/web/search/item/` 的**签名请求**。**不直接打开 `https://www.douyin.com/search/<kw>?type=video` 深链**——实测那样会被风控拦成「验证码中间页」（标题就是「验证码中间页」、页面正文为空、一个搜索请求都不发），而走首页搜索框是正常用户路径、不触发验证码。拿到页面自己发出的那条带 `a_bogus` 的 URL 后，在页面里 `fetch(credentials:'include')` **重放它**，只改 `offset` / `count` / `sort_type` / `publish_time` / `filter_duration`，并把 `is_filter_search` 置为 `1`（**不改就会完全不生效**，这是实测踩到的坑）。综合 tab 的响应是 `<十六进制长度> <JSON>` 的分块流，重放时把 path 从 `/general/search/stream/` 换成 `/general/search/single/` 就拿到普通 JSON。和评论翻页一样：**只复用页面给的签名，不计算、不逆向、不伪造**。
+- **采集阶段**：搜索那一步用 `keep:true` 保留浏览器窗口，接着对每条视频（视频页 `/video/<id>`、图文帖 `/note/<id>`）依次调用原采集流程，窗口复用不重开（每条结束不关窗口、下一条直接导航）；全部结束再关窗口（`need-login` / `keepOpen` 时保留）。需要登录态：搜索页未登录会弹「登录后即可搜索更多精彩视频」，登录闸门与原来一致（可用 shop-accounts 账号），`waitLoginSec` 内可扫码。
+- **产物**（都在输出目录，控制台「导出记录」可见）：
+  - `douyin-keyword-<关键词 slug>-<时间戳>.csv`：合并评论表，前 10 列是视频信息（`video_index, video_id, video_kind, video_title, video_url, video_author, video_digg_count, video_comment_count, video_duration_ms, video_publish`），后面 19 列与原评论 CSV 完全同序。
+  - `douyin-keyword-<关键词 slug>-<时间戳>.json`：`{keyword, filters, filterValues, videoCount, commentCount, collectedAt, durationSec, outDir, logPath, videos[每条 ok/collected/phase/note/error/csvPath/jsonPath], comments[带 text_clean 与视频归属]}`。
+  - `douyin-videos-<关键词 slug>-<时间戳>.csv`：视频清单（序号 / ID / 类型 / 标题 / 链接 / 作者 / 点赞 / 评论数 / 时长 / 发布时间 / 采集状态 / 条数 / 备注 / 分片 CSV / 分片 JSON）。
+  - 每条视频自己的 `douyin-comments-<id>-<时间戳>.csv/json` 仍然照旧落盘。
+- **控制台**：采集页视频链接下方新增「关键词搜索」输入，填了会展开两行筛选（视频条数 + 排序 / 发布时间 / 时长 / 内容形式），「总超时」标签变成「整个任务预算（分钟）」；结果区显示「关键词「…」：采了 N 条视频，共 M 条评论」+ 视频逐条摘要 + 「下载视频清单 CSV」；进度条按 `videoIndex / videoTotal` 走。
+- **图文帖支持**：内置扩展升到 0.5.63，`extractVideoId()` / `pageKey()` / `pageViewId()` 认 `/note/<id>`，`pageKind()` 把 `/note/` 当详情页（评论区常驻）。实测图文帖（如 4 图帖）评论能采，走的是同一个 `/aweme/v1/web/comment/list/`，但**比视频更容易撞风控停顿**（暂停后按原逻辑会等验证）。
+- 自检：`verify-tool.mjs` **277/277**（新增 13 项：搜索接口签名重放、搜首页搜索框进（不直开 `/search/` 深链）、筛选字典、`/note/` 与目标 URL、合并 CSV/视频清单、加载器透传、工具/控制台/前端入口、扩展 `/note/` 源+安装后、扩展版本）；`verify-encrypted.mjs`、`verify-merged.mjs`（28）、`verify-console.mjs`、`verify-client.mjs` 全过；`node --check` 全过；真机 E2E 两种通道都跑通（视频：关键词「咖啡」+最新发布+一周内+1-5分钟 → 2 条视频 202 条评论，34s；图文：关键词「咖啡」+综合排序 → 2 条图文帖 204 条评论，44s）。
+- **注意**：本轮改了 `src-core/` 和扩展源码（`../douyin-collector/content.js`），**已跑 `node sync-extension.mjs` + `node build-encrypted.mjs` 重建 `core.enc` / `extension.enc`**（core.enc sha256=`5d7f1e3c…`、extension.enc v0.5.63）；安装副本已同步到 `C:\Users\mo\.dsh\profiles\desktop` 与 `web` 两个 profile 的 `node_modules/dsh-douyin-comments`（version=0.9.0、core.enc 同 hash），**需退出重开 DSH 生效**。
 
 **0.8.6 变更**（2026-11-06）：**修「筛选框会变大变小」**——采集页「收藏客户」工具条在筛选时会跳动。
 - 原因：`#favCount` 计数胶囊原本放在工具条里、宽度随文字变（`4 位` → `2 / 4 位` 宽了约 17px），而工具条是 `flex-wrap: wrap`；总宽度一变就整行换行，搜索框的宽度随之在 181px / 242px 之间来回跳，工具条高度也在 32px / 66px 之间跳。

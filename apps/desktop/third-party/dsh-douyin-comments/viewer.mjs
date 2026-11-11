@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectorHome, lastOutDir } from "./console.mjs";
+import { EntitlementError, activate, entitlementEnabled, machineId, removeDevice, status as entitlementStatus, textOf } from "./entitlement.mjs";
 
 // v0.6.0：合并后不再作为独立 cordis 插件导出（没有 name/inject/apply），
 // 只有 index.js 会调用 registerViewer / createViewerHandler。
@@ -132,7 +133,8 @@ export function viewRoots() {
 function peekCount(file) {
   try {
     const head = readFileSync(file, { encoding: "utf8", flag: "r" }).slice(0, 8192);
-    const m = head.match(/"count"\s*:\s*(\d+)/);
+    // v0.9.6：关键词模式的合并 JSON 用的是 commentCount；单视频 JSON 用 count
+    const m = head.match(/"commentCount"\s*:\s*(\d+)/) || head.match(/"count"\s*:\s*(\d+)/);
     if (m) return Number(m[1]);
     const videoId = head.match(/"videoId"\s*:\s*"(\d+)"/);
     return videoId ? 0 : 0;
@@ -152,7 +154,8 @@ export function listExports() {
       continue;
     }
     for (const entry of names) {
-      if (!/^douyin-comments-.*\.json$/i.test(entry)) continue;
+      // v0.9.6：关键词模式的合并 JSON 也要能被分析台看到（否则「最新一份」只会是最后一条视频的分片）
+      if (!/^douyin-(?:comments|keyword|links)-.*\.json$/i.test(entry)) continue;
       const full = path.join(root, entry);
       let st;
       try {
@@ -161,13 +164,16 @@ export function listExports() {
         continue;
       }
       if (!st.isFile()) continue;
-      const head = readFileSync(full, { encoding: "utf8" }).slice(0, 4096);
+      const head = readFileSync(full, { encoding: "utf8" }).slice(0, 8192);
       const videoId = (head.match(/"videoId"\s*:\s*"(\d+)"/) || [])[1] || "";
-      const title = (head.match(/"title"\s*:\s*"([^"]{0,120})"/) || [])[1] || "";
+      const keyword = (head.match(/"keyword"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1] || "";
+      let title = (head.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1] || "";
+      if (keyword) title = "关键词「" + keyword + "」· 本次全部视频";
       files.push({
         name: entry,
         path: full,
         videoId,
+        keyword,
         title,
         count: peekCount(full),
         size: st.size,
@@ -258,6 +264,82 @@ function favoriteList(store) {
     (a, b) => (Number(b.savedAt) || 0) - (Number(a.savedAt) || 0),
   );
 }
+
+/* ===================== v0.9.10：给老收藏补头像 =====================
+ * 收藏记录只存 uid/昵称/属地（老数据没有头像）。这里扫最近的导出 JSON，
+ * 从评论里的 user.avatar_thumb/medium/larger 建「uid/secUid → 头像」索引，
+ * 给收藏里缺头像的记录补上并落盘（之后 Console 采集页 / 词云页都能显示）。
+ */
+function userAvatarUrl(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const pick = (o) => {
+    if (!o) return "";
+    if (typeof o === "string") return o;
+    const list = o.url_list || o.urlList;
+    if (Array.isArray(list) && list.length) return String(list[0] || "");
+    return String(o.url || o.uri || "");
+  };
+  return (
+    pick(src.avatar_thumb) || pick(src.avatar_medium) || pick(src.avatar_larger)
+    || String(src.avatar || src.avatarUrl || src.avatar_url || "")
+  ).trim().slice(0, 600);
+}
+
+let avatarIndexCache = { at: 0, index: new Map() };
+function avatarIndexFromExports(wanted) {
+  // v0.9.10：从最新往旧扫导出 JSON，凑齐所有缺头像的 uid 就提前停（最多 40 个文件）。
+  const now = Date.now();
+  if (avatarIndexCache.index.size && now - avatarIndexCache.at < 60_000 && (!wanted || wanted.size === 0)) return avatarIndexCache.index;
+  const index = new Map();
+  const files = listExports().slice(0, 40);
+  for (const f of files) {
+    try {
+      if (f.size && f.size > 80 * 1024 * 1024) continue;
+      const obj = JSON.parse(readFileSync(f.path, "utf8"));
+      const arr = Array.isArray(obj)
+        ? obj
+        : (obj && Array.isArray(obj.comments) ? obj.comments
+          : (obj && obj.data && Array.isArray(obj.data.comments) ? obj.data.comments : []));
+      for (const c of arr) {
+        const raw = c && c.user;
+        if (!raw) continue;
+        const url = userAvatarUrl(raw);
+        if (!url) continue;
+        const uid = raw.uid ? String(raw.uid) : "";
+        const sec = raw.sec_uid ? String(raw.sec_uid) : (raw.secUid ? String(raw.secUid) : "");
+        if (uid) index.set("u:" + uid, url);
+        if (sec) index.set("s:" + sec, url);
+      }
+    } catch { /* 跳过坏文件 */ }
+    if (wanted && wanted.size) {
+      const doneAll = Array.from(wanted).every((k) => index.has(k));
+      if (doneAll) break;
+    }
+  }
+  avatarIndexCache = { at: now, index };
+  return index;
+}
+
+export function enrichFavoriteAvatars(store) {
+  const users = Object.values((store && store.users) || {});
+  const missing = users.filter((u) => !u.avatar);
+  if (!missing.length) return 0;
+  // 要凑的 key：优先 uid，其次 secUid
+  const wanted = new Set();
+  for (const u of missing) {
+    if (u.uid) wanted.add("u:" + u.uid);
+    else if (u.secUid) wanted.add("s:" + u.secUid);
+  }
+  const index = avatarIndexFromExports(wanted);
+  let filled = 0;
+  for (const u of missing) {
+    const hit = (u.uid && index.get("u:" + u.uid)) || (u.secUid && index.get("s:" + u.secUid));
+    if (hit) { u.avatar = hit; filled++; }
+  }
+  if (filled) writeFavorites(store);
+  return filled;
+}
+
 
 function normalizeFavoriteUser(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
@@ -483,6 +565,102 @@ export function createViewerHandler(scopeCtx, rootCtx) {
 
         if (pathname === PREFIX || pathname === `${PREFIX}/`) return serveStatic(req, res, pathname);
 
+        if (pathname === `${PREFIX}/api/entitlement`) {
+          // v0.9.21：授权状态（NovaFlow 收费模式）。未启用时只回 enabled:false。
+          const readBody = () => new Promise((resolve) => {
+            let raw = "";
+            req.on("data", (chunk) => {
+              raw += chunk;
+              if (raw.length > 1_000_000) req.destroy();
+            });
+            req.on("end", () => {
+              let body = {};
+              try { body = JSON.parse(raw || "{}"); } catch { body = {}; }
+              resolve(body);
+            });
+            req.on("error", () => resolve({}));
+          });
+          const replyErr = (error) => {
+            const code = (error && error.code) || "SERVICE_UNAVAILABLE";
+            const http = { TOKEN_INVALID: 401, NOT_ACTIVATED: 402, EXPIRED: 402, DEVICE_LIMIT: 403, CODE_INVALID: 400, CODE_BOUND_OTHER: 409, CODE_REVOKED: 409, VERSION_RETIRED: 426, RATE_LIMITED: 429, NONCE_REPLAY: 409 }[code] || 503;
+            sendJson(res, http, { ok: false, code, error: textOf(code) });
+          };
+          (async () => {
+            try {
+              if (!entitlementEnabled()) {
+                sendJson(res, 200, { ok: true, enabled: false, activated: false, machineId: machineId() });
+                return;
+              }
+              const st = await entitlementStatus();
+              sendJson(res, 200, Object.assign({ ok: true, enabled: true, machineId: machineId() }, st));
+            } catch (error) {
+              replyErr(error);
+            }
+          })();
+          return;
+        }
+
+        if (pathname === `${PREFIX}/api/entitlement/activate`) {
+          if (req.method !== "POST") {
+            sendJson(res, 405, { ok: false, error: "只支持 POST" });
+            return;
+          }
+          let raw = "";
+          req.on("data", (chunk) => {
+            raw += chunk;
+            if (raw.length > 1_000_000) req.destroy();
+          });
+          req.on("end", () => {
+            let body = {};
+            try { body = JSON.parse(raw || "{}"); } catch {
+              sendJson(res, 400, { ok: false, code: "CODE_INVALID", error: "请求体不是合法 JSON" });
+              return;
+            }
+            (async () => {
+              try {
+                const code = String(body.code || "").trim();
+                if (!code) throw new EntitlementError("CODE_INVALID");
+                const r = await activate(code);
+                sendJson(res, 200, Object.assign({ ok: true, activated: true, enabled: true, machineId: machineId() }, r));
+              } catch (error) {
+                const errCode = (error && error.code) || "SERVICE_UNAVAILABLE";
+                const http = { TOKEN_INVALID: 401, NOT_ACTIVATED: 402, EXPIRED: 402, DEVICE_LIMIT: 403, CODE_INVALID: 400, CODE_BOUND_OTHER: 409, CODE_REVOKED: 409, VERSION_RETIRED: 426, RATE_LIMITED: 429 }[errCode] || 503;
+                sendJson(res, http, { ok: false, code: errCode, error: textOf(errCode) });
+              }
+            })();
+          });
+          return;
+        }
+
+        if (pathname === `${PREFIX}/api/entitlement/remove`) {
+          if (req.method !== "POST") {
+            sendJson(res, 405, { ok: false, error: "只支持 POST" });
+            return;
+          }
+          let raw = "";
+          req.on("data", (chunk) => {
+            raw += chunk;
+            if (raw.length > 1_000_000) req.destroy();
+          });
+          req.on("end", () => {
+            let body = {};
+            try { body = JSON.parse(raw || "{}"); } catch { body = {}; }
+            (async () => {
+              try {
+                const deviceId = String(body.deviceId || "").trim();
+                if (!deviceId) throw new EntitlementError("BAD_REQUEST");
+                await removeDevice(deviceId);
+                const st = await entitlementStatus();
+                sendJson(res, 200, Object.assign({ ok: true, enabled: true, machineId: machineId() }, st));
+              } catch (error) {
+                const errCode = (error && error.code) || "SERVICE_UNAVAILABLE";
+                sendJson(res, 400, { ok: false, code: errCode, error: textOf(errCode) });
+              }
+            })();
+          });
+          return;
+        }
+
         if (pathname === `${PREFIX}/api/roots`) {
           sendJson(res, 200, { ok: true, roots: viewRoots() });
           return;
@@ -535,6 +713,7 @@ export function createViewerHandler(scopeCtx, rootCtx) {
           // v0.7.0：收藏用户（目标客户）。GET 列表 / POST 新增或更新（upsert）。
           if (req.method === "GET") {
             const store = readFavorites();
+            enrichFavoriteAvatars(store);
             const uid = String(url.searchParams.get("uid") || "").trim();
             if (uid) {
               sendJson(res, 200, {
@@ -551,6 +730,7 @@ export function createViewerHandler(scopeCtx, rootCtx) {
           readJsonBody(req, 2_000_000, ({ error, body }) => {
             if (error) return sendJson(res, 400, { ok: false, error });
             const store = readFavorites();
+            enrichFavoriteAvatars(store);
             const inputs = Array.isArray(body.users) ? body.users : Array.isArray(body.favorites) ? body.favorites : [body.user || body];
             const saved = [];
             const failed = [];
@@ -559,7 +739,7 @@ export function createViewerHandler(scopeCtx, rootCtx) {
               if (result.error) failed.push({ user: input && input.uid, error: result.error });
               else saved.push(result.user);
             }
-            if (saved.length) writeFavorites(store);
+            if (saved.length) { enrichFavoriteAvatars(store); writeFavorites(store); }
             sendJson(res, 200, { ok: saved.length > 0, saved, failed, favorites: favoriteList(store), file: favoritesFile() });
           });
           return;
@@ -620,7 +800,7 @@ export function createViewerHandler(scopeCtx, rootCtx) {
             for (const target of targets) {
               const abs = path.resolve(String(target || ""));
               const allowed = roots.some((root) => abs === root || abs.startsWith(root + path.sep));
-              const looksLikeExport = /^douyin-comments-.*\.(json|csv)$/i.test(path.basename(abs));
+              const looksLikeExport = /^douyin-(?:comments|keyword|links)-.*\.(json|csv)$/i.test(path.basename(abs));
               if (!allowed || !looksLikeExport) {
                 failed.push({ path: String(target || ""), error: "不允许删除该路径" });
                 continue;

@@ -11,6 +11,14 @@ const selection: RelaySelection = {
 }
 const access: RelayAccess = { accessToken: 'test-only-token', deviceSessionId: 'test-device', group: 'discount' }
 const ORIGIN = 'https://api.novaflow.com'
+/** @returns the request URL of one recorded fetch call. */
+function requestUrl(call: unknown[]): string {
+  const input = call[0]
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  if (input instanceof Request) return input.url
+  return ''
+}
 const premium: GroupSelection = { group: 'premium', autoGroups: null, crossGroupRetry: false }
 
 function fixture(response = new Response('data: {"delta":"ok"}\n\ndata: [DONE]\n\n', {
@@ -451,12 +459,18 @@ describe('NovaFlow native account-to-relay composition', () => {
       await vi.waitFor(() => { expect(runtime.getSnapshot().walletStatus).toBe('ready') })
       const before = runtime.getSnapshot()
       const release = Promise.withResolvers<Response>()
+      const normal = fetch.getMockImplementation()!
       fetch.mockClear()
-      fetch.mockReturnValueOnce(release.promise)
+      let delayed = true
+      fetch.mockImplementation((input, init) => {
+        const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        if (path.endsWith('/balance') && delayed) { delayed = false; return release.promise }
+        return normal(input, init)
+      })
       const first = runtime.refreshWallet()
       const second = runtime.refreshWallet()
       await vi.waitFor(() => { expect(runtime.getSnapshot().walletStatus).toBe('loading') })
-      expect(fetch).toHaveBeenCalledOnce()
+      expect(fetch.mock.calls.filter(call => requestUrl(call).endsWith('/balance'))).toHaveLength(1)
       expect(runtime.getSnapshot().wallet).toEqual(before.wallet)
       expect(runtime.getSnapshot().walletUpdatedAt).toBe(before.walletUpdatedAt)
       clock.now += 1000
@@ -464,7 +478,12 @@ describe('NovaFlow native account-to-relay composition', () => {
       await Promise.all([first, second])
       expect(runtime.getSnapshot()).toMatchObject({ walletStatus: 'failed', walletError: 'network_error', walletUpdatedAt: before.walletUpdatedAt })
       expect(runtime.getSnapshot().wallet).toEqual(before.wallet)
-      fetch.mockResolvedValueOnce(Response.json({ quota_remaining: '9', quota_used: '8', unit: 'quota', quota_used_kind: 'account_usage_total', device_quota_used: '7', device_quota_limit: null }))
+      const nextBalance = Response.json({ quota_remaining: '9', quota_used: '8', unit: 'quota', quota_used_kind: 'account_usage_total', device_quota_used: '7', device_quota_limit: null })
+      fetch.mockImplementation((input, init) => {
+        const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        if (path.endsWith('/balance')) return Promise.resolve(nextBalance)
+        return normal(input, init)
+      })
       await runtime.refreshWallet()
       expect(runtime.getSnapshot()).toMatchObject({ walletStatus: 'ready', walletUpdatedAt: clock.now, wallet: { remaining: '9' } })
       expect(runtime.getSnapshot().walletError).toBeUndefined()
@@ -504,7 +523,8 @@ describe('NovaFlow native account-to-relay composition', () => {
       fetch.mockClear()
       fetch.mockResolvedValue(new Response(null, { status }))
       await runtime.refreshWallet()
-      expect(fetch).toHaveBeenCalledTimes(status === 401 ? 2 : 1)
+      // One settings read plus the balance attempt (and its retry after a 401).
+      expect(fetch).toHaveBeenCalledTimes(status === 401 ? 3 : 2)
       expect(transport.refresh).toHaveBeenCalledTimes(status === 401 ? 2 : 1)
       expect(runtime.getSnapshot()).toMatchObject({ account: { status: 'signed-in' }, walletStatus: 'failed', walletError: status === 401 ? 'session_expired' : 'wallet_unavailable' })
     } finally { await runtime.dispose() }
@@ -539,7 +559,13 @@ describe('NovaFlow native account-to-relay composition', () => {
       await runtime.restore()
       await vi.waitFor(() => { expect(runtime.getSnapshot().walletStatus).toBe('ready') })
       const wallet = Promise.withResolvers<Response>()
-      fetch.mockReturnValueOnce(wallet.promise)
+      const normalBalance = fetch.getMockImplementation()!
+      let delayed = true
+      fetch.mockImplementation((input, init) => {
+        const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        if (path.endsWith('/balance') && delayed) { delayed = false; return wallet.promise }
+        return normalBalance(input, init)
+      })
       const reading = runtime.refreshWallet()
       await vi.waitFor(() => { expect(runtime.getSnapshot().walletStatus).toBe('loading') })
       const refreshed = Promise.withResolvers<typeof grant>()
@@ -584,12 +610,20 @@ describe('NovaFlow native account-to-relay composition', () => {
       await runtime.restore()
       await vi.waitFor(() => { expect(runtime.getSnapshot().walletStatus).toBe('ready') })
       fetch.mockClear()
-      fetch.mockResolvedValueOnce(Response.json({ quota_remaining: '900', quota_used: '7036', unit: 'quota', quota_used_kind: 'account_usage_total', device_quota_used: '7012', device_quota_limit: '10000' }))
+      const normalBalanceRead = fetch.getMockImplementation()!
+      const balanceResponses: Response[] = [
+        Response.json({ quota_remaining: '900', quota_used: '7036', unit: 'quota', quota_used_kind: 'account_usage_total', device_quota_used: '7012', device_quota_limit: '10000' }),
+      ]
+      fetch.mockImplementation((input, init) => {
+        const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        if (path.endsWith('/balance')) return Promise.resolve(balanceResponses.shift() ?? new Response('unavailable', { status: 503 }))
+        return normalBalanceRead(input, init)
+      })
       await runtime.refreshWallet()
-      expect(fetch).toHaveBeenCalledOnce()
-      expect(fetch.mock.calls[0]?.[0]).toMatch(/\/balance$/u)
+      // The wallet refresh also re-reads the site's display settings.
+      expect(fetch.mock.calls.map(call => requestUrl(call)))
+        .toEqual(expect.arrayContaining([expect.stringMatching(/\/balance$/u), expect.stringMatching(/\/api\/status$/u)]))
       expect(runtime.getSnapshot()).toMatchObject({ catalogStatus: 'ready', walletStatus: 'ready', wallet: { remaining: '900', accountUsage: '7036', deviceUsage: '7012', deviceLimit: '10000' } })
-      fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
       await runtime.refreshWallet()
       expect(runtime.getSnapshot().wallet).toMatchObject({ remaining: '900', deviceUsage: '7012' })
     } finally { await runtime.dispose() }

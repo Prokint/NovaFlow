@@ -62,10 +62,14 @@ function exchange(relay: NovaFlowLoopbackRelay, options: {
     })
     req.on('socket', own)
     req.on('error', reject)
+    const method = options.method ?? 'POST'
+    const bodyless = options.chunks === undefined && options.body === undefined
+      && (method === 'GET' || method === 'HEAD' || method === 'DELETE')
     if (options.chunks !== undefined) {
       for (const chunk of options.chunks) req.write(chunk)
       req.end()
-    } else req.end(options.body ?? JSON.stringify(payload))
+    } else if (bodyless) req.end()
+    else req.end(options.body ?? JSON.stringify(payload))
   })
 }
 
@@ -508,4 +512,85 @@ it.each([
     expect(JSON.stringify(chunks)).not.toContain(relay.localCapability)
     expect(prepared.retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 0 })
   } finally { await ctx.fiber.dispose() }
+})
+
+describe('NovaFlow collect subscription relay', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  async function collectFixture(options: {
+    origin?: string
+    access?: () => Promise<string>
+    response?: Response | Error
+  } = {}) {
+    const origin = options.origin ?? 'https://collect.example.test'
+    const access = options.access ?? (() => Promise.resolve('fixture-account-bearer'))
+    const fetchMock = vi.fn(async (_target: string | URL | Request, _init?: RequestInit) => {
+      if (options.response instanceof Error) throw options.response
+      return options.response ?? Response.json({ ok: true, activated: false }, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const f = await fixture({ collect: { origin: () => origin, access } })
+    return { ...f, fetchMock, origin }
+  }
+
+  function collectHeaders(relay: NovaFlowLoopbackRelay, extra: OutgoingHttpHeaders = {}): OutgoingHttpHeaders {
+    return { 'x-novaflow-capability': relay.localCapability, ...extra }
+  }
+
+  it('requires the local capability and rejects browser requests', async () => {
+    const { relay } = await collectFixture()
+    expect((await exchange(relay, { path: '/novaflow/collect/v1/status', method: 'GET', headers: collectHeaders(relay) })).status).toBe(200)
+    expect((await exchange(relay, { path: '/novaflow/collect/v1/status', method: 'GET', headers: { authorization: `Bearer ${relay.localCapability}` } })).status).toBe(401)
+    expect((await exchange(relay, { path: '/novaflow/collect/v1/status', method: 'GET', headers: collectHeaders(relay, { origin: 'https://browser.example' }) })).status).toBe(403)
+    expect((await exchange(relay, { path: '/novaflow/collect/v1/status', method: 'DELETE', headers: collectHeaders(relay) })).status).toBe(405)
+  })
+
+  it('forwards only the /v1 suffix with the account bearer and mirrors the upstream response', async () => {
+    const response = Response.json({ ok: true, activated: true, remainingDays: 30 }, {
+      status: 200, headers: { 'content-type': 'application/json', 'x-upstream-secret': 'do-not-forward' },
+    })
+    const { relay, fetchMock, origin } = await collectFixture({ response })
+    const result = await exchange(relay, {
+      path: '/novaflow/collect/v1/status?beta=true', method: 'GET',
+      headers: collectHeaders(relay, { 'x-forward-me': 'no' }),
+    })
+    expect(result.status).toBe(200)
+    expect(result.body).toContain('"remainingDays":30')
+    expect(result.headers['x-upstream-secret']).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [target, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(target).toBe(`${origin}/v1/status?beta=true`)
+    expect(init.method).toBe('GET')
+    expect(init.headers).toEqual({ authorization: 'Bearer fixture-account-bearer' })
+    expect(init.body).toBeUndefined()
+  })
+
+  it('forwards JSON POST bodies and rejects unknown suffixes or non-JSON bodies', async () => {
+    const { relay, fetchMock, origin } = await collectFixture()
+    const activated = await exchange(relay, {
+      path: '/novaflow/collect/v1/activate', method: 'POST',
+      headers: collectHeaders(relay), body: JSON.stringify({ code: 'NOVA-DY-AAAA-BBBB', machineId: 'mid_fixture' }),
+    })
+    expect(activated.status).toBe(200)
+    const [target, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(target).toBe(`${origin}/v1/activate`)
+    expect(init.method).toBe('POST')
+    expect(init.headers).toEqual({ authorization: 'Bearer fixture-account-bearer', 'content-type': 'application/json' })
+    expect(init.body).toBe(JSON.stringify({ code: 'NOVA-DY-AAAA-BBBB', machineId: 'mid_fixture' }))
+    expect((await exchange(relay, { path: '/novaflow/collect/anything', method: 'GET', headers: collectHeaders(relay) })).status).toBe(404)
+    const plain = await exchange(relay, {
+      path: '/novaflow/collect/v1/activate', method: 'POST',
+      headers: collectHeaders(relay, { 'content-type': 'text/plain' }), body: 'code',
+    })
+    expect(plain.status).toBe(415)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an unavailable account or upstream as a service error', async () => {
+    const failingAccess = await collectFixture({ access: () => Promise.reject(new Error('no account')) })
+    expect((await exchange(failingAccess.relay, { path: '/novaflow/collect/v1/status', method: 'GET', headers: collectHeaders(failingAccess.relay) })).status).toBe(503)
+    expect(failingAccess.fetchMock).not.toHaveBeenCalled()
+    const failingFetch = await collectFixture({ response: new TypeError('connect ECONNREFUSED') })
+    expect((await exchange(failingFetch.relay, { path: '/novaflow/collect/v1/status', method: 'GET', headers: collectHeaders(failingFetch.relay) })).status).toBe(503)
+  })
 })

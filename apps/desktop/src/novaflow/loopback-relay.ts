@@ -9,6 +9,16 @@ import type { DesktopEndpoint } from './catalog.ts'
 import type { NovaFlowDesktopRuntime } from './runtime.ts'
 
 /** Explicit native limits; the runtime is never exposed through renderer IPC. */
+export interface NovaFlowCollectRelayOptions {
+  /** Collect service base URL, without a trailing slash or path suffix. */
+  readonly origin: () => string
+  /** Current authenticated account bearer, read from the native broker for each forwarded request. */
+  readonly access: () => Promise<string>
+  /** Local path prefix the Host calls; defaults to `/novaflow/collect`. */
+  readonly pathPrefix?: string
+}
+
+/** Explicit native limits; the runtime is never exposed through renderer IPC. */
 export interface NovaFlowLoopbackRelayOptions {
   readonly runtime: Pick<NovaFlowDesktopRuntime, 'invoke' | 'getRelayRevision'>
   readonly maxRequestBytes: number
@@ -19,6 +29,8 @@ export interface NovaFlowLoopbackRelayOptions {
   readonly admit?: () => boolean
   /** Notified once per rejected quota failure so the shell can offer a top-up without reading the stream. */
   readonly onAccountQuotaExhausted?: () => void
+  /** When present, also forwards collect-service requests carrying the account token. */
+  readonly collect?: NovaFlowCollectRelayOptions
 }
 
 /** Transfer only through trusted subprocess IPC; neither field belongs in renderer state or logs. */
@@ -100,6 +112,15 @@ async function relayFailure(
   response.writeHead(quota ? 402 : upstream.status, headers)
   response.end(text)
   await finished(response, { cleanup: true })
+}
+
+/** Local path the Host uses for collect-service forwarding; the entitlement module appends `/v1/*`. */
+const COLLECT_PATH_PREFIX = '/novaflow/collect'
+
+/** @returns whether the request target addresses the collect-service relay. */
+function isCollectPath(url: string | undefined, prefix: string): boolean {
+  return url !== undefined && (url === prefix || url.startsWith(`${prefix}/`))
+
 }
 
 function headerCount(request: IncomingMessage, name: string): number {
@@ -236,6 +257,82 @@ async function streamResponse(upstream: Response, response: ServerResponse, sign
   }
 }
 
+/** Constant-time capability check for collect forwarding; the Host never reuses the model Authorization header. */
+function authorizeCollect(request: IncomingMessage, host: string, localCapability: string): void {
+  if (headerCount(request, 'origin') !== 0 || request.method === 'OPTIONS') {
+    throw new LocalRequestError(403, 'browser_requests_forbidden')
+  }
+  if (headerCount(request, 'host') !== 1 || request.headers.host !== host) {
+    throw new LocalRequestError(403, 'invalid_host')
+  }
+  const capability = request.headers['x-novaflow-capability']
+  const supplied = Buffer.from(typeof capability === 'string' ? capability : '', 'utf8')
+  const expected = Buffer.from(localCapability, 'utf8')
+  if (headerCount(request, 'x-novaflow-capability') !== 1 || typeof capability !== 'string'
+    || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    throw new LocalRequestError(401, 'unauthorized')
+  }
+  if (request.method !== 'GET' && request.method !== 'POST') throw new LocalRequestError(405, 'method_not_allowed')
+}
+
+/**
+ * Forward one collect-service request to the configured origin with the account's access token.
+ * The caller chooses only a `/v1/*` suffix; credentials, headers, and cookies are never forwarded.
+ * @param request - admitted Host request bound for the collect service.
+ * @param response - local response carrying the collect service's status and body.
+ * @param controller - per-request abort source tied to the local connection.
+ * @param collect - origin and token provider supplied by the desktop shell.
+ * @param host - exact loopback host the listener advertises.
+ * @param localCapability - minted capability required from the Host.
+ */
+async function serveCollect(
+  request: IncomingMessage, response: ServerResponse, controller: AbortController,
+  collect: NovaFlowCollectRelayOptions, host: string, localCapability: string,
+): Promise<void> {
+  authorizeCollect(request, host, localCapability)
+  const prefix = collect.pathPrefix ?? COLLECT_PATH_PREFIX
+  const rawURL = request.url ?? ''
+  const suffix = rawURL.slice(prefix.length)
+  if (!suffix.startsWith('/v1/')) throw new LocalRequestError(404, 'unknown_endpoint')
+  let payload: unknown
+  if (request.method === 'POST') {
+    if (headerCount(request, 'content-type') !== 1
+      || !/^application\/json(?:\s*;\s*charset=(?:utf-8|"utf-8"))?$/iu.test(request.headers['content-type'] ?? '')
+      || headerCount(request, 'content-encoding') !== 0) {
+      throw new LocalRequestError(415, 'json_required')
+    }
+    payload = await readJSON(request, 1 * 1024 * 1024, 60_000, controller.signal)
+  }
+  let accessToken: string
+  try {
+    accessToken = await collect.access()
+  } catch (_accessError) {
+    throw new LocalRequestError(503, 'account_unavailable')
+  }
+  const target = `${collect.origin().replace(/\/+$/u, '')}${suffix}`
+  const timeout = AbortSignal.timeout(Math.min(60_000, 2_147_483_647))
+  const post = request.method === 'POST'
+  const init: RequestInit = {
+    method: post ? 'POST' : 'GET',
+    headers: { authorization: `Bearer ${accessToken}`, ...post ? { 'content-type': 'application/json' } : {} },
+    signal: AbortSignal.any([controller.signal, timeout]),
+  }
+  if (post) init.body = JSON.stringify(payload)
+  let upstream: Response
+  try {
+    upstream = await fetch(target, init)
+  } catch (_fetchError) {
+    throw new LocalRequestError(503, 'collect_unavailable')
+  }
+  const headers: Record<string, string> = {
+    'content-type': upstream.headers.get('content-type') ?? 'application/json',
+    'cache-control': 'no-store', 'x-content-type-options': 'nosniff', connection: 'close',
+  }
+  const text = await upstream.text()
+  response.writeHead(upstream.status, headers)
+  response.end(text)
+}
+
 /**
  * Bind a fresh IPv4 loopback listener and mint a 256-bit capability used only by the trusted Host.
  * Each request requires local capability authentication (Bearer, or Anthropic x-api-key) and its prepared positive x-novaflow-revision.
@@ -279,6 +376,10 @@ export async function startNovaFlowLoopbackRelay(options: NovaFlowLoopbackRelayO
     try {
       if (closing) throw new LocalRequestError(503, 'relay_closed')
       if (options.admit?.() === false) throw new LocalRequestError(503, 'account_unavailable')
+      if (options.collect !== undefined && isCollectPath(request.url, options.collect.pathPrefix ?? COLLECT_PATH_PREFIX)) {
+        await serveCollect(request, response, controller, options.collect, host, localCapability)
+        return
+      }
       const endpoint = authorize(request, host, authorization)
       const revision = revisionFor(request)
       if (revision !== options.runtime.getRelayRevision()) throw new LocalRequestError(409, 'stale_relay_revision')

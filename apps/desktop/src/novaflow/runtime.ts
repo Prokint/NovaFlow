@@ -96,6 +96,14 @@ export class NovaFlowDesktopRuntime {
   /** @returns the account/catalog admission revision for the private Host relay. */
   getRelayRevision(): number { return this.generation }
 
+  /**
+   * Read the current account bearer for the main-process collect relay only.
+   * @returns the native access token; callers must never forward it to a renderer or log it.
+   */
+  async getCollectAccessToken(): Promise<string> {
+    return (await this.account.getRequestCredentials()).accessToken
+  }
+
   /** @returns a fresh safe projection suitable for owned-window IPC. */
   getSnapshot(): NovaFlowDesktopSnapshot {
     const catalog = this.catalog.getSnapshot()
@@ -323,8 +331,9 @@ export class NovaFlowDesktopRuntime {
 
   private async readWallet(generation: number, signal: AbortSignal): Promise<void> {
     // Re-read the site's display settings with every balance refresh: an operator can switch the
-    // currency or unit while a user stays signed in, and the wallet must follow that change.
-    const display = this.readQuotaDisplay(generation, signal)
+    // currency or unit while a user stays signed in, and the wallet must follow that change. The
+    // settings read publishes on its own, so a slow status endpoint never delays the balance.
+    void this.readQuotaDisplay(generation, signal)
     try {
       let access = await this.account.getRequestCredentials()
       let wallet: NovaFlowWalletQuota
@@ -349,8 +358,6 @@ export class NovaFlowDesktopRuntime {
         this.publish()
       }
     }
-    await display
-    if (generation === this.generation && !signal.aborted) this.publish()
   }
 
   /**

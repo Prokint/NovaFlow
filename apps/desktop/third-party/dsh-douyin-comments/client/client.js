@@ -387,7 +387,25 @@ window.__ModuleLoader__.load({
       return pair[0];
     }
 
-    /** v0.8.1：面板顶部子页 tab —— 下划线式（激活 = 2px 琥珀线 + ink 文字），不再用色块 */
+    /** v0.9.21：NovaFlow 收费模式下的授权状态（未启用 = 独立运行模式，保持旧行为：两个 tab 都在）。 */
+    function useEntitlement() {
+      var pair = React.useState(null);
+      var setState = pair[1];
+      React.useEffect(function () {
+        var stopped = false;
+        function poll() {
+          fetch(VIEWER_PATH + '/api/entitlement', { cache: 'no-store' }).then(function (r) {
+            return r.ok ? r.json() : null;
+          }).then(function (d) { if (!stopped && d) setState(d); }).catch(function () { /* 拿不到就按未启用 */ });
+        }
+        poll();
+        var timer = setInterval(poll, 60000);
+        return function () { stopped = true; clearInterval(timer); };
+      }, []);
+      return pair[0];
+    }
+
+
     function panelTabStyle(active, p) {
       return {
         appearance: 'none',
@@ -406,14 +424,53 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** 合并后的唯一面板：顶部「采集 / 评论词云」两个 tab，下面两个 iframe 交替显示。 */
+    /** 合并后的唯一面板：顶部「采集 / 评论词云」两个 tab，下面两个 iframe 交替显示。
+     *  v0.9.21：NovaFlow 收费模式下（授权服务已启用）采集只能由 AI 工具触发，面板隐藏「采集」tab，
+     *  只留评论词云，顶部显示订阅状态。*/
     function DouyinPanel() {
       var mode = usePanelMode();
       var theme = useDshTheme();
       var p = dshPalette(theme);
+      var ent = useEntitlement();
+      var licenseOn = ent && ent.enabled === true;
+      React.useEffect(function () {
+        if (licenseOn && panelMode === 'console') setPanelMode('viewer');
+      }, [licenseOn]);
       var paneStyle = function (active) {
         return { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, display: active ? 'block' : 'none' };
       };
+      var tabs = [];
+      if (!licenseOn) {
+        tabs.push(h('button', {
+          key: 'console',
+          type: 'button',
+          onClick: function () { setPanelMode('console'); },
+          style: panelTabStyle(mode === 'console', p),
+        }, '采集'));
+      }
+      tabs.push(h('button', {
+        key: 'viewer',
+        type: 'button',
+        onClick: function () { setPanelMode('viewer'); },
+        style: panelTabStyle(mode === 'viewer', p),
+      }, '评论词云'));
+      if (licenseOn) {
+        var subText = ent.activated === true
+          ? ('订阅有效' + (ent.remainingDays > 0 ? ' · 剩 ' + ent.remainingDays + ' 天' : ''))
+          : '未激活';
+        tabs.push(h('span', {
+          key: 'license',
+          style: {
+            marginLeft: 'auto',
+            alignSelf: 'center',
+            fontSize: '12px',
+            color: ent.activated === true ? p.muted : p.accent,
+            fontWeight: 500,
+            padding: '0 2px 0 10px',
+            whiteSpace: 'nowrap',
+          },
+        }, subText));
+      }
       return h('div', {
         style: {
           display: 'flex',
@@ -435,23 +492,10 @@ window.__ModuleLoader__.load({
             background: p.surface,
             borderBottom: '1px solid ' + p.line,
           },
-        }, [
-          h('button', {
-            key: 'console',
-            type: 'button',
-            onClick: function () { setPanelMode('console'); },
-            style: panelTabStyle(mode === 'console', p),
-          }, '采集'),
-          h('button', {
-            key: 'viewer',
-            type: 'button',
-            onClick: function () { setPanelMode('viewer'); },
-            style: panelTabStyle(mode === 'viewer', p),
-          }, '评论词云'),
-        ]),
+        }, tabs),
         h('div', { key: 'body', style: { position: 'relative', flex: 1, minHeight: 0, background: p.bg } }, [
-          h('div', { key: 'console-pane', style: paneStyle(mode === 'console') }, h(ConsolePage, { key: 'console' })),
-          h('div', { key: 'viewer-pane', style: paneStyle(mode === 'viewer') }, h(ViewerPage, { key: 'viewer' })),
+          h('div', { key: 'console-pane', style: paneStyle(mode === 'console' && !licenseOn) }, h(ConsolePage, { key: 'console' })),
+          h('div', { key: 'viewer-pane', style: paneStyle(mode === 'viewer' || licenseOn) }, h(ViewerPage, { key: 'viewer' })),
         ]),
       ]);
     }
