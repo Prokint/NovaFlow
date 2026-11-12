@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it, onTestFinished } from 'vitest'
@@ -130,6 +130,26 @@ it('applies built-in defaults and drops the legacy standalone viewer when the me
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
     '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer',
   ])
+})
+
+it('removes pre-entitlement profile copies so the shipped bundle cannot be shadowed', () => {
+  const root = fixture()
+  const profile = join(root, 'profile')
+  const writeBundle = (name: string, version: string): void => {
+    mkdirSync(join(profile, 'node_modules', name), { recursive: true })
+    writeFileSync(join(profile, 'node_modules', name, 'package.json'), JSON.stringify({ name, version }))
+  }
+  writeBundle('dsh-douyin-comments', '0.7.0')
+  writeBundle('dsh-comment-viewer', '0.2.16')
+  writeBundle('dsh-skill-explorer', '0.1.2')
+  writeFileSync(join(profile, 'package.json'), JSON.stringify({ name: 'profile', dsh: { profile: { bundles: [] } } }))
+  migrateNovaFlowBundledPlugins(profile)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(false)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-comment-viewer'))).toBe(true)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-skill-explorer'))).toBe(true)
+  writeBundle('dsh-douyin-comments', '0.9.22')
+  migrateNovaFlowBundledPlugins(profile)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(true)
 })
 
 it('leaves older runtimes unchanged and rejects an invalid shipped catalog or changed pinned source', () => {

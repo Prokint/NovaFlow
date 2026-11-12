@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { initProfile } from '@deepseek-ai/dsh-app-boot'
 import { PROFILE_TEMPLATES } from '@deepseek-ai/dsh-official-bundles'
-import { migrateNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
+import { enforceShippedPluginBundleVersions, migrateNovaFlowBundledPlugins } from './novaflow/bundled-plugins.ts'
 import type { NovaFlowDesktopSnapshot } from './novaflow/runtime.ts'
 
 /** Authenticated identity, never a username, group, or credential. */
@@ -172,6 +172,7 @@ export class DesktopAccountScopes {
           recursive: true, dereference: false, verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE,
         })
       }
+      enforceShippedPluginBundleVersions(profile)
       await writeFile(join(temporary, 'desktop-account.patch.json'), JSON.stringify([{ id: 'workspace-controller', config: {
         documentsDirectory: join(this.options.documents, 'NovaFlow', 'accounts'), productDirectory: scope.key,
       } }]) + '\n', { mode: 0o600 })

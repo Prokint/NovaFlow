@@ -1,5 +1,5 @@
 /** Third-party bundles shipped in NovaFlow, independently switchable in each profile. */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** Built-in bundles enabled for every account, without a plugin-page switch. */
@@ -23,16 +23,59 @@ export const NOVAFLOW_BUNDLED_PLUGINS_FILE = 'novaflow-plugins.json'
 /** Old standalone viewer bundle replaced by the merged viewer inside dsh-douyin-comments. */
 const LEGACY_VIEWER_BUNDLE = 'dsh-comment-viewer'
 
+
+/** Compare dotted numeric versions; prerelease suffixes sort before the matching release. */
+function compareVersions(left: string, right: string): number | undefined {
+  const parse = (text: string): { parts: number[]; prerelease: boolean } | undefined => {
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/u.exec(text)
+    return match === null ? undefined : { parts: [Number(match[1]), Number(match[2]), Number(match[3])], prerelease: text.includes('-') }
+  }
+  const a = parse(left)
+  const b = parse(right)
+  if (a === undefined || b === undefined) return undefined
+  for (let index = 0; index < 3; index++) {
+    const difference = (a.parts[index] ?? 0) - (b.parts[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  if (a.prerelease === b.prerelease) return 0
+  return a.prerelease ? -1 : 1
+}
+
+/**
+ * Remove user-installed copies of shipped bundles older than the bundled release. A profile-level
+ * install shadows the runtime copy, so a pre-entitlement Douyin plugin would bypass the
+ * subscription gate that the shipped build enforces.
+ * @param profileDirectory - Profile whose `node_modules` may shadow a shipped bundle.
+ */
+export function enforceShippedPluginBundleVersions(profileDirectory: string): void {
+  for (const plugin of [...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+    const directory = join(profileDirectory, 'node_modules', plugin.name)
+    const manifest = join(directory, 'package.json')
+    if (!existsSync(manifest)) continue
+    let installed = ''
+    try {
+      const value: unknown = JSON.parse(readFileSync(manifest, 'utf8'))
+      if (typeof value === 'object' && value !== null && 'version' in value && typeof value.version === 'string') installed = value.version
+    } catch {
+      continue
+    }
+    if ((compareVersions(installed, plugin.version) ?? 0) < 0) rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 /** Bundle that contains the merged collector and viewer. */
 const MERGED_DOUYIN_BUNDLE = 'dsh-douyin-comments'
 
 /**
  * Bring an existing profile onto the current shipped defaults: built-in bundles are always
- * enabled, while a merged Douyin bundle removes the redundant standalone viewer. The optional
- * Douyin bundle is deliberately not selected here; the plugin page owns that choice.
+ * enabled, a merged Douyin bundle removes the redundant standalone viewer, and a profile-level
+ * copy of a shipped bundle older than the bundled release is removed so it cannot shadow the
+ * shipped build. The optional Douyin bundle is deliberately not selected here; the plugin page
+ * owns that choice.
  * @param profileDirectory - Profile whose package.json carries the bundle list.
  */
 export function migrateNovaFlowBundledPlugins(profileDirectory: string): void {
+  enforceShippedPluginBundleVersions(profileDirectory)
   const filename = join(profileDirectory, 'package.json')
   if (!existsSync(filename)) return
   let value: unknown
