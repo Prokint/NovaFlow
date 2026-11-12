@@ -60,7 +60,7 @@ it('stages every reviewed bundle and compatibility package without running plugi
     dependencies: Record<string, string>
     exports: Record<string, string>
   }
-  expect(douyin).toHaveProperty('version', '0.9.22')
+  expect(douyin).toHaveProperty('version', '0.9.23')
   expect(douyin).toHaveProperty('dependencies.playwright-core', '^1.63.0')
   expect(douyin.exports['./viewer']).toBe('./viewer.mjs')
   expect(readFileSync(join(root, 'third-party/dsh-douyin-comments/NOTICE.txt'), 'utf8')).toContain('novaflow')
@@ -99,7 +99,7 @@ it('exposes shipped bundles through the installation and preserves a user disabl
   expect(active).not.toContain('dsh-skill-explorer')
   expect(active).not.toContain('dsh-douyin-comments')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-skill-explorer', '0.1.2')
-  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-douyin-comments', '0.9.22')
+  expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-douyin-comments', '0.9.23')
   expect(JSON.parse(readFileSync(anchor, 'utf8'))).toHaveProperty('dependencies.dsh-comment-viewer', '0.2.16')
 })
 
@@ -147,7 +147,7 @@ it('removes pre-entitlement profile copies so the shipped bundle cannot be shado
   expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(false)
   expect(existsSync(join(profile, 'node_modules', 'dsh-comment-viewer'))).toBe(true)
   expect(existsSync(join(profile, 'node_modules', 'dsh-skill-explorer'))).toBe(true)
-  writeBundle('dsh-douyin-comments', '0.9.22')
+  writeBundle('dsh-douyin-comments', '0.9.23')
   migrateNovaFlowBundledPlugins(profile)
   expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(true)
 })

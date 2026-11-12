@@ -3,6 +3,8 @@
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
 （插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.23 变更**（2026-11-12）：**面板控制台补上订阅闸门**——此前只有工具入口（`douyin_comments`）在采集前校验授权，网页面板的「开始采集」走 `console.mjs` 的 `startJob` 没校验，未激活账号可以绕过面板直接采集。现在 `startJob` 同样要求已激活（未配置 relay 的独立运行模式不受影响）。
+
 **0.9.22 变更**（2026-11-10）：**修 NovaFlow 内置包缺文件的问题**——`package.json` 的 `files` 白名单一直没加 `entitlement.mjs`，pnpm 按白名单打包 file: 依赖时把它漏掉了，导致 CI 出来的安装包里插件一 import 就崩（授权/采集都不可用）。
 - 修法：`dsh-douyin-comments/package.json` 的 `files` 加入 `entitlement.mjs`；插件版本升到 0.9.22。
 - 自检新增 `pkg-files-entitlement`，以后白名单再漏文件会被 341 项自检抓到。

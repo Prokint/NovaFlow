@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, DEFAULTS, resolveDouyinVideoInputs } from './collector.mjs';
+import { entitlementEnabled, status as entitlementStatus, textOf } from './entitlement.mjs';
 import { listShopAccounts } from './shop-accounts-bridge.mjs';
 
 export const CONSOLE_PREFIX = '/plugins/dsh-douyin-comments';
@@ -360,9 +361,19 @@ export function createConsole(options = {}) {
     for (const job of done.slice(MAX_JOBS)) jobs.delete(job.id);
   }
 
-  function startJob(raw) {
+  async function startJob(raw) {
     if (activeJob && !activeJob.done) {
       throw httpError('已有一个采集任务在跑，等它结束或先取消', 409);
+    }
+    // v0.9.23：面板控制台也走订阅闸门，别让未激活用户绕过工具入口直接建采集任务。
+    if (entitlementEnabled()) {
+      let state;
+      try {
+        state = await entitlementStatus();
+      } catch (error) {
+        throw httpError(textOf((error && error.code) || 'SERVICE_UNAVAILABLE'), 402);
+      }
+      if (!state || state.activated !== true) throw httpError(textOf((state && state.code) || 'NOT_ACTIVATED'), 402);
     }
     const outDir = String(getOutDir() || DEFAULTS.outDir || '');
     const settings = getSettings() || {};
@@ -535,7 +546,7 @@ export function createConsole(options = {}) {
             delete body.urls;
           }
         }
-        const job = startJob(body);
+        const job = await startJob(body);
         return sendJson(res, 200, { ok: true, job: publicJob(job) });
       }
 
