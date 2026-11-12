@@ -3,6 +3,8 @@
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
 （插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.25 变更**（2026-11-12）：**修多账号导出记录串号**——分析台和面板的「导出记录」除了本账号目录，还会把机器级 `~/.dsh/douyin-collector/out` 当可读根，导致 A 账号采集的文件出现在 B 账号的列表里。现在 NovaFlow（`DSH_NOVAFLOW_DESKTOP=1`）只读本账号 `$DSH_HOME/douyin-collector/out`、`last-out.json` 记录的目录和显式 `DSH_COMMENT_VIEWER_DIRS`；独立运行/旧版行为不变。
+
 **0.9.24 变更**（2026-11-12）：**修激活失败时的报错**——`douyin_entitlement` 的错误分支只返回了 `ok/message`，但工具输出结构把 `activated/expiresAt/remainingDays/devices/deviceLimit/purchaseUrl/machineId` 都声明为必填，框架于是先报「输出字段不完整」，真正的失败原因（如激活码无效、设备超限）反而看不到。现在失败分支补齐全部字段并按错误码输出原因。
 
 **0.9.23 变更**（2026-11-12）：**面板控制台补上订阅闸门**——此前只有工具入口（`douyin_comments`）在采集前校验授权，网页面板的「开始采集」走 `console.mjs` 的 `startJob` 没校验，未激活账号可以绕过面板直接采集。现在 `startJob` 同样要求已激活（未配置 relay 的独立运行模式不受影响）。

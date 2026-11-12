@@ -122,8 +122,12 @@ export function viewRoots() {
   for (const dir of String(process.env.DSH_COMMENT_VIEWER_DIRS || "").split(";")) push(dir.trim());
   // 采集器的默认输出目录（NovaFlow/DSH Desktop 下 = <$DSH_HOME>/douyin-collector/out，按账号隔离）
   push(path.join(collectorHome(), "out"));
-  push(path.join(os.homedir(), ".dsh", "douyin-collector", "out"));
-  push(path.join(process.cwd(), "douyin-comments"));
+  // v0.9.25：NovaFlow 按账号注入 DSH_HOME 后，机器级 ~/.dsh 目录是旧版/独立运行留下的，
+  // 不能再当可读根，否则 A 账号采的数据会出现在 B 账号的分析台里。
+  if (process.env.DSH_NOVAFLOW_DESKTOP !== "1") {
+    push(path.join(os.homedir(), ".dsh", "douyin-collector", "out"));
+    push(path.join(process.cwd(), "douyin-comments"));
+  }
   // v0.6.0：采集工具写会话工作区时，目录记在 last-out.json —— 分析台要能读到刚采的那份
   push(lastOutDir());
   return out;

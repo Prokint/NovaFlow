@@ -4,11 +4,11 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.24",
+      "version": "0.9.25",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "d54bf5ea40ff525151cd50626afc63d6cbc2b9a5",
+      "commit": "80aa6f31d67f9f3a74abd2493bf1b2424dc20a38",
       "optional": true
     },
     {
@@ -33,7 +33,7 @@
     "Add distribution notices.",
     "Use a white comment-viewer palette and iframe.",
     "dsh-skill-explorer is a Prokint-maintained fork: renamed, rebuilt as a standalone package, and stripped of anonymous install telemetry.",
-    "dsh-douyin-comments 0.9.24 comes from the private feat/entitlement-v31 branch and merges the former dsh-comment-viewer into one panel; it adds NovaFlow entitlement gating (activation code, two devices, 199 CNY/month) with material issued at runtime through the local relay.",
+    "dsh-douyin-comments 0.9.25 comes from the private feat/entitlement-v31 branch and merges the former dsh-comment-viewer into one panel; it adds NovaFlow entitlement gating (activation code, two devices, 199 CNY/month) with material issued at runtime through the local relay.",
     "dsh-comment-viewer 0.2.16 is retained only as a compatibility package for profiles created before the merge; new profiles do not enable it.",
     "dsh-skill-explorer 0.1.2 renders the skill list as a card grid and opens create/import/edit as dialogs from the list toolbar instead of nav tabs."
   ]

@@ -138,8 +138,11 @@ function allowedRoots(extraOutDir) {
   };
   push(extraOutDir);
   push(DEFAULTS.outDir);
-  push(path.join(os.homedir(), '.dsh', 'douyin-collector', 'out'));
-  push(path.join(process.cwd(), 'douyin-comments'));
+  // v0.9.25：NovaFlow 多账号下只看本账号目录，机器级旧目录会跨账号串数据。
+  if (process.env.DSH_NOVAFLOW_DESKTOP !== '1') {
+    push(path.join(os.homedir(), '.dsh', 'douyin-collector', 'out'));
+    push(path.join(process.cwd(), 'douyin-comments'));
+  }
   // 工具上一次实际写入的目录（通常是当前会话工作区）
   push(lastOutDir());
   return roots;
