@@ -719,7 +719,19 @@ export function apply(ctx, config = {}) {
           message: st.activated === true ? '' : '输入激活码后即可采集：douyin_entitlement action=activate code=NOVA-DY-XXXX-XXXX',
         };
       } catch (e) {
-        return { ok: false, message: textOf((e && e.code) || 'SERVICE_UNAVAILABLE') };
+        // v0.9.24：失败分支也要给全输出结构（工具参数都声明为 required），否则框架会报
+        // 「输出字段不完整」，把真正的原因（如 CODE_INVALID）盖掉。
+        return {
+          ok: false,
+          activated: false,
+          expiresAt: '',
+          remainingDays: 0,
+          devices: 0,
+          deviceLimit: 2,
+          purchaseUrl: '',
+          machineId: machineId(),
+          message: textOf((e && e.code) || 'SERVICE_UNAVAILABLE'),
+        };
       }
     },
   }));
