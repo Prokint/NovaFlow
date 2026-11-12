@@ -141,15 +141,33 @@ it('removes pre-entitlement profile copies so the shipped bundle cannot be shado
   }
   writeBundle('dsh-douyin-comments', '0.7.0')
   writeBundle('dsh-comment-viewer', '0.2.16')
-  writeBundle('dsh-skill-explorer', '0.1.2')
+  writeBundle('dsh-skill-explorer', '0.0.9')
   writeFileSync(join(profile, 'package.json'), JSON.stringify({ name: 'profile', dsh: { profile: { bundles: [] } } }))
   migrateNovaFlowBundledPlugins(profile)
+  // Every shipped plugin is enforced, including the built-in bundles.
   expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(false)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-skill-explorer'))).toBe(false)
   expect(existsSync(join(profile, 'node_modules', 'dsh-comment-viewer'))).toBe(true)
-  expect(existsSync(join(profile, 'node_modules', 'dsh-skill-explorer'))).toBe(true)
   writeBundle('dsh-douyin-comments', '0.9.25')
+  writeBundle('dsh-skill-explorer', '0.1.2')
   migrateNovaFlowBundledPlugins(profile)
   expect(existsSync(join(profile, 'node_modules', 'dsh-douyin-comments'))).toBe(true)
+  expect(existsSync(join(profile, 'node_modules', 'dsh-skill-explorer'))).toBe(true)
+})
+
+it('keeps every shipped plugin list covered by the version enforcement', () => {
+  // Guard the policy: adding a plugin to any shipped list without enforcement must fail here.
+  const root = fixture()
+  const profile = join(root, 'profile')
+  const shipped = [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]
+  for (const plugin of shipped) {
+    mkdirSync(join(profile, 'node_modules', plugin.name), { recursive: true })
+    writeFileSync(join(profile, 'node_modules', plugin.name, 'package.json'),
+      JSON.stringify({ name: plugin.name, version: '0.0.1' }))
+  }
+  writeFileSync(join(profile, 'package.json'), JSON.stringify({ name: 'profile', dsh: { profile: { bundles: [] } } }))
+  migrateNovaFlowBundledPlugins(profile)
+  for (const plugin of shipped) expect(existsSync(join(profile, 'node_modules', plugin.name))).toBe(false)
 })
 
 it('leaves older runtimes unchanged and rejects an invalid shipped catalog or changed pinned source', () => {

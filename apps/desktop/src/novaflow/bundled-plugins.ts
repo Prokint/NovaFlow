@@ -24,6 +24,13 @@ export const NOVAFLOW_BUNDLED_PLUGINS_FILE = 'novaflow-plugins.json'
 const LEGACY_VIEWER_BUNDLE = 'dsh-comment-viewer'
 
 
+/** Every plugin shipped inside NovaFlow, enforced at the same version as the runtime copy. */
+const SHIPPED_PLUGINS = [
+  ...NOVAFLOW_BUNDLED_PLUGINS,
+  ...NOVAFLOW_OPTIONAL_PLUGINS,
+  ...NOVAFLOW_COMPAT_PLUGINS,
+] as const
+
 /** Compare dotted numeric versions; prerelease suffixes sort before the matching release. */
 function compareVersions(left: string, right: string): number | undefined {
   const parse = (text: string): { parts: number[]; prerelease: boolean } | undefined => {
@@ -44,11 +51,12 @@ function compareVersions(left: string, right: string): number | undefined {
 /**
  * Remove user-installed copies of shipped bundles older than the bundled release. A profile-level
  * install shadows the runtime copy, so a pre-entitlement Douyin plugin would bypass the
- * subscription gate that the shipped build enforces.
+ * subscription gate that the shipped build enforces. Every shipped plugin is enforced, not just
+ * the ones that carry licensing.
  * @param profileDirectory - Profile whose `node_modules` may shadow a shipped bundle.
  */
 export function enforceShippedPluginBundleVersions(profileDirectory: string): void {
-  for (const plugin of [...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
+  for (const plugin of SHIPPED_PLUGINS) {
     const directory = join(profileDirectory, 'node_modules', plugin.name)
     const manifest = join(directory, 'package.json')
     if (!existsSync(manifest)) continue
