@@ -118,7 +118,7 @@ it('enables shipped bundles for a new authenticated account while inherited user
   await writeFile(filename, JSON.stringify(manifest))
   await scopes.prepare(account, legacy)
   expect(JSON.parse(await readFile(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles',
-    ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-skill-explorer'])
+    ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego'])
   const signedOut = scopes.resolve(null)
   await scopes.prepare(signedOut, legacy)
   expect(JSON.parse(await readFile(join(signedOut.profile, 'package.json'), 'utf8')))

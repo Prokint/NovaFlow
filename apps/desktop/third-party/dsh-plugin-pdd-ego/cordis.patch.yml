@@ -1,0 +1,5 @@
+# bundle patch for the NovaFlow Pinduoduo listing plugin: inserts its plugin row
+# into the profile roster. Applied as a profile bundle layer (`dsh.bundle.patch`).
+- insert:
+    - id: pdd-ego-listing
+      name: 'dsh-plugin-pdd-ego'

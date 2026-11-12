@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it, onTestFinished } from 'vitest'
@@ -41,7 +41,8 @@ it('stages every reviewed bundle and compatibility package without running plugi
   expect(manifest.dependencies).toEqual({ 'existing-core': 'file:./core.tgz',
     'dsh-douyin-comments': 'file:./third-party/dsh-douyin-comments',
     'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer',
-    'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer' })
+    'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer',
+    'dsh-plugin-pdd-ego': 'file:./third-party/dsh-plugin-pdd-ego' })
   for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const staged = join(root, 'third-party', plugin.name)
     expect(JSON.parse(readFileSync(join(staged, 'package.json'), 'utf8'))).toMatchObject(plugin)
@@ -51,6 +52,12 @@ it('stages every reviewed bundle and compatibility package without running plugi
       expect(notice).toContain('zhu1090093659/dsh-web')
       expect(notice).toContain('telemetry')
       expect(readFileSync(join(staged, 'lib/client.js'), 'utf8')).not.toMatch(/dsh-market\.com|reportDailyHeartbeat|telemetry-visitor/)
+    } else if (plugin.name === 'dsh-plugin-pdd-ego') {
+      expect(notice).toContain('dsh-plugin-pdd-ego')
+      expect(notice).toContain('MIT')
+      // 执行层必须随包：缺 scripts/ 的包在运行时找不到上架脚本。
+      expect(existsSync(join(staged, 'scripts', 'run_listing_ego.mjs'))).toBe(true)
+      expect(existsSync(join(staged, 'scripts', 'tools', 'xlsx_to_product.py'))).toBe(true)
     } else {
       expect(notice).toContain('monagisa/douyin-ai-collector')
     }
@@ -117,6 +124,7 @@ it('applies built-in defaults and drops the legacy standalone viewer when the me
   migrateNovaFlowBundledPlugins(profile)
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
     '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments', 'dsh-skill-explorer',
+    'dsh-plugin-pdd-ego',
   ])
   // A profile that only enabled the old viewer keeps it, and still receives the built-in bundle.
   writeFileSync(filename, JSON.stringify({
@@ -124,11 +132,11 @@ it('applies built-in defaults and drops the legacy standalone viewer when the me
   }))
   migrateNovaFlowBundledPlugins(profile)
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
-    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer',
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego',
   ])
   // The optional Douyin bundle is not added by the migration.
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
-    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer',
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego',
   ])
 })
 

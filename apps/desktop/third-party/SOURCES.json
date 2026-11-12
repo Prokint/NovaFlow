@@ -26,6 +26,15 @@
       "repository": "https://github.com/Prokint/novaflow-skill-explorer",
       "upstreamRepository": "https://github.com/zhu1090093659/dsh-web",
       "upstreamCommit": "d9058cd0f635c91413962ffc43b1b0f728e20a12"
+    },
+    {
+      "name": "dsh-plugin-pdd-ego",
+      "version": "1.1.7",
+      "upstreamPath": "dsh-plugin-pdd-ego",
+      "declaredLicense": "MIT",
+      "branch": "local",
+      "bundled": true,
+      "note": "NovaFlow 内维护的插件：ego 版拼多多多店铺上架（技能 pdd-ego-listing + pdd_ego_* 工具）。无第三方上游仓库。"
     }
   ],
   "localChanges": [
