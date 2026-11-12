@@ -3,6 +3,8 @@
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
 （插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.26 变更**（2026-11-12）：**未开通/到期改成整页拦截**——此前未激活只是隐藏「采集」tab、评论词云仍可用；现在点「抖音评论」直接是授权页：标题（未开通 / 已到期）、到期时间、套餐与价格、「开通/续费订阅」按钮（跳购买页）、「我已有激活码」展开输入框（就地激活，成功后自动进入面板）。词云与采集入口都不再出现。
+
 **0.9.25 变更**（2026-11-12）：**修多账号导出记录串号**——分析台和面板的「导出记录」除了本账号目录，还会把机器级 `~/.dsh/douyin-collector/out` 当可读根，导致 A 账号采集的文件出现在 B 账号的列表里。现在 NovaFlow（`DSH_NOVAFLOW_DESKTOP=1`）只读本账号 `$DSH_HOME/douyin-collector/out`、`last-out.json` 记录的目录和显式 `DSH_COMMENT_VIEWER_DIRS`；独立运行/旧版行为不变。
 
 **0.9.24 变更**（2026-11-12）：**修激活失败时的报错**——`douyin_entitlement` 的错误分支只返回了 `ok/message`，但工具输出结构把 `activated/expiresAt/remainingDays/devices/deviceLimit/purchaseUrl/machineId` 都声明为必填，框架于是先报「输出字段不完整」，真正的失败原因（如激活码无效、设备超限）反而看不到。现在失败分支补齐全部字段并按错误码输出原因。

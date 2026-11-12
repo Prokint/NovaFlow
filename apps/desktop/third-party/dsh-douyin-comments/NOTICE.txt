@@ -1,7 +1,7 @@
 Upstream: monagisa/douyin-ai-collector (private repository)
 Branch: feat/entitlement-v31 (lineage: novaflow -> feat/entitlement-v31)
-Commit: 80aa6f31d67f9f3a74abd2493bf1b2424dc20a38
-Package: dsh-douyin-comments 0.9.25
+Commit: dd0fd79ba0235786cd84c89db1f9138b6087fe37
+Package: dsh-douyin-comments 0.9.26
 
 This snapshot merges the former dsh-comment-viewer into the collector plugin and
 adds the NovaFlow subscription gate: an activation code binds one NovaFlow

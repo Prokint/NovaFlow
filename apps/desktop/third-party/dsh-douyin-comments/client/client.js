@@ -387,10 +387,13 @@ window.__ModuleLoader__.load({
       return pair[0];
     }
 
-    /** v0.9.21：NovaFlow 收费模式下的授权状态（未启用 = 独立运行模式，保持旧行为：两个 tab 都在）。 */
+    /** v0.9.21：NovaFlow 收费模式下的授权状态（未启用 = 独立运行模式，保持旧行为：两个 tab 都在）。
+     *  v0.9.26：返回 [state, reload]，拦截页激活成功后要立刻重新拉一次状态。 */
     function useEntitlement() {
       var pair = React.useState(null);
       var setState = pair[1];
+      var bump = React.useState(0);
+      var setBump = bump[1];
       React.useEffect(function () {
         var stopped = false;
         function poll() {
@@ -401,10 +404,181 @@ window.__ModuleLoader__.load({
         poll();
         var timer = setInterval(poll, 60000);
         return function () { stopped = true; clearInterval(timer); };
-      }, []);
-      return pair[0];
+      }, [bump[0]]);
+      var reload = function () { setBump(bump[0] + 1); };
+      return [pair[0], reload];
     }
 
+
+    /** 授权到期/未开通时整页拦截：panel 里连评论词云都不渲染。 */
+    function LicenseGatePage(props) {
+      var ent = props.ent;
+      var p = props.p;
+      var onRefresh = props.onRefresh;
+      var hadSubscription = ent.expiresAt !== null && ent.expiresAt !== undefined && ent.expiresAt !== '';
+      var codePair = React.useState('');
+      var setCode = codePair[1];
+      var busyPair = React.useState(false);
+      var setBusy = busyPair[1];
+      var errPair = React.useState('');
+      var err = errPair[0];
+      var setErr = errPair[1];
+      var expandedPair = React.useState(false);
+      var expanded = expandedPair[0];
+      var setExpanded = expandedPair[1];
+      var purchaseUrl = String(ent.purchaseUrl || '');
+      if (!purchaseUrl) purchaseUrl = 'https://collect.lanjiaotrade.com/buy';
+
+      var expiresText = '';
+      if (hadSubscription) {
+        var at = Number(ent.expiresAt) * 1000;
+        if (at > 0) {
+          var d = new Date(at);
+          var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+          expiresText = d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+      }
+
+      function doActivate() {
+        var value = String(codePair[0] || '').trim().toUpperCase();
+        if (!value) { setErr('请输入激活码'); expandedPair[1](true); return; }
+        setBusy(true); setErr('');
+        fetch(VIEWER_PATH + '/api/entitlement/activate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: value }),
+        }).then(function (r) {
+          return r.text().then(function (t) {
+            var body = null;
+            try { body = JSON.parse(t); } catch (e) { body = null; }
+            return { ok: r.ok, body: body };
+          });
+        }).then(function (res) {
+          setBusy(false);
+          if (res.ok && res.body && res.body.ok !== false) { setErr(''); if (onRefresh) onRefresh(); return; }
+          setErr((res.body && (res.body.error || res.body.message)) || '激活失败，请稍后重试');
+        }).catch(function () {
+          setBusy(false);
+          setErr('授权服务不可用，请稍后重试');
+        });
+      }
+
+      var title = hadSubscription ? '抖音评论采集已到期' : '抖音评论采集未开通';
+      var desc = hadSubscription
+        ? ('订阅已于 ' + (expiresText || '此前') + ' 到期。续费后可继续采集抖音公开评论、查看评论词云与 AI 解读。')
+        : '开通后可采集抖音公开评论、查看评论词云与 AI 解读。订阅为包月制，一码绑定一个 NovaFlow 账号，最多 2 台设备。';
+      var planText = '';
+      if (ent.plan && ent.plan.title) {
+        planText = String(ent.plan.title) + (ent.plan.price ? ' · ¥' + ent.plan.price + ' / 月' : '');
+      }
+
+      var button = function (label, primary) {
+        return {
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          height: '38px', borderRadius: '9px', textDecoration: 'none', cursor: 'pointer',
+          background: primary ? p.ink : 'transparent',
+          color: primary ? p.bg : p.ink,
+          border: primary ? ('1px solid ' + p.ink) : ('1px solid ' + p.line),
+          fontSize: '13px', fontWeight: 600, letterSpacing: '0.2px',
+          fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
+        };
+      };
+
+      return h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          height: '100%', minHeight: 0, padding: '32px 20px', background: p.bg, colorScheme: props.theme,
+          overflow: 'auto',
+        },
+      }, [
+        h('div', {
+          key: 'card',
+          style: {
+            width: '100%', maxWidth: '392px', background: p.surface, border: '1px solid ' + p.line,
+            borderRadius: '14px', padding: '26px 24px 22px', boxSizing: 'border-box',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.06)',
+          },
+        }, [
+          h('div', {
+            key: 'mark',
+            style: {
+              width: '44px', height: '44px', borderRadius: '11px', background: p.ink, color: p.bg,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px',
+            },
+          }, h('svg', {
+            width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+            strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+          }, [
+            h('rect', { key: 'a', x: 4, y: 6, width: 16, height: 12, rx: 2, ry: 2 }),
+            h('path', { key: 'b', d: 'M12 3v3' }),
+          ])),
+          h('div', { key: 'title', style: { fontSize: '17px', fontWeight: 700, color: p.ink, letterSpacing: '-0.2px' } }, title),
+          h('div', {
+            key: 'desc',
+            style: { marginTop: '9px', fontSize: '12.5px', lineHeight: 1.65, color: p.muted },
+          }, desc),
+          planText ? h('div', {
+            key: 'plan',
+            style: {
+              marginTop: '14px', padding: '9px 12px', borderRadius: '9px', background: p.surface2,
+              border: '1px solid ' + p.line, fontSize: '12px', color: p.ink, fontWeight: 600,
+            },
+          }, planText) : null,
+          h('a', {
+            key: 'buy',
+            href: purchaseUrl, target: '_blank', rel: 'noreferrer',
+            style: Object.assign({ marginTop: '18px' }, button(hadSubscription ? '续费订阅' : '开通订阅', true)),
+          }, hadSubscription ? '续费订阅' : '开通订阅'),
+          h('button', {
+            key: 'toggle',
+            type: 'button',
+            onClick: function () { expandedPair[1](!expandedPair[0]); setErr(''); },
+            style: {
+              marginTop: '12px', appearance: 'none', background: 'transparent', border: 0, padding: '4px 0',
+              color: p.muted, font: 'inherit', fontSize: '12px', cursor: 'pointer', width: '100%',
+            },
+          }, expanded ? '收起激活码' : '我已有激活码'),
+          expanded ? h('div', { key: 'activate', style: { marginTop: '10px' } }, [
+            h('div', { key: 'row', style: { display: 'flex', gap: '8px' } }, [
+              h('input', {
+                key: 'input',
+                type: 'text',
+                placeholder: 'NOVA-DY-XXXX-XXXX',
+                value: codePair[0],
+                onChange: function (e) { codePair[1](e.target.value); },
+                onKeyDown: function (e) { if (e.key === 'Enter') doActivate(); },
+                spellCheck: false,
+                style: {
+                  flex: 1, minWidth: 0, height: '34px', padding: '0 10px', boxSizing: 'border-box',
+                  borderRadius: '8px', border: '1px solid ' + p.line, background: p.bg, color: p.ink,
+                  font: 'inherit', fontSize: '12px', letterSpacing: '0.4px',
+                },
+              }),
+              h('button', {
+                key: 'go',
+                type: 'button',
+                onClick: doActivate,
+                disabled: busyPair[0],
+                style: {
+                  appearance: 'none', height: '34px', padding: '0 14px', borderRadius: '8px',
+                  border: '1px solid ' + p.ink, background: p.ink, color: p.bg,
+                  font: 'inherit', fontSize: '12px', fontWeight: 600,
+                  cursor: busyPair[0] ? 'default' : 'pointer', opacity: busyPair[0] ? 0.6 : 1, flex: '0 0 auto',
+                },
+              }, busyPair[0] ? '激活中…' : '激活'),
+            ]),
+            err ? h('div', {
+              key: 'err',
+              style: { marginTop: '8px', fontSize: '11.5px', color: '#c2410c', lineHeight: 1.5 },
+            }, err) : null,
+          ]) : null,
+          h('div', {
+            key: 'foot',
+            style: { marginTop: '16px', fontSize: '11px', color: p.muted, lineHeight: 1.6 },
+          }, '订阅为包月制，一码绑定一个 NovaFlow 账号，最多 2 台设备。'),
+        ]),
+      ]);
+    }
 
     function panelTabStyle(active, p) {
       return {
@@ -431,11 +605,18 @@ window.__ModuleLoader__.load({
       var mode = usePanelMode();
       var theme = useDshTheme();
       var p = dshPalette(theme);
-      var ent = useEntitlement();
+      var entPair = useEntitlement();
+      var ent = entPair[0];
+      var reloadEnt = entPair[1];
       var licenseOn = ent && ent.enabled === true;
+      var licensed = licenseOn && ent.activated === true;
       React.useEffect(function () {
         if (licenseOn && panelMode === 'console') setPanelMode('viewer');
       }, [licenseOn]);
+      // v0.9.26：授权未开通或已到期时整页拦截，评论词云也不渲染。
+      if (licenseOn && !licensed) {
+        return h(LicenseGatePage, { ent: ent, p: p, theme: theme, onRefresh: reloadEnt });
+      }
       var paneStyle = function (active) {
         return { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, display: active ? 'block' : 'none' };
       };
