@@ -8,7 +8,7 @@
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "b12f8fde5a7a316dc3027509b764cfdcbaadc896",
+      "commit": "fdbdb04fcdd09838e0f137585796df13918f6e97",
       "optional": true,
       "tag": "v0.9.41"
     },
