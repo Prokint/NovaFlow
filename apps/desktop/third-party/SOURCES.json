@@ -34,7 +34,7 @@
     "Add distribution notices.",
     "Use a white comment-viewer palette and iframe.",
     "dsh-skill-explorer is a Prokint-maintained fork: renamed, rebuilt as a standalone package, and stripped of anonymous install telemetry.",
-    "dsh-douyin-comments 0.9.39 comes from the private feat/entitlement-v31 branch and merges the former dsh-comment-viewer into one panel; it adds NovaFlow entitlement gating (activation code, two devices, 199 CNY/month) with material issued at runtime through the local relay, ships the paid-edition outreach workbench (account profile, saved leads, script library and send log) while keeping the collection console hidden, and keeps only 12 built-in outreach scripts with per-user add/delete stored in the local account home.",
+    "dsh-douyin-comments 0.9.40 comes from the private feat/entitlement-v31 branch and merges the former dsh-comment-viewer into one panel; it adds NovaFlow entitlement gating (activation code, two devices, 199 CNY/month) with material issued at runtime through the local relay, ships the paid-edition outreach workbench (account profile, saved leads, script library and send log) while keeping the collection console hidden, and keeps the 12 built-in outreach scripts plus per-user add/delete stored in the local account home, and teaches the AI (tool description plus README section) to ask account / collection mode / the six keyword filters before it collects anything.",
     "dsh-comment-viewer 0.2.16 is retained only as a compatibility package for profiles created before the merge; new profiles do not enable it.",
     "dsh-skill-explorer 0.1.2 renders the skill list as a card grid and opens create/import/edit as dialogs from the list toolbar instead of nav tabs."
   ]
