@@ -289,7 +289,7 @@ window.__ModuleLoader__.load({
 			"list.noFileHint": "该技能没有本地 SKILL.md 文件，无法在此启用/禁用、编辑或删除。",
 			"list.providerFile": "由插件提供",
 			"list.providerFileTooltip": "该技能的文件由插件 provider 提供，未落在本面板扫描的技能根目录下",
-			"list.providerFileHint": "该技能由插件提供、确有 SKILL.md 文件，但不在本面板扫描的技能根目录下，因此无法在此编辑或删除；开关只改变本面板的可调用视图，不会改变模型实际加载的技能。",
+			"list.providerFileHint": "该技能由插件提供、确有 SKILL.md 文件，但不在本面板扫描的技能根目录下，因此无法在此编辑或删除；模型是否加载由提供它的插件负责，本面板不提供开关。",
 			"list.mark.model": "模型",
 			"list.mark.user": "用户",
 			"provider.filesystem": "文件系统",
@@ -406,7 +406,7 @@ window.__ModuleLoader__.load({
 			"list.noFileHint": "This skill has no local SKILL.md file, so it cannot be enabled/disabled, edited, or deleted here.",
 			"list.providerFile": "Provided by plugin",
 			"list.providerFileTooltip": "This skill has a file supplied by its plugin provider, outside the skill roots this panel scans",
-			"list.providerFileHint": "This skill is supplied by a plugin and does have a SKILL.md file, but it sits outside the skill roots this panel scans, so it cannot be edited or deleted here. Its switch only changes what this panel considers invocable; the model still loads the skill.",
+			"list.providerFileHint": "This skill is supplied by a plugin and does have a SKILL.md file, but it sits outside the skill roots this panel scans, so it cannot be edited or deleted here. Whether the model loads it belongs to that plugin, so this panel shows no switch for it.",
 			"list.mark.model": "model",
 			"list.mark.user": "user",
 			"provider.filesystem": "Filesystem",
@@ -1553,14 +1553,14 @@ window.__ModuleLoader__.load({
 		* Whether this row carries an enable switch.
 		*
 		* A row with a writable path switches by rewriting its own SKILL.md
-		* frontmatter. A plugin-provided file (issue #1854) has no such path, so its
-		* switch is recorded in the panel's own store; a truly fileless registration
-		* has nothing to switch and still shows none.
+		* frontmatter. A plugin-provided file and a fileless registration have no such
+		* path: their "switch" could only change this panel's own view while the model
+		* keeps loading the skill, so they show no switch at all.
 		* @param skill - the row's entry.
 		* @returns whether the row offers the switch.
 		*/
 		function canToggle(skill) {
-			return skill.path !== void 0 || skill.fileState === "provider-file";
+			return skill.path !== void 0;
 		}
 		/**
 		* The local-file badge for a row that the write routes cannot serve.
