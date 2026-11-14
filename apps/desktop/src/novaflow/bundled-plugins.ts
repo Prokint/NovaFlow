@@ -9,7 +9,7 @@ export const NOVAFLOW_BUNDLED_PLUGINS = [
 
 /** Shipped bundles installed with NovaFlow but switched off until the user enables them. */
 export const NOVAFLOW_OPTIONAL_PLUGINS = [
-  { name: 'dsh-douyin-comments', version: '0.9.26' },
+  { name: 'dsh-douyin-comments', version: '0.9.38' },
 ] as const
 
 /** Installed only so profiles created before the merged Douyin bundle still load their old bundles. */

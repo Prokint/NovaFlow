@@ -448,6 +448,22 @@
       });
   }
 
+  // v0.9.27：页面自更新 —— 后端插件版本变了（DSH 重启 / 插件更新到新版）就自动刷新页面，
+  // 不用每次手动 Ctrl+R。每 15s 探一次 /api/health，版本不一致就自动 reload。
+  var pagePluginVersion = "";
+  function watchPluginVersion() {
+    if (watchPluginVersion.timer) return;
+    watchPluginVersion.timer = setInterval(function () {
+      api("health").then(function (data) {
+        if (!data || !data.version) return;
+        if (pagePluginVersion && data.version !== pagePluginVersion) {
+          toast("插件已更新到 v" + data.version + "，正在自动刷新页面…");
+          setTimeout(function () { location.reload(); }, 600);
+        }
+      }).catch(function () { /* 窗口关闭 / 网络抖动：忽略，下次再探 */ });
+    }, 15000);
+  }
+
   function loadConfig() {
     api("config")
       .then(function (data) {
@@ -456,6 +472,7 @@
         // 关键词模式的默认视频条数
         if ($("videoCount")) $("videoCount").value = Math.max(1, Math.min(100, Number(d.keywordVideoCount) || 10));
         $("version").textContent = "v" + (data.version || "—");
+        pagePluginVersion = data.version || pagePluginVersion;
         var out = $("outDir");
         out.textContent = data.outDir ? "输出：" + shortPath(data.outDir) : "";
         out.title = data.outDir || "";
@@ -786,10 +803,384 @@
     toast("已导出 " + list.length + " 位收藏客户");
   }
 
+  // v0.9.23：本机抖音账号资质（采集页直接展示；只读识别，不发送任何内容）
+  var ACCT_LABELS = {
+    enterprise: "蓝V企业号",
+    personal: "个人账号",
+    unverified: "白号（新号）",
+  };
+  var ACCT_RISK = {
+    enterprise: "风险档位较低：评论 200-300 条 / 站内信 80 条 / 每小时打招呼 ≤ 30 次（运营经验值，非官方额度）",
+    personal: "个人账号口径：评论 ≤ 200 条 / 站内信 ≤ 30 条 / 每小时打招呼 ≤ 5 次；遇验证或频繁提示立即停",
+    unverified: "白号（注册不足 1 个月的新号）：不建议站内信（建议 0 条），评论 ≤ 50 条；新号更容易触发验证，遇验证或频繁提示立即停",
+  };
+
+  function fmtAcctTime(value) {
+    if (!value) return "";
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return "";
+    return "上次识别 " + fmtTime(d.toISOString());
+  }
+
+  function renderAccountProfile(entry) {
+    var card = $("acctCard");
+    if (!card) return;
+    var type = String((entry && entry.accountType) || "");
+    var label = ACCT_LABELS[type] || "";
+    var typeEl = $("acctType");
+    typeEl.textContent = label || "未检测";
+    typeEl.className = "acct-type" + (type ? " " + type : "");
+    card.dataset.state = type || "empty";
+    $("acctNick").textContent = (entry && entry.nickname) ? entry.nickname : "还没识别过本机抖音账号";
+    var meta = $("acctMeta");
+    if (entry && type) {
+      meta.hidden = false;
+      $("acctUid").textContent = String(entry.uid || "—");
+      $("acctUnique").textContent = String(entry.uniqueId || "—");
+      $("acctFans").textContent = String(Number(entry.followers) || 0);
+      $("acctWorks").textContent = String(Number(entry.awemeCount) || 0);
+    } else {
+      meta.hidden = true;
+    }
+    $("acctHint").textContent = type && ACCT_RISK[type] ? ACCT_RISK[type] : "还没识别过：点右侧按钮读取当前浏览器里登录的抖音账号资料。";
+    var foot = $("acctChecked");
+    var stamp = fmtAcctTime(entry && entry.checkedAt ? entry.checkedAt : Date.parse(entry && entry.checkedAtMs || ""));
+    if (stamp) { foot.hidden = false; foot.textContent = stamp + " · 只读，不发送任何内容"; }
+    else foot.hidden = true;
+    // v0.9.24：话术库跟着账号类型走（白号只给公开评论话术）
+    var nextType = type || "";
+    if (scriptState.accountType !== nextType) {
+      scriptState.accountType = nextType;
+      if ($("scriptList")) loadScripts();
+    }
+  }
+
+  function loadAccountProfile() {
+    if (!$("acctCard")) return;
+    var account = $("account") ? $("account").value || "" : "";
+    var query = account ? "?account=" + encodeURIComponent(account) : "";
+    api("account" + query)
+      .then(function (data) {
+        if (!data || data.ok === false) return;
+        renderAccountProfile(data.entry || null);
+      })
+      .catch(function () { /* 拿不到就保持未检测状态 */ });
+  }
+
+  function refreshAccountProfile() {
+    var button = $("acctRefresh");
+    if (!button || button.disabled) return;
+    var previous = button.textContent;
+    button.disabled = true;
+    button.textContent = "识别中…（可能要扫码）";
+    var account = $("account") ? $("account").value || "" : "";
+    api("account/refresh", { method: "POST", body: JSON.stringify({ account: account }) })
+      .then(function (data) {
+        if (!data || !data.entry) throw new Error("没拿到账号资料");
+        renderAccountProfile(data.entry);
+        toast("已识别：" + (ACCT_LABELS[data.entry.accountType] || "账号"));
+      })
+      .catch(function (err) { toast("识别失败：" + err.message, true); })
+      .then(function () {
+        button.disabled = false;
+        button.textContent = previous;
+      });
+  }
+
+  // v0.9.24：获客话术库（纯文案资产，插件不发送任何内容；只做浏览 / 复制 / 随机轮换）
+  var scriptState = {
+    scene: "",
+    accountType: "",
+    libraryVersion: "",
+    scenes: [],
+    allowedScenes: [],
+    rules: [],
+    list: [],
+    picked: null,
+    avoid: [],
+  };
+
+  function scriptUsageToday() {
+    try {
+      var raw = JSON.parse(localStorage.getItem("cw.scriptUsage") || "{}");
+      var today = new Date().toISOString().slice(0, 10);
+      if (raw.date !== today) return 0;
+      return Number(raw.count) || 0;
+    } catch (e) { return 0; }
+  }
+
+  function bumpScriptUsage() {
+    var today = new Date().toISOString().slice(0, 10);
+    var count = scriptUsageToday() + 1;
+    try { localStorage.setItem("cw.scriptUsage", JSON.stringify({ date: today, count: count })); } catch (e) { /* ignore */ }
+    var el = $("scriptUsage");
+    if (el) el.textContent = "今日已复制 " + count + " 条";
+  }
+
+  function copyText(text) {
+    var task = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text)
+      : Promise.reject(new Error("no clipboard"));
+    return task.catch(function () {
+      return new Promise(function (resolve, reject) {
+        try {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          var ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+          ok ? resolve() : reject(new Error("copy failed"));
+        } catch (err) { reject(err); }
+      });
+    });
+  }
+
+  function scriptSceneLabel(scene) {
+    var hit = (scriptState.scenes || []).filter(function (s) { return s.id === scene; })[0];
+    return hit ? hit.label : scene;
+  }
+
+  function renderScriptTabs() {
+    var wrap = $("scriptSceneTabs");
+    if (!wrap) return;
+    clearNode(wrap);
+    var items = [{ id: "", label: "全部" }].concat((scriptState.scenes || []).filter(function (s) {
+      // v0.9.24：白号只允许公开评论，私信/追问 tab 直接不显示，避免点了空列表
+      if (!scriptState.allowedScenes || !scriptState.allowedScenes.length) return true;
+      return scriptState.allowedScenes.indexOf(s.id) > -1;
+    }));
+    items.forEach(function (item) {
+      var active = (scriptState.scene || "") === item.id;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn small script-tab" + (active ? " active" : "");
+      btn.textContent = item.label;
+      btn.addEventListener("click", function () {
+        scriptState.scene = item.id;
+        renderScriptTabs();
+        loadScripts();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  function renderScriptRules() {
+    var box = $("scriptRuleBox");
+    if (!box) return;
+    clearNode(box);
+    var rules = scriptState.rules || [];
+    if (!rules.length) return;
+    var title = document.createElement("div");
+    title.className = "script-rules-title";
+    title.textContent = "使用规则（避免验证 / 封禁）";
+    box.appendChild(title);
+    rules.forEach(function (text) {
+      var row = document.createElement("div");
+      row.className = "script-rule";
+      row.textContent = "· " + text;
+      box.appendChild(row);
+    });
+  }
+
+  function makeCopyButton(text) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn small";
+    btn.textContent = "复制";
+    btn.addEventListener("click", function () {
+      copyText(text).then(function () {
+        bumpScriptUsage();
+        toast("已复制，去抖音手动发送（插件不会自动发）");
+      }).catch(function (err) { toast("复制失败：" + err.message, true); });
+    });
+    return btn;
+  }
+
+  function renderScriptPick() {
+    var box = $("scriptPick");
+    if (!box) return;
+    var pick = scriptState.picked;
+    if (!pick) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    clearNode(box);
+    var head = document.createElement("div");
+    head.className = "script-pick-head";
+    var tag = document.createElement("span");
+    tag.className = "script-tag";
+    tag.textContent = scriptSceneLabel(pick.scene) + " · " + (pick.title || "");
+    head.appendChild(tag);
+    head.appendChild(makeCopyButton(pick.text));
+    box.appendChild(head);
+    var body = document.createElement("div");
+    body.className = "script-pick-text";
+    body.textContent = pick.text;
+    box.appendChild(body);
+    var note = document.createElement("div");
+    note.className = "script-pick-note";
+    note.textContent = "复制后把 {…} 里的变量换成真实内容再发；同一句别连续用。";
+    box.appendChild(note);
+  }
+
+  function renderScriptList() {
+    var list = $("scriptList");
+    if (!list) return;
+    clearNode(list);
+    var meta = $("scriptMeta");
+    if (meta) {
+      var libVer = scriptState.libraryVersion || "0.9.27";
+      meta.textContent = (scriptState.list || []).length + " 条 · 库 " + libVer;
+    }
+    var items = scriptState.list || [];
+    if (!items.length) {
+      var empty = document.createElement("div");
+      empty.className = "script-empty";
+      empty.textContent = scriptState.accountType === "unverified"
+        ? "当前账号是白号（注册不足 1 个月的新号），只建议公开评论；私信内容不展示。"
+        : "这个场景下没有可用话术。";
+      list.appendChild(empty);
+      return;
+    }
+    items.forEach(function (item) {
+      var row = document.createElement("div");
+      row.className = "script-item";
+      var main = document.createElement("div");
+      main.className = "script-main";
+      var top = document.createElement("div");
+      top.className = "script-item-top";
+      var tag = document.createElement("span");
+      tag.className = "script-tag";
+      tag.textContent = scriptSceneLabel(item.scene) + " · " + (item.title || "");
+      top.appendChild(tag);
+      main.appendChild(top);
+      var text = document.createElement("div");
+      text.className = "script-text";
+      text.textContent = item.text;
+      main.appendChild(text);
+      row.appendChild(main);
+      row.appendChild(makeCopyButton(item.text));
+      list.appendChild(row);
+    });
+  }
+
+  function loadScripts() {
+    if (!$("scriptList")) return;
+    var query = [];
+    if (scriptState.scene) query.push("scene=" + encodeURIComponent(scriptState.scene));
+    if (scriptState.accountType) query.push("accountType=" + encodeURIComponent(scriptState.accountType));
+    var path = "scripts" + (query.length ? "?" + query.join("&") : "");
+    api(path).then(function (data) {
+      if (!data || data.ok === false) return;
+      scriptState.libraryVersion = data.libraryVersion || scriptState.libraryVersion;
+      scriptState.scenes = data.scenes || scriptState.scenes;
+      scriptState.allowedScenes = data.allowedScenes || scriptState.allowedScenes;
+      scriptState.rules = data.rules || scriptState.rules;
+      if (scriptState.scene && scriptState.allowedScenes.length
+        && scriptState.allowedScenes.indexOf(scriptState.scene) === -1) {
+        scriptState.scene = "";
+      }
+      scriptState.list = data.scripts || [];
+      renderScriptTabs();
+      renderScriptRules();
+      renderScriptList();
+      renderSendQuota(data.quota, data.recentSends);
+      var hint = $("scriptHint");
+      if (hint) {
+        var typeLabel = ACCT_LABELS[scriptState.accountType] || "";
+        hint.textContent = typeLabel
+          ? "已按「" + typeLabel + "」筛选：只显示这类账号能用的场景。话术由你自己复制、自己发，插件不发送任何内容。"
+          : "话术由你自己复制、自己发，插件不发送任何内容。同一句别连续用，尽量轮换。";
+      }
+    }).catch(function (err) {
+      var list = $("scriptList");
+      if (!list) return;
+      clearNode(list);
+      var empty = document.createElement("div");
+      empty.className = "script-empty";
+      var message = String(err && err.message || err || "");
+      // v0.9.27：还在跑旧 console.mjs 时后端没有 /api/scripts，会报「接口不存在」——给出明确的下一步
+      empty.textContent = message.indexOf("接口不存在") > -1
+        ? "话术库接口还没生效：这是旧的后端模块缓存，需要重启 DSH Desktop（右键托盘图标 →「Restart DSH Desktop」）后再回到本页。"
+        : "话术库读取失败：" + message;
+      list.appendChild(empty);
+    });
+  }
+
+  var SEND_SCENE_LABELS = { comment: "评论", dm: "私信打招呼", outreach: "主动获客", followup: "追问" };
+  function formatShortTime(iso) {
+    var d = new Date(String(iso || ""));
+    if (isNaN(d.getTime())) return String(iso || "—");
+    var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  // v0.9.37：把「今天/本小时发了多少条 + 最近发了谁」显示在话术卡里（数据来自本机 outreach-log.json）
+  function renderSendQuota(quota, recent) {
+    var line = $("sendQuotaLine");
+    var box = $("sendRecent");
+    if (!line || !box) return;
+    if (!quota) {
+      line.textContent = "发送记录：暂时读不到（后端还没加载新版 console.mjs？）";
+      return;
+    }
+    var limits = quota.limits || {};
+    var used = quota.used || {};
+    line.textContent = quota.accountTypeLabel + "：今天私信 " + (used.dmToday || 0) + "/" + (limits.dmPerDay || 0)
+      + " 条 · 本小时私信 " + (used.dmThisHour || 0) + "/" + (limits.dmPerHour || 0)
+      + " 条 · 今天评论 " + (used.commentToday || 0) + "/" + (limits.commentPerDay || 0)
+      + " 条 · 今天关注 " + (used.followsToday || 0) + " 个";
+    clearNode(box);
+    var list = Array.isArray(recent) ? recent : [];
+    if (!list.length) {
+      box.textContent = "还没有发送记录（本机 outreach-log.json 为空）";
+      return;
+    }
+    var head = document.createElement("div");
+    head.className = "send-recent-item send-recent-head";
+    head.textContent = "时间 · 场景 · 话术 · 目标 · 关注";
+    box.appendChild(head);
+    list.forEach(function (entry) {
+      var row = document.createElement("div");
+      row.className = "send-recent-item";
+      row.textContent = formatShortTime(entry.at)
+        + " · " + (SEND_SCENE_LABELS[entry.scene] || entry.scene || "—")
+        + " · " + (entry.scriptId || "—")
+        + " · " + (entry.target || "—")
+        + (entry.followed ? " · 已关注" : "");
+      box.appendChild(row);
+    });
+  }
+
+  function randomScript() {
+    var button = $("scriptRandom");
+    if (button && button.disabled) return;
+    if (button) { button.disabled = true; button.textContent = "挑一条…"; }
+    api("scripts/pick", {
+      method: "POST",
+      body: JSON.stringify({
+        scene: scriptState.scene,
+        accountType: scriptState.accountType,
+        avoidIds: scriptState.avoid,
+      }),
+    }).then(function (data) {
+      if (!data || !data.script) throw new Error("没拿到话术");
+      scriptState.picked = data.script;
+      scriptState.avoid = [data.script.id].concat(scriptState.avoid).slice(0, 8);
+      renderScriptPick();
+    }).catch(function (err) {
+      toast("随机话术失败：" + err.message, true);
+    }).then(function () {
+      if (button) { button.disabled = false; button.textContent = "随机一条"; }
+    });
+  }
+
   function bind() {
     $("start").addEventListener("click", startCollection);
     $("cancel").addEventListener("click", cancelCollection);
     $("refreshExports").addEventListener("click", refreshExports);
+    if ($("acctRefresh")) $("acctRefresh").addEventListener("click", refreshAccountProfile);
     $("refreshFavs").addEventListener("click", loadFavorites);
     $("exportFavs").addEventListener("click", exportFavoritesCsv);
     $("favSearch").addEventListener("input", renderFavorites);
@@ -839,12 +1230,40 @@
         if (event.key === "Enter") startCollection();
       });
     }
+    if ($("account")) {
+      $("account").addEventListener("change", function () { loadAccountProfile(); });
+    }
+    // v0.9.24：话术库随机挑一条（纯复制辅助，不发送）
+    if ($("scriptRandom")) {
+      $("scriptRandom").addEventListener("click", randomScript);
+    }
+    var usage = $("scriptUsage");
+    if (usage) usage.textContent = "今日已复制 " + scriptUsageToday() + " 条";
     syncKeywordUi();
   }
 
+  // v0.9.38：?view=outreach → 获客工作台
+  // 同一个页面，隐藏「新建采集 / 采集状态 / 导出记录」三块，只留「我的抖音账号 / 收藏客户 / 话术库 + 发送记录」。
+  // 这样 NovaFlow 付费版可以继续不展示采集页（同事的设计），同时保留获客要用的页面功能。
+  function applyPageMode() {
+    var params = new URLSearchParams(location.search);
+    var mode = params.get("view") || "";
+    if (mode !== "outreach") return;
+    document.body.classList.add("outreach-mode");
+    var title = $("pageTitle");
+    if (title) title.textContent = "获客工作台";
+    document.title = "获客工作台";
+    var outDir = $("outDir");
+    if (outDir) outDir.hidden = true;
+  }
+
+  applyPageMode();
   bind();
   loadConfig();
   loadAccounts();
+  loadAccountProfile();
+  loadScripts();
   refreshExports();
   loadFavorites();
+  watchPluginVersion();
 })();

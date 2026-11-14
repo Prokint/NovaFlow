@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>抖音评论采集</title>
-  <link rel="stylesheet" href="./styles.css?v=0.9.22" />
+  <link rel="stylesheet" href="./styles.css?v=0.9.38" />
 </head>
 <body>
   <div class="app">
     <header class="topbar">
       <div class="brand">
         <span class="brand-dot"></span>
-        <h1>抖音评论采集</h1>
+        <h1 id="pageTitle">抖音评论采集</h1>
         <span class="version" id="version">v—</span>
       </div>
       <div class="topbar-meta">
@@ -97,6 +97,33 @@
         </div>
       </section>
 
+      <!-- v0.9.23：本机抖音账号资质（只读识别；不发送私信/评论，不做任何账号操作） -->
+      <!-- v0.9.38：从「新建采集」里拆成独立卡片，这样「获客工作台」页（?view=outreach）也能看到它 -->
+      <section class="card acct-section">
+        <div class="card-head">
+          <h2>我的抖音账号</h2>
+          <span class="muted">只读识别 · 不发送任何内容</span>
+        </div>
+        <div class="acct-card" id="acctCard" data-state="empty">
+          <div class="acct-head">
+            <span class="acct-type" id="acctType">未检测</span>
+            <button id="acctRefresh" class="btn small" type="button"
+                    title="打开本机浏览器读取当前登录账号的资料（只读，不发送任何内容）">识别我的账号</button>
+          </div>
+          <div class="acct-nick" id="acctNick">还没识别过本机抖音账号</div>
+          <div class="acct-meta" id="acctMeta" hidden>
+            <span class="acct-kv"><b>uid</b><code id="acctUid">—</code></span>
+            <span class="acct-kv"><b>抖音号</b><code id="acctUnique">—</code></span>
+            <span class="acct-kv"><b>粉丝</b><span id="acctFans">0</span></span>
+            <span class="acct-kv"><b>作品</b><span id="acctWorks">0</span></span>
+          </div>
+          <div class="acct-hint" id="acctHint">
+            用于提示这个账号的评论/私信风险档位；插件只读资料，不发送任何内容。
+          </div>
+          <div class="acct-foot" id="acctChecked" hidden></div>
+        </div>
+      </section>
+
       <section class="card status-card">
         <div class="card-head">
           <h2>采集状态</h2>
@@ -158,9 +185,38 @@
         </div>
         <div id="favs" class="fav-list">加载中…</div>
       </section>
+
+      <!-- v0.9.24：获客话术库（纯文案，插件不会自动发送；只提供浏览 / 复制 / 随机轮换） -->
+      <section class="card scripts-card span-2">
+        <div class="card-head">
+          <div class="scripts-title">
+            <h2>获客话术库</h2>
+            <span id="scriptMeta" class="badge idle">0 条</span>
+          </div>
+          <div class="scripts-head-actions">
+            <span id="scriptUsage" class="script-usage">今日已复制 0 条</span>
+            <button id="scriptRandom" class="btn small primary" type="button">随机一条</button>
+          </div>
+        </div>
+        <div class="scripts-toolbar" id="scriptSceneTabs"></div>
+        <div id="sendQuota" class="send-quota">
+          <div class="send-quota-head">
+            <span class="send-quota-title">发送记录</span>
+            <span id="sendQuotaLine" class="send-quota-line">今天/本小时已发：加载中…</span>
+          </div>
+          <div id="sendRecent" class="send-recent">还没有发送记录</div>
+          <p class="send-quota-note">记录来自本机 <code>outreach-log.json</code>；只有 agent 真发成功（dryRun=false）才会写入，dry-run 不计。</p>
+        </div>
+        <p class="scripts-hint" id="scriptHint">
+          话术由你自己复制、自己发；插件不发送任何内容。同一句别连续用，尽量轮换。
+        </p>
+        <div id="scriptPick" class="script-pick hidden"></div>
+        <div id="scriptList" class="script-list">加载中…</div>
+        <div id="scriptRuleBox" class="script-rules"></div>
+      </section>
     </main>
   </div>
   <div id="toast" class="toast hidden"></div>
-  <script src="./app.js?v=0.9.22"></script>
+  <script src="./app.js?v=0.9.38"></script>
 </body>
 </html>

@@ -162,14 +162,16 @@ async function egoSnapshot(config) {
 }
 
 /** 插件面板 / 工具用：shop-accounts 是否可用 + 账号列表（默认只列抖音） */
-export async function listShopAccounts({ platform = 'douyin', includeAll = false } = {}) {
+export async function listShopAccounts({ platform = 'douyin', includeAll = false, buyerOnly = false } = {}) {
   const store = readShopAccountsStore();
   if (!store.ok) return { ok: false, available: false, accounts: [], error: store.error, dataDir: store.dataDir };
   const found = resolveShopAccountsRoot();
   const ego = await egoSnapshot(store.config);
   const all = (store.accounts || []).map((a) => normalizeAccount(a, store)).filter(Boolean);
   const want = String(platform || '').toLowerCase();
-  const accounts = (includeAll || !want) ? all : all.filter((a) => a.platform === want);
+  const byPlatform = (includeAll || !want) ? all : all.filter((a) => a.platform === want);
+  // v0.9.34：本插件只认抖音买家账户（个人号）；卖家账户（抖店后台）不参与采集
+  const accounts = buyerOnly ? byPlatform.filter((a) => a.accountType === 'buyer') : byPlatform;
   for (const a of accounts) {
     if (a.backend === 'auto') a.backend = ego.available ? 'ego' : 'chrome';
     a.backendLabel = a.backend === 'ego' ? 'ego' : 'Chrome';
@@ -207,6 +209,10 @@ export async function resolveShopAccount(ref, { platform = 'douyin' } = {}) {
   }
   if (String(hit.platform || '') !== String(platform || '').toLowerCase() && platform) {
     throw new Error('账号「' + hit.name + '」是 ' + hit.platformLabel + ' 的，不能用来采集' + platformLabel(platform) + '评论');
+  }
+  // v0.9.34：只允许抖音买家账户（个人号）。店铺后台的卖家账户（如「抖店」）不能用于采集/互动。
+  if (platform === 'douyin' && hit.accountType === 'seller') {
+    throw new Error('账号「' + hit.name + '」是抖音「卖家」账户（店铺后台身份），本插件只支持抖音买家账户（个人号）；请换买家账户，或在店铺账号管理里给它分配独立 Profile 后重新登录');
   }
   return hit;
 }

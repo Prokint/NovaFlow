@@ -16,16 +16,43 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, DEFAULTS, resolveDouyinVideoInputs } from './collector.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, DEFAULTS, resolveDouyinVideoInputs,
+  // v0.9.23：采集页直接展示「我的抖音账号」资质（只读识别，不发送任何内容）
+  fetchDouyinSelfProfile, readAccountProfiles,
+} from './collector.mjs';
+// v0.9.24：内置获客话术库（纯文案，插件不自动发送；页面上浏览 / 复制 / 随机轮换）
+import {
+  SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, listScripts, pickScript, allowedScenes,
+} from './scripts-library.mjs';
 import { entitlementEnabled, status as entitlementStatus, textOf } from './entitlement.mjs';
 import { listShopAccounts } from './shop-accounts-bridge.mjs';
+// v0.9.36：获客发送配额/记录（只读本地记账文件，供采集页展示「今天/本小时已发多少条」）
+import { outreachQuota, readOutreachLog } from './outreach.mjs';
 
 export const CONSOLE_PREFIX = '/plugins/dsh-douyin-comments';
 
 const APP_DIR = fileURLToPath(new URL('./app/', import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const VERSION = String(PKG.version || '0.0.0');
+const LIBRARY_FILE = fileURLToPath(new URL('./scripts-library.mjs', import.meta.url));
+
+// v0.9.27：话术库按文件 mtime 动态 import —— 改话术文案后页面刷新就能看到新内容，
+// 不用为了改一句文案重启整个 DSH。console.mjs 本身的改动（新增接口）仍需重启才会生效。
+let freshLibraryCache = { key: '', mod: null };
+async function freshScriptsLibrary() {
+  try {
+    const key = String(fs.statSync(LIBRARY_FILE).mtimeMs);
+    if (freshLibraryCache.key !== key) {
+      freshLibraryCache.mod = await import(`${pathToFileURL(LIBRARY_FILE).href}?v=${key}`);
+      freshLibraryCache.key = key;
+    }
+    return freshLibraryCache.mod;
+  } catch {
+    return { SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, listScripts, pickScript, allowedScenes };
+  }
+}
 
 const MAX_JOBS = 20;
 const MAX_LOG_LINES = 400;
@@ -496,8 +523,122 @@ export function createConsole(options = {}) {
 
       if (pathname === `${CONSOLE_PREFIX}/api/accounts` && (req.method === 'GET' || req.method === 'HEAD')) {
         // v0.8.0：shop-accounts 账号清单（默认只列抖音账号）；不可用时 ok:false + error，UI 显示提示
-        const data = await listShopAccounts({ platform: 'douyin' });
-        return sendJson(res, 200, Object.assign({ ok: true, platform: 'douyin' }, data));
+        // v0.9.34：只列「买家」账户（个人号）；卖家账户（抖店后台）不出现在可采集账号里
+        const data = await listShopAccounts({ platform: 'douyin', buyerOnly: true });
+        return sendJson(res, 200, Object.assign({ ok: true, platform: 'douyin', buyerOnly: true }, data));
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/account` && (req.method === 'GET' || req.method === 'HEAD')) {
+        // v0.9.23：本机抖音账号资质档案（采集页直接展示；只读识别，不发送任何内容）。
+        // 不写店铺账号管理插件，档案落在本插件自己的 <DOUYIN_HOME>/account-profile.json。
+        const accountKey = String(url.searchParams.get('account') || '').slice(0, 64);
+        let profiles;
+        try {
+          profiles = readAccountProfiles();
+        } catch {
+          profiles = { version: 1, entries: [], updatedAt: '' };
+        }
+        const entries = Array.isArray(profiles.entries) ? profiles.entries : [];
+        // v0.9.32：指定账号按 key 精确取；没指定时取「最近识别」的那条（旧实现先取 default，会一直显示过期档案）
+        const latest = entries.slice().sort((a, b) => String((b && b.checkedAt) || '').localeCompare(String((a && a.checkedAt) || '')));
+        const entry = (accountKey && entries.find((row) => row && row.key === accountKey))
+          || latest[0]
+          || null;
+        return sendJson(res, 200, {
+          ok: true,
+          version,
+          key: String((entry && entry.key) || accountKey || ''),
+          entry,
+          entries,
+        });
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/account/refresh` && req.method === 'POST') {
+        // v0.9.23：点「识别我的账号」时才打开浏览器，截主页自己发出的签名响应；不点不弹窗。
+        const body = await readJson(req);
+        const account = String((body && body.account) || '').slice(0, 64);
+        const result = await fetchDouyinSelfProfile({
+          account: account || undefined,
+          waitLoginSec: 180,
+          log: () => {},
+        });
+        if (!result || result.ok !== true) {
+          throw httpError(String((result && result.error) || '账号识别失败，请重试'), 400);
+        }
+        // 采集核心返回的是扁平结果（{ok, key, ...entry, file}），这里整理成前端用的 entry 结构
+        const ACCOUNT_FIELDS = [
+          'key', 'machine', 'accountType', 'accountTypeLabel', 'nickname', 'uid', 'secUid', 'uniqueId',
+          'followers', 'awemeCount', 'avatar', 'verifyReason', 'source', 'accountRef', 'accountName', 'checkedAt',
+        ];
+        const entry = {};
+        for (const field of ACCOUNT_FIELDS) {
+          if (result[field] !== undefined) entry[field] = result[field];
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          entry,
+          file: String(result.file || ''),
+          logPath: String(result.logPath || ''),
+        });
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/scripts` && (req.method === 'GET' || req.method === 'HEAD')) {
+        // v0.9.24：获客话术库（纯文案，不发送）。?scene=comment|dm|followup & ?accountType=enterprise|personal|unverified
+        const scene = String(url.searchParams.get('scene') || '').slice(0, 24);
+        const accountType = String(url.searchParams.get('accountType') || '').slice(0, 24);
+        const lib = await freshScriptsLibrary();
+        const scripts = lib.listScripts({ scene, accountType });
+        // v0.9.36：把「今天/本小时发了多少条、关注了几个、最近发了谁」一并给页面
+        let quota = null;
+        let recentSends = [];
+        try {
+          quota = outreachQuota({ accountType, home: DEFAULTS.home });
+          // 页面传的是账号类型；但「个人账号」与「个人认证」在配额表里同一档，
+          // 这里用账号档案里更准确的文案覆盖（例如「个人账号」而不是「个人认证」）。
+          try {
+            const entries = readAccountProfiles({ home: DEFAULTS.home }).entries || [];
+            const latest = entries.slice().sort((a, b) => String(b.checkedAt || '').localeCompare(String(a.checkedAt || '')))[0];
+            const want = accountType || quota.accountType;
+            if (latest && latest.accountType === want && latest.accountTypeLabel) quota.accountTypeLabel = latest.accountTypeLabel;
+          } catch { /* 没档案就用配额表默认文案 */ }
+          const store = readOutreachLog({ home: DEFAULTS.home });
+          recentSends = (store.entries || [])
+            .filter((e) => ['dm', 'outreach', 'followup', 'comment'].includes(String(e.scene || '')))
+            .slice(-10)
+            .reverse()
+            .map((e) => ({
+              at: String(e.at || ''),
+              scene: String(e.scene || ''),
+              scriptId: String(e.scriptId || ''),
+              target: String(e.target || ''),
+              followed: e.followed === true,
+            }));
+        } catch { /* 记账文件坏了也不影响话术库 */ }
+        return sendJson(res, 200, {
+          ok: true,
+          libraryVersion: lib.SCRIPT_LIBRARY_VERSION,
+          scenes: lib.SCRIPT_SCENES,
+          allowedScenes: lib.allowedScenes(accountType),
+          rules: lib.SCRIPT_RULES,
+          accountType,
+          scene,
+          total: scripts.length,
+          scripts,
+          quota,
+          recentSends,
+        });
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/scripts/pick` && req.method === 'POST') {
+        // v0.9.24：随机轮换一条（前端把最近用过的 id 传进 avoidIds，尽量不重复）
+        const body = await readJson(req);
+        const scene = String((body && body.scene) || '').slice(0, 24);
+        const accountType = String((body && body.accountType) || '').slice(0, 24);
+        const avoidIds = Array.isArray(body && body.avoidIds) ? body.avoidIds.slice(0, 50).map(String) : [];
+        const lib = await freshScriptsLibrary();
+        const script = lib.pickScript({ scene, accountType, avoidIds });
+        if (!script) throw httpError('这个场景下没有可用话术（当前账号类型不允许该场景）', 400);
+        return sendJson(res, 200, { ok: true, script });
       }
 
       if (pathname === `${CONSOLE_PREFIX}/api/config`) {

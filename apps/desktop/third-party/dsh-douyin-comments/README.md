@@ -1,7 +1,87 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.22；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.38；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.38 变更**（2026-11-14）：**新增「获客工作台」页（NovaFlow 付费版专用），付费墙与「不显示采集页」的设计都不动**。
+- 动机：NovaFlow 里同事的设计是付费版不展示采集页（未开通直接是授权页），但账号识别 / 收藏客户 / 话术库 / 发送记录都在采集页上。
+- 做法：同一个采集页支持 ?view=outreach —— 隐藏「新建采集 / 采集状态 / 导出记录」三张卡片，只保留「我的抖音账号 / 收藏客户 / 话术库 + 发送记录」；账号卡同时从「新建采集」里拆成独立卡片（本地版也能看到）。
+- 客户端（client/client.js）：新增第三个 tab「获客工作台」（永远可用），采集 tab 仍然只在未启用授权时出现，评论词云 tab 在未开通时隐藏、开通后显示；未开通时点词云才显示授权页，不再整页拦截。
+- 边界：这个页只读 / 只做话术与记账，不会自动发送；真正的采集仍只由 AI 工具触发（与同事的 0.9.21 设计一致）。
+- 自检新增 v0.9.38 断言组（outreach-mode-page / outreach-mode-js / outreach-mode-css / outreach-mode-client / outreach-mode-readme）。
+
+**0.9.37 变更**（2026-11-13）：**采集页「获客话术」卡新增「发送记录」面板**，能直接看到当天/本小时发了多少条。数据全部来自本机记账文件 `<DOUYIN_HOME>/outreach-log.json`（AGENT 真发成功才写入，`dryRun` 不计）：
+- 汇总行：`个人账号：今天私信 1/30 条 · 本小时私信 1/5 条 · 今天评论 0/150 条 · 今天关注 0 个`；
+- 明细（最近 10 条）：时间 · 场景（私信打招呼/主动获客/追问/评论）· 话术 id · 目标 · 是否已关注；
+- 接口：`GET /api/scripts` 的返回新增 `quota`（`outreachQuota()` 结果）与 `recentSends`（最近 10 条记录）；
+- 说明：这个面板只读，不会发送；想核对「这个小时内还能发几条」，看本小时私信 `已发/上限`；想核对某个人的记录，看明细里的目标。
+自检新增 v0.9.37 断言组（`send-quota-console` / `send-quota-page` / `send-quota-js` / `send-quota-readme`）。
+
+**0.9.36 变更**（2026-11-13）：**私信前先关注对方**（`douyin_outreach action=send` 默认 `follow=true`）。打开目标主页后先判断关注状态：已关注/互相关注 → 跳过；未关注 → 用真实鼠标点击「关注」按钮，等按钮变成「已关注/互相关注」再点「私信」；关注失败（没找到按钮/点了没生效/出现人机验证）只记日志、继续发私信，不阻断。`dryRun` 模式下只检测关注状态、不点关注；真发成功后在记账里写 `followed: true`，`quota` 多统计「今天关注 N 个」，超过经验阈值 100/天会给出 warning。自检新增 `dm-follow-core` / `dm-follow-batch` / `dm-follow-tool` / `dm-readme-v0936`。
+- 参数：`douyin_outreach` 新增 `follow`（boolean，默认 true）；显式 `follow: false` 可只发私信不关注。
+- 边界不变：仍是受控自动化（batch ≤5、间隔 40–90 秒、遇验证整批停），真发送必须使用者明确授权后再把 `dryRun` 传 false。
+
+**0.9.35 变更**（2026-11-13）：**修复「已点发送但消息其实没发出」的误报**。发送按钮改用 `page.mouse.click(x, y)` 对红色圆箭头做**真实坐标点击**（原来的 `element.click()` 在 Slate/React 输入区上静默无效，实测点了输入框文案还在）；成功判定改为「输入框已清空 **且** 会话区出现这段文案」，不再把面板里常驻的「对方回复或关注你之前，只能发送一条文字消息」提示当成发送成功（0.9.34 曾因此把没发出的消息记成已发）。自检新增 `dm-send-click` / `dm-send-verify` 断言。
+
+**0.9.34 变更**（2026-11-13）：**只允许抖音「买家」账户用于采集**：`GET /api/accounts` 只列 `accountType=buyer` 的抖音账号，`listShopAccounts` 新增 `buyerOnly` 过滤；`resolveShopAccount()` 遇到抖音「卖家」账户（如店铺账号管理里那条「抖店」）会直接抛错，不再允许它采集/识别/发送。原因：买家账户才是 www.douyin.com 的消费者登录态；卖家账户对应店铺后台（fxg.jinritemai.com）登录，且 ego 里可能和买家账户共用同一个 Profile，容易误用。需要卖家账户时请在店铺账号管理里给它分配**独立 Profile**。自检新增 `buyer-only` 断言。
+
+**0.9.33 变更**（2026-11-13）：**采集页不再展示判定依据**：去掉账号卡下方的「判定依据：…」一行（以及认证信息的一行），页面上只保留 `#acctType` 徽标、昵称、uid/抖音号/粉丝/作品、风险档位与上次识别时间。判定逻辑仍在后端（`accountTypeFromUser` + `registerInfoOf`，阈值 `WHITE_ACCOUNT_MAX_DAYS = 30`），只是不再把「为什么这样判」写给人看。自检断言改为 `!id="acctReason"` / 无「判定依据」文案。
+
+**0.9.32 变更**（2026-11-13）：**修「识别过还是显示白号」的两个原因**：①采集页 `GET /api/account` 以前先找 `default` 档案，会一直显示几天前那条过期记录（旧逻辑存成 unverified → 页面徽标就按「白号（新号）」显示）；现在改成按 `checkedAt` 取「最近识别」的档案，指定账号时仍按 key 精确取。②通过店铺账号识别时，同时镜像一份 `default` 档案（`mirrorOf` 记录来源 key），避免「没选账号时看到的是旧档」。`douyin_account_info action=status` 也受益于最近档案优先。自检新增 `acct-latest` / `acct-readme-v0932`。
+
+**0.9.30 变更**（2026-11-13）：**白号按注册天数判定（1 个月阈值）**——账号类型不再由「有没有官方认证」单独决定，而是：
+- 蓝V企业号：企业认证字段有值 → 「蓝V企业号」（不变）；
+- 个人认证：`custom_verify`/`personal_verify` 有认证文案 → 「个人认证」（认证优先，不看注册天数）；
+- 个人账号：没有官方认证、但 `register_time` 显示注册已满 **30 天（1 个月）** → 「个人账号」；
+- 白号（新号）：没有官方认证、注册**不足 1 个月（30 天）** → 「白号（新号）」；注册时间拿不到时按「未认证（注册时间未知）」保守处理。
+
+配套改动：①注册时间不再在采集页展示（用户要求「不用展示」，但识别时会用它做判定）；②`WHITE_ACCOUNT_MAX_DAYS = 30` 常量与判定说明写进账号档案和 `accountTypeLabel`；③配额按类型分档：白号不建议私信（私信配额 0）、评论 ≤ 50/天；个人账号/个人认证 评论 ≤ 150/天、私信 ≤ 30/天、每小时 ≤ 5；蓝V 300/80/30 不变；④白号账号只给「评论互动」话术，私信/获客场景自动隐藏；⑤旧档案里存成 unverified 但注册已满 1 个月的，读取时自动回判为「个人账号」（不用重新识别也能看到正确类型）。
+- 判定用的字段只有自己的账号有：`/aweme/v1/web/user/profile/self/` 的 `user.register_time`（秒级）；别人的 `profile/other` 与 `im/user/info` 都没有，所以此规则只对本机登录账号生效。
+- 自检新增 v0.9.30 断言组（`acct-white-threshold` / `acct-white-classify` / `acct-white-quota` / `acct-white-page` / `acct-readme-v0930`）。阈值 0.9.30 定稿为 **30 天（1 个月）**。
+
+**0.9.29 变更**（2026-11-13，0.9.30 起采集页不再展示注册日期）：**账号资质识别新增「注册时间 / 账号年龄」**——`/aweme/v1/web/user/profile/self/` 返回的 `user.register_time`（秒级时间戳）现在会写进账号档案（`registeredAt` ISO + `accountAgeDays`），`douyin_account_info` 的输出也多这两个字段（0.9.30 起这两个字段只用于白号判定，不在页面显示）。
+- 自己的账号可以拿到：`nagisa` 实测 `register_time=1785343019` ⇒ **2026-07-30 注册，约 107 天**。
+- 别人的账号（获客目标）拿不到：`/aweme/v1/web/user/profile/other/` 只有 129 个字段，**没有 `register_time`**（只有自己的 `profile/self` 有）；`im/user/info` 也没有。所以插件不做「目标是新号/白号」的判断，只给自己的账号算年龄。想近似目标账号的资历，只能看作品数/最早作品发布时间（没有作品的新号没有依据）。
+- 自检新增 v0.9.29 断言组（`acct-regtime` / `acct-regtime-page` / `acct-regtime-tool` / `acct-readme-v0929`）。
+
+**合并记录（2026-11-13）**：同事发布的 `dsh-douyin-comments` 0.9.23–0.9.26（面板控制台订阅闸门、激活失败报错补全、NovaFlow 多账号导出隔离、未开通/到期整页授权拦截）已并入本版本，**冲突处一律采用同事的实现**。版本号是两边各自独立演进撞车的：下方第一个「0.9.23–0.9.27」条目是本地独立做的功能（账号识别 / 获客话术库 / 主动私信获客工具 / 受控发送），后半段重复的「0.9.23–0.9.26」条目是同事发布版本的说明；合并后实际代码两者都有（例如 `console.mjs` 的 `startJob` 现在既走订阅闸门、也保留本地 `/api/account`、`/api/scripts` 路由）。
+
+**0.9.28 变更**（2026-11-13）：**账号资质的判定口径修正——「白号」不是抖音的账号类型**。抖音账号只有三种**官方认证状态**：**无官方认证 / 个人认证 / 企业认证（蓝V企业号）**；「白号」是获客圈对「刚注册、还没实名的新号」的口语称呼，不是字段、也不是账号类型，而且**网页端判断不了实名状态**（`realname_verify_status` 这个字段在 web 接口语义不可靠）。之前的版本把「无官方认证」写成「疑似白号」，容易被误读成一种独立账号，0.9.28 起统一叫「**个人账号（无官方认证）**」——普通个人账号就是普通个人账号，不代表没实名。
+- 判定依据（截 `/aweme/v1/web/user/profile/self/` 返回的 `user` 对象）：企业认证看 `enterprise_verify_reason` 非空、或 `verification_type === 2`；个人认证看 `custom_verify` / `personal_verify` 非空、或 `verification_type === 1`；两者都为空 = 没有官方认证（按个人账号口径给配额）。`account_cert_info` 常见是字符串 `"{}"`，**不能当认证**；`enterprise_user_info` 只是企业号功能配置，也不代表蓝V。
+- 统一常量 `ACCOUNT_TYPE_LABELS = { enterprise: '蓝V企业号', personal: '个人认证', unverified: '个人账号（无官方认证）' }`；`readAccountProfiles()` 读取档案时按 `accountType` 把旧版写进去的「未认证（疑似白号）」自动归一化成新文案，页面和 `douyin_account_info action=status` 都不再显示「白号」。
+- 采集页账号卡：无官方认证时显示「判定依据：企业认证字段（enterprise_verify_reason）和个人认证字段（custom_verify）都为空」，并明确「未认证 ≠ 白号（白号指未实名新号，网页端判断不了）」；风险档位仍按个人账号口径（评论 ≤150/天、私信 ≤30/天、每小时 ≤5 次）。
+- 自检新增 v0.9.28 断言组（`acct-label-map` / `acct-label-normalize` / `acct-type-v0928` / `acct-copy-waibai` / `acct-readme-v0928`）。
+
+**0.9.27 变更**（2026-11-13）：**获客私信话术重写为「打招呼 + 自我介绍 + 理由 + 轻问」结构**——12 条 `o01`–`o12` 全部按这个顺序改写，例如「你好，我是{identity}，主要做{category}。看到你在关注{need}，可以先给你推荐几款看看，合适再细聊」。新增两个最关键的自我介绍占位符：`{identity}`（我是谁、什么身份，如「XX的源头厂家」「XX服务商」）和 `{category}`（做什么品类/产品），支持源头厂家推荐款、供货/拿货、样品寄样、批发价目、新品/爆款推荐、定制代工，也保留同行交流、案例复盘、合作邀约、送资料、活动邀约、回访同步。`SCRIPT_RULES` 与 `outreachChecklist()` 增加一条硬要求：首条必须打招呼并说清「我是谁、做什么」，不要一上来只发产品/报价；首条仍不放价格/联系方式/链接。
+
+
+**0.9.26 变更**（2026-11-12）：**新增受控自动发送私信（`douyin_outreach action=send`）**——agent 可以用本机已登录的抖音账号，把获客话术逐条发给采集结果里挑出的意向用户。发送仍是自动化操作，有触发验证/封号风险，所以做了**工具层硬闸门**：
+- **必须显式传 `account`**（店铺账号管理里的抖音账号 id/名字）：不传一律拒绝；账号不存在/用不了它的登录态直接报错。配额与记账都按这个账号算。
+- **必须已识别账号类型**：从 `<DOUYIN_HOME>/account-profile.json` 按该账号取类型；没识别过就拒绝并提示先 `douyin_account_info action=refresh account=…`。
+- **配额硬限制**（运营经验值）：蓝V 私信 ≤80/天、≤30/小时；个人认证 ≤30/天、≤5/小时；未认证按个人账号口径（评论 ≤150/天、私信 ≤30/天、≤5/小时）。`max` 默认 5、硬上限 10，并再取当天/本小时剩余额度。
+- **7 天去重**：同一目标 7 天内已私信过 → 跳过，不重复发。
+- **文案闸门**：变量没填完、带微信/电话/链接等联系方式/导流词 → 拒绝发送。
+- **`dryRun` 默认 true**：只打开对方主页 → 点「私信」→ 把文案填进输入框，**停在发送前不点发送**；显式传 `dryRun: false` 才真的发。真发时每条间隔 40–90 秒随机，出现验证浮层/「操作过于频繁」立即整批停（`endedBy=captcha|frequent`），每条成功才写记账。
+- 平台限制：**对方回复或关注你之前，只能发送一条文字消息**，所以每批只发首条、7 天内不重复、首条不推销。
+- 文档/自检：README 新增「受控自动发送私信（v0.9.26：action=send）」章节；自检新增 v0.9.26 断言组。**任何真发送都必须使用者明确授权后再把 dryRun 传 false。**
+
+**0.9.25 变更**（2026-11-12，历史）：**新增「主动私信获客」（给 agent 用的第 4 个工具 `douyin_outreach`）**——`scripts-library.mjs` 新增 `outreach` 场景 **12 条主动获客私信话术**（同城同行 / 案例复盘 / 合作邀约 / 需求确认 / 同行请教 / 转介绍 / 活动邀约 / 送资料 / 小单试合作 / 服务切入 / 活动直播邀约 / 回访同步）；新增 `outreach.mjs`：按账号类型给配额，`action=guide|list|pick|draft|record|quota`：
+- `draft` 把 `{变量}` 填成待发文案，并做发送前检查（缺变量、文案里带联系方式/导流词、今日/本小时配额超限、对同一目标 7 天内已私信过、同一条话术今天已用 ≥3 次）；
+- `record` 记一条「已发」到 `<DOUYIN_HOME>/outreach-log.json`，`quota` 查今天/本小时已用与剩余；
+- **插件仍不发送任何内容**：工具只产出话术与配额记账，发送由 agent 或使用者完成（不自动群发、不绕验证）。agent 正确流程：`douyin_account_info` 确认账号类型 → `douyin_comments` 采目标 → `douyin_outreach draft` 生成文案 → 人工/agent 发送 → `douyin_outreach record` 记账。
+- 自检新增 v0.9.25 一组断言（模块/配额三档/工具/参数/输出 schema/打包白名单/README）。
+
+**0.9.24 变更**（2026-11-12）：**新增「获客话术库」**（采集页直接浏览、复制、随机轮换；**插件不自动发送**）——内置 24 条话术，按场景分三类：**评论互动**（公开评论，最安全）、**私信打招呼**（首条私信）、**追问 / 邀约**（对方回应后用）；按账号类型自动过滤：**未认证（疑似白号）只给公开评论话术**（私信/追问 tab 不显示），蓝V 与个人认证三类都能用。话术里用 `{videoTitle}` / `{direction}` / `{business}` 等占位符，复制后自己替换。页面同时列出**使用规则 + 配额经验值**（白号评论 ≤ 50 条/天、不建议私信；个人 私信 ≤ 30 条/天、每小时打招呼 ≤ 5 次；蓝V 私信 ≤ 80 条/天、每小时打招呼 ≤ 30 次；同一句别连续用、同一人 7 天内最多 1 次），并记录「今日已复制 N 条」提醒自己控量。
+- 资产文件 `scripts-library.mjs`（纯数据 + `listScripts` / `pickScript` / `allowedScenes`，可直接改文案扩库）；后端 `GET /api/scripts`、`POST /api/scripts/pick`（带 `avoidIds` 避免刚挑过的重复）；前端 `.scripts-card` 全宽卡片。
+- 边界：**只读 + 文案辅助**，不提供自动群发、不绕过验证、不发送任何内容；配额数字是运营经验值，不是抖音官方额度。
+- 自检新增 v0.9.24 一组断言（话术库条数/场景/过滤/接口/页面/样式/打包白名单）。
+
+**0.9.23 变更**（2026-11-12）：**新增「识别自己的抖音账号资质」**（只读）——注册第三个工具 `douyin_account_info`，判定当前登录账号是**蓝V企业号 / 个人认证 / 未认证（疑似白号）**，并在**抖音采集页**（`/plugins/dsh-douyin-comments/app/`「新建采集」卡片内）直接展示徽标、昵称、uid、抖音号、粉丝数、作品数、认证文案和风险档位提示；识别结果写进 `<DOUYIN_HOME>/account-profile.json`（不写「店铺账号管理」插件），为后续「按账号类型控制打招呼/评论配额 + 话术库」打基础。
+- 做法：用和采集相同的登录态打开 `https://www.douyin.com/user/self`，**截页面自己发出的「我的资料」签名请求响应**（`/aweme/v1/web/user/profile/self/` 等，a_bogus/msToken 都由页面计算，插件不自己造签名），再从 `j.user` 的 `enterprise_verify_reason` / `account_cert_info` / `custom_verify` / `personal_verify` 判定类型；截不到响应时用页面发过的签名 URL 重放一次，仍不行才退回读页面文案（只分「认证/未认证」）。持久化 profile 会留着旧缓存，识别前会先清浏览器缓存保证主页重新发请求。
+- 注意：没认证的账号 `account_cert_info` 是字符串 `"{}"`，**不能当「有认证」**（本版专门解析并排除，否则会把白号误判成蓝V）。
+- 工具用法：`action=status` 读已识别的缓存（不发浏览器）；`action=refresh` 重新识别（需要登录，可能要扫码，默认等 180s）；`account` 可传「店铺账号管理」里某个已登录抖音账号的 id/名字（走它的隔离 profile + cookie，不传就用插件自己的登录态）。
+- 边界：**只读识别，不发私信、不发评论、不关注、不改资料**；「白号」没有官方字段，只能给「未认证（疑似白号）」的推断。
+- 自检新增 v0.9.23 一组断言；真机实测（`nagisa`）拿到 `uid=1694788236093520`、`抖音号 69163407913`、粉丝 92、作品 6、类型「未认证（疑似白号）」，约 14s。
 
 **0.9.26 变更**（2026-11-12）：**未开通/到期改成整页拦截**——此前未激活只是隐藏「采集」tab、评论词云仍可用；现在点「抖音评论」直接是授权页：标题（未开通 / 已到期）、到期时间、套餐与价格、「开通/续费订阅」按钮（跳购买页）、「我已有激活码」展开输入框（就地激活，成功后自动进入面板）。词云与采集入口都不再出现。
 
@@ -1079,6 +1159,56 @@ dsh plugin --profile web add file:dsh-douyin-comments
 - `snapshotDir`（0.5.14 起）：**失败或没采完时**才有值（超时 / 无进展 / 被取消 / 抛错），目录里是
   `status.json`（收工原因 `endedBy`、面板 `status` 快照、日志尾部 80 行）+ `screenshot.png` + `page.html` + `run.log`；
   正常采完是空串。保留份数由设置 `keepSnapshots`（默认 20）决定。抛错时这两个路径也会拼进 `error` 文本。
+
+## 账号资质识别（v0.9.23：`douyin_account_info`）
+
+第三个工具，**只读**识别当前登录的抖音账号资质，并在**抖音采集页**直接展示（不写「店铺账号管理」插件）：
+
+- 展示位置：采集控制台「新建采集」卡片里的「我的抖音账号」区域（`app/index.html` 的 `#acctCard`）——徽标（蓝V企业号 / 个人认证 / 未认证（疑似白号））、昵称、uid、抖音号、粉丝、作品、认证文案、上次识别时间；下面一行按类型给风险档位提示（运营经验值，不是官方额度）。
+- 采集页后端：`GET /plugins/dsh-douyin-comments/api/account`（读档案，`?account=` 可选）、`POST /plugins/dsh-douyin-comments/api/account/refresh`（点「识别我的账号」才打开浏览器，未登录等扫码 180s）。页面加载时只读档案，不进浏览器。
+- 参数：`action`（`status` 读缓存 / `refresh` 打开抖音重新识别）、`account`（可选：店铺账号管理里的抖音账号 id 或名字，仅用于选登录态）、`waitLoginSec`（默认 180）、`keepOpen`（调试保留窗口）。
+- 结果文件：`<DOUYIN_HOME>/account-profile.json`（默认 `~/.dsh/douyin-collector/account-profile.json`），结构 `{ version: 1, updatedAt, entries: [{ key, machine, accountType, accountTypeLabel, nickname, uid, secUid, uniqueId, followers, awemeCount, avatar, verifyReason, source, checkedAt }] }`；`key` 是店铺账号 id（只作区分），插件自己的登录态用 `default`。
+- `accountType`：`enterprise`（蓝V企业号）/ `personal`（个人认证）/ `unverified`（未认证，疑似白号，这是推断不是官方字段）；`source`：`api`（截到页面签名请求）/ `dom`（只读页面文案的兜底）。
+- 判定字段：`enterprise_verify_reason`、`account_cert_info`（**没认证时是字符串 `"{}"`，要解析排除**）、`custom_verify`、`personal_verify`。
+- 登录：与采集共用登录态（`~/.dsh/douyin-collector/chrome-profile`），未登录会等扫码；传 `account` 时走「店铺账号管理」插件的隔离 profile + cookie。
+- 不发送任何内容：不发私信、不发评论、不关注、不改资料。
+
+## 获客话术库（v0.9.24）
+
+采集页底部的**全宽卡片**（`.scripts-card`）：把成体系的获客话术放在这里，供你**自己复制、自己发送**——插件不发送任何内容，也不绕过验证。
+
+- 资产：`scripts-library.mjs`（纯数据，可直接改文案扩库）。当前 **24 条**，三个场景：
+  - `comment` 评论互动（公开评论，风险最低）：共鸣/认同/夸细节/提问/同城/收藏/蹲后续/补充经验/真诚提问；
+  - `dm` 私信打招呼（首条私信：先给理由，再提一个小问题）；
+  - `followup` 追问 / 邀约（对方回应之后再用，别第一条就推销）。
+- 账号类型过滤：`allowedScenes(accountType)`——`unverified`（未认证/疑似白号）**只允许 `comment`**，私信/追问 tab 不显示；`enterprise` / `personal` 三类都能用。
+- 变量：话术里的 `{videoTitle}` / `{direction}` / `{city}` / `{business}` / `{question}` 等占位符**由你自己替换**（插件不填，避免填成硬广）；主动获客私信另有 `{identity}`（自我介绍：我是谁、什么身份）和 `{category}`（品类/产品），这两项是首条必须填的。
+- 页面上同时展示 `SCRIPT_RULES`：同一句别连续用、同一人 7 天内最多 1 次、每天同一句不超过 3 次；白号评论 ≤ 50 条/天、不建议私信；个人 私信 ≤ 30 条/天、每小时打招呼 ≤ 5 次；蓝V 私信 ≤ 80 条/天、每小时打招呼 ≤ 30 次。**这些是运营经验值，不是抖音官方额度**；到量就停，遇到验证/滑块立刻停手。
+- 接口：`GET /plugins/dsh-douyin-comments/api/scripts?scene=&accountType=`（列表 + 场景 + 规则 + `allowedScenes`）、`POST /plugins/dsh-douyin-comments/api/scripts/pick`（body `{scene, accountType, avoidIds}`，随机挑一条并避开刚用过的）。
+- 页面：「随机一条」给顶部推荐区；每条话术右侧「复制」把文案写进剪贴板，并计数「今日已复制 N 条」（`localStorage` 里的 `cw.scriptUsage`）。
+
+## 主动私信获客（v0.9.25：`douyin_outreach`）
+
+面向 **agent** 的主动获客工具：把 `outreach` 场景的话术变成可调用能力，并管配额记账。v0.9.25 时**本工具不发送任何内容、不操作抖音页面**；v0.9.26 起新增 `action=send` 受控发送（见下一章）。
+
+- 资产：`scripts-library.mjs` 的 `SCRIPTS` 里 `id: 'o01'`–`'o12'` 共 **12 条主动获客私信**（`accountTypes: ['enterprise','personal']`），v0.9.27 起统一为「打招呼（你好）→ 自我介绍（`{identity}`：我是谁/什么身份，`{category}`/`{business}`：做什么）→ 为什么找他 → 一句轻问」。
+- 配额（`OUTREACH_QUOTAS`，运营经验值，不是抖音官方额度）：蓝V企业号 评论 300/天、私信 80/天、每小时 30；个人认证 评论 200/天、私信 30/天、每小时 5；未认证按个人账号口径 评论 150/天、私信 30/天、每小时 5。
+- 记账文件：`<DOUYIN_HOME>/outreach-log.json`（`{version, updatedAt, entries:[{at, scene, scriptId, accountType, target, note}]}`，最多保留 5000 条）。
+- 工具 `douyin_outreach` 参数：`action`（`guide` / `list` / `pick` / `draft` / `send` / `record` / `quota`）、`scene`（`comment` / `dm` / `outreach` / `followup`）、`accountType`、`account`、`targets`、`max`、`dryRun`、`scriptId`、`variables`（JSON 字符串）、`target`、`avoidIds`（逗号分隔）、`note`、`limit`。
+- `draft` 的发送前检查：缺变量、文案里带联系方式/导流词、今日/本小时配额超限、对同一目标 7 天内已私信过、同一条话术今天已用 ≥3 次；`record` 先做检查再记账（不会把刚记的这条算成「7 天内已发」）。
+- agent 正确用法：`douyin_account_info` 确认账号类型 → `douyin_comments` 采目标 → `douyin_outreach action=draft` 生成文案 → 发送 → `douyin_outreach action=record` 记账；到配额或出现验证/滑块立刻停手。
+
+## 受控自动发送私信（v0.9.26：`douyin_outreach action=send`）
+
+**这是唯一会操作抖音页面并点「发送」的入口**，默认 dry-run，必须使用者明确授权后才用 `dryRun: false`。
+
+- 前置：`account`（店铺账号管理里的抖音账号）必填；该账号必须已经用 `douyin_account_info action=refresh account=…` 识别过类型（读 `<DOUYIN_HOME>/account-profile.json`）。
+- 目标：`targets` 是逗号分隔的 `sec_uid` 或主页链接 `https://www.douyin.com/user/<sec_uid>`；建议只从采集结果 CSV 的 `user_sec_uid` 里挑明确意向的人。
+- 硬闸门（全部在 `index.js` 的 execute 里，agent 绕不过）：不传 account 拒绝；账号类型缺失拒绝；当天/本小时私信配额用完拒绝；`max` 默认 5、硬上限 10；7 天内已私信过的目标跳过；文案有未填变量或联系方式/导流词拒绝。
+- 发送流程（core：`sendDouyinDmBatch` → `dmOpenChatForTarget` → `dmFillAndMaybeSend`）：打开目标主页 → 页内点「私信」（按 `textContent==='私信'` + 可见尺寸过滤，避开 0x0 隐藏副本）→ 等输入框 `div[contenteditable="true"]`（`data-placeholder="发送消息"`）→ 聚焦后 `execCommand('insertText')` 填文案 → dry-run 停在这里；真发才点 `path fill="#FE2C55"` 的发送按钮 → 2.6s 后 `dmDetectStop` 查验证浮层/「操作过于频繁」→ 校验编辑器清空。
+- 停止与记录：`endedBy` = `done` / `captcha` / `frequent` / `abort`；每条截图到 `<DOUYIN_HOME>/dm-shots/`；真发送成功才 `outreachRecord` 记账；运行日志 `douyin_dm 运行日志`（路径在 `logPath`）。
+- 平台限制：**对方回复或关注你之前，只能发送一条文字消息**；所以每批只发首条、7 天内不重复、首条不推销（先给理由/价值，再问一个小问题）。
+- 风险：自动私信仍可能触发验证甚至封号，只在小批量、真实意向目标上用；不做绕验证、不多账号轮换、不代理规避。
 
 ## 输出格式
 

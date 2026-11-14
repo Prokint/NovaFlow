@@ -726,3 +726,145 @@ input::placeholder { color: var(--meta); }
   .fav-row { align-items: flex-start; }
   .fav-actions { flex-direction: column; align-items: stretch; }
 }
+
+/* v0.9.23: 我的抖音账号资质卡片（采集页展示，只读识别） */
+.acct-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+}
+.acct-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.acct-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--surface-3);
+  color: var(--meta);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.acct-card[data-state='enterprise'] .acct-type {
+  border-color: var(--info);
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+}
+.acct-card[data-state='personal'] .acct-type {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.acct-card[data-state='unverified'] .acct-type {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.acct-nick {
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-card[data-state='empty'] .acct-nick { color: var(--muted); font-weight: 500; }
+.acct-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+.acct-kv b { color: var(--meta); font-weight: 500; margin-right: 4px; }
+.acct-kv code { color: var(--text); font-family: var(--mono); font-size: 11px; }
+.acct-reason {
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.acct-hint { margin-top: 7px; color: var(--meta); font-size: 11.5px; line-height: 1.55; }
+.acct-foot { margin-top: 5px; color: var(--meta); font-size: 11px; }
+
+/* ---- v0.9.24：获客话术库（纯文案，插件不自动发送）---- */
+.span-2 { grid-column: 1 / -1; }
+.scripts-card .scripts-title { display: flex; align-items: center; gap: 8px; }
+.scripts-card .scripts-head-actions { display: flex; align-items: center; gap: 10px; }
+.script-usage { color: var(--meta); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.scripts-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.script-tab.active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.scripts-hint { margin: 8px 0 2px; color: var(--meta); font-size: 11.5px; line-height: 1.55; }
+.script-pick {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-ctl);
+  background: var(--accent-soft);
+}
+.script-pick.hidden { display: none; }
+.script-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.script-pick-text { margin-top: 7px; color: var(--ink); font-size: 13px; line-height: 1.6; }
+.script-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.script-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 420px; overflow: auto; padding-right: 2px; }
+.script-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+}
+.script-item:hover { border-color: var(--line-strong); }
+.script-main { min-width: 0; }
+.script-item-top { display: flex; align-items: center; gap: 6px; }
+.script-text { margin-top: 5px; color: var(--text); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.script-empty { padding: 14px 0; color: var(--meta); font-size: 12px; }
+.script-rules {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--meta);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.script-rules-title { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.script-rule { margin-top: 2px; }
+.script-pick-note { margin-top: 6px; color: var(--meta); font-size: 11px; line-height: 1.5; }
+
+/* v0.9.37：发送记录（今日/本小时配额 + 最近发送明细） */
+.send-quota {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, .14);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .04);
+  font-size: 12px;
+}
+.send-quota-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.send-quota-title { font-weight: 600; color: #334155; }
+.send-quota-line { color: #475569; }
+.send-recent { margin-top: 6px; max-height: 130px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #64748b; line-height: 1.7; }
+.send-recent-item { white-space: nowrap; }
+.send-recent-head { color: #94a3b8; }
+.send-quota-note { margin: 6px 0 0; color: #64748b; font-size: 11px; }
+
+/* v0.9.38: 获客工作台（?view=outreach）——同一个页面，隐藏采集相关的三块卡片。 */
+body.outreach-mode .create-card,
+body.outreach-mode .status-card,
+body.outreach-mode .exports-card { display: none !important; }
+body.outreach-mode .topbar-meta { display: none; }
+body.outreach-mode .acct-section { margin-top: 0; }

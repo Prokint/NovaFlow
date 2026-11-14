@@ -13,10 +13,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, resolveDouyinVideoInputs, DEFAULTS, describeSearchOptions, normalizeSearchOptions, resolveOutDir, sessionWorkspaceCwd } from './collector.mjs';
+import { collectDouyinComments, collectDouyinKeyword, collectDouyinLinks, resolveDouyinVideoInputs, DEFAULTS, describeSearchOptions, normalizeSearchOptions, resolveOutDir, sessionWorkspaceCwd, fetchDouyinSelfProfile, readAccountProfiles, accountProfilePath, accountTypeFromUser, sendDouyinDmBatch } from './collector.mjs';
 import { EntitlementError, activate, entitlementEnabled, issueKey, machineId, status as entitlementStatus, textOf } from './entitlement.mjs';
 import { CONSOLE_PREFIX, createConsole, rememberOutDir } from './console.mjs';
 import { VIEWER_PREFIX, createViewerHandler } from './viewer.mjs';
+import { resolveShopAccount } from './shop-accounts-bridge.mjs';
+import {
+  outreachGuide, outreachList, outreachPick, outreachDraft, outreachRecord, outreachQuota, outreachPrecheck, OUTREACH_QUOTAS,
+} from './outreach.mjs';
 
 /** Loader 稳定标识（同时也是 cordis.patch.yml 里 id 的来源）。 */
 export const name = 'dsh-douyin-comments';
@@ -736,8 +740,465 @@ export function apply(ctx, config = {}) {
     },
   }));
 
-  // 插件卸载时精确注销这个工具。
-  if (typeof ctx.effect === 'function') ctx.effect(() => () => { dispose(); disposeEnt(); });
+  // v0.9.23：识别「自己的抖音账号」资质（蓝V企业号 / 个人账号 / 白号（新号））。
+  // 只读：打开自己的主页、复用页面自己发出的签名请求；结果写 <DOUYIN_HOME>/account-profile.json，
+  // 抖音采集页（/plugins/dsh-douyin-comments/app/）直接读这个文件展示，不进「店铺账号管理」插件。
+  // 不发私信、不发评论、不改资料。
+  const disposeAccount = ctx.tools.register(defineTool({
+    name: 'douyin_account_info',
+    description: '识别当前登录的抖音账号属于哪类：蓝V企业号 / 个人账号（注册满 1 个月、无官方认证）/ 白号（新号，注册不足 1 个月），并把昵称、uid、粉丝数、作品数、注册时间写进 account-profile.json。只读识别，不发私信、不发评论、不改资料。action=status 读已缓存的结果；action=refresh 打开抖音自己的主页重新识别一次（需要该账号已登录，可能要扫码）。',
+    parameters: {
+      action: {
+        type: 'string',
+        description: 'status = 读已识别的结果（默认，不发浏览器）；refresh = 打开抖音重新识别一次。',
+      },
+      account: {
+        type: 'string',
+        description: '可选：用「店铺账号管理」插件里的某个已登录抖音账号来识别（传账号 id 或名字）；不传 = 用本插件自己 profile 的登录态。',
+      },
+      waitLoginSec: {
+        type: 'integer',
+        description: '可选：识别时等扫码登录的秒数（默认 180；0 = 不等待，未登录直接报错）。',
+      },
+      keepOpen: {
+        type: 'boolean',
+        description: '调试用：识别完不关浏览器窗口（默认 false）。',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          accountType: { type: 'string', required: true },
+          accountTypeLabel: { type: 'string', required: true },
+          nickname: { type: 'string', required: true },
+          uid: { type: 'string', required: true },
+          uniqueId: { type: 'string', required: true },
+          followers: { type: 'number', required: true },
+          awemeCount: { type: 'number', required: true },
+          registeredAt: { type: 'string', required: true },
+          accountAgeDays: { type: 'integer', required: true },
+          verifyReason: { type: 'string', required: true },
+          source: { type: 'string', required: true },
+          checkedAt: { type: 'string', required: true },
+          file: { type: 'string', required: true },
+          message: { type: 'string', required: true },
+        },
+      },
+      render: (out) => {
+        const lines = [];
+        if (out.ok) {
+          lines.push('抖音账号资质：' + (out.accountTypeLabel || '未知') + (out.nickname ? '（' + out.nickname + '）' : ''));
+          if (out.uid) lines.push('uid：' + out.uid + (out.uniqueId ? '（抖音号 ' + out.uniqueId + '）' : ''));
+          if (out.followers || out.awemeCount) lines.push('粉丝 ' + (out.followers || 0) + ' · 作品 ' + (out.awemeCount || 0));
+          if (out.registeredAt) {
+            const day = String(out.registeredAt).slice(0, 10);
+            lines.push('注册：' + day + (out.accountAgeDays ? '（约 ' + out.accountAgeDays + ' 天）' : ''));
+          }
+          if (out.verifyReason) lines.push('认证信息：' + out.verifyReason);
+          if (out.source) lines.push('判定来源：' + (out.source === 'api' ? '接口' : (out.source === 'dom' ? '页面文案' : out.source)) + (out.checkedAt ? '（识别于 ' + out.checkedAt + '）' : ''));
+          if (out.file) lines.push('档案文件：' + out.file);
+        } else {
+          lines.push('识别失败：' + (out.message || '未知错误'));
+        }
+        if (out.message && out.ok) lines.push(out.message);
+        return [{ type: 'text', text: lines.join('\n') }];
+      },
+    },
+    isConcurrencySafe: () => true,
+    async execute(args) {
+      const action = String(args.action || 'status').trim().toLowerCase();
+      const accountRef = String(args.account || '').trim();
+      try {
+        if (action !== 'refresh') {
+          const store = readAccountProfiles();
+          const entries = Array.isArray(store.entries) ? store.entries : [];
+          const hit = accountRef
+            ? entries.find((e) => String(e.key || '').toLowerCase() === accountRef.toLowerCase()
+              || String(e.accountName || '').toLowerCase() === accountRef.toLowerCase())
+            : (entries.find((e) => String(e.key || '') === 'default') || entries[entries.length - 1]);
+          if (!hit) {
+            return {
+              ok: true, accountType: '', accountTypeLabel: '', nickname: '', uid: '', uniqueId: '',
+              followers: 0, awemeCount: 0, registeredAt: '', accountAgeDays: 0, verifyReason: '', source: '', checkedAt: '', file: accountProfilePath(),
+              message: '还没有识别记录：用 action=refresh 识别一次（' + accountProfilePath() + '）',
+            };
+          }
+          return {
+            ok: true,
+            accountType: String(hit.accountType || ''),
+            accountTypeLabel: String(hit.accountTypeLabel || ''),
+            nickname: String(hit.nickname || ''),
+            uid: String(hit.uid || ''),
+            uniqueId: String(hit.uniqueId || ''),
+            followers: Number(hit.followers) || 0,
+            awemeCount: Number(hit.awemeCount) || 0,
+            registeredAt: String(hit.registeredAt || ''),
+            accountAgeDays: Number(hit.accountAgeDays) || 0,
+            verifyReason: String(hit.verifyReason || ''),
+            source: String(hit.source || ''),
+            checkedAt: String(hit.checkedAt || ''),
+            file: accountProfilePath(),
+            message: entries.length > 1 ? '共识别过 ' + entries.length + ' 个账号，可用 account 指定其中一个。' : '',
+          };
+        }
+        const res = await fetchDouyinSelfProfile({
+          account: accountRef,
+          waitLoginSec: args.waitLoginSec,
+          keep: args.keepOpen === true,
+          log: (line) => (typeof console !== 'undefined' && console.log ? console.log('[douyin-account] ' + line) : undefined),
+        });
+        return {
+          ok: true,
+          accountType: String(res.accountType || ''),
+          accountTypeLabel: String(res.accountTypeLabel || ''),
+          nickname: String(res.nickname || ''),
+          uid: String(res.uid || ''),
+          uniqueId: String(res.uniqueId || ''),
+          followers: Number(res.followers) || 0,
+          awemeCount: Number(res.awemeCount) || 0,
+          registeredAt: String(res.registeredAt || ''),
+          accountAgeDays: Number(res.accountAgeDays) || 0,
+          verifyReason: String(res.verifyReason || ''),
+          source: String(res.source || ''),
+          checkedAt: String(res.checkedAt || ''),
+          file: String(res.file || accountProfilePath()),
+          message: '已更新账号资质档案。',
+        };
+      } catch (e) {
+        return {
+          ok: false, accountType: '', accountTypeLabel: '', nickname: '', uid: '', uniqueId: '',
+          followers: 0, awemeCount: 0, registeredAt: '', accountAgeDays: 0, verifyReason: '', source: '', checkedAt: '', file: accountProfilePath(),
+          message: String((e && e.message) || e),
+        };
+      }
+    },
+  }));
+
+  // v0.9.25：主动私信获客话术 —— 给 agent 用的「话术 + 配额记账」工具。
+  // v0.9.26：新增 action=send —— 受控自动发送（必须显式传 account，dryRun 默认 true）。
+  const disposeOutreach = ctx.tools.register(defineTool({
+    name: 'douyin_outreach',
+    description: [
+      '主动私信获客：话术库 + 配额记账 + **受控自动发送**（给 agent 用）。内置 36 条话术（场景：comment 评论互动 / dm 私信打招呼 / outreach 主动私信获客 / followup 追问邀约），按账号类型过滤。',
+      'action=guide 返回当前账号的可用场景、使用规则、当天配额和获客执行清单；action=list 列话术；action=pick 随机挑一条；action=draft 把 {变量} 填成待发文案并做发送前检查；action=send 用本机已登录的抖音账号把文案逐条发给 targets 里的目标（**受控**：必须传 account、必须已识别账号类型、过配额/7天去重/联系方式检查、dryRun 默认 true 只填不点发送）；action=record 记账；action=quota 查用量。',
+      '配额是运营经验值，不是抖音官方额度：蓝V 评论 200-300/天、私信 ≤80/天、每小时 ≤30；个人账号/个人认证 评论 100-200（本地取 150）/天、私信 ≤30/天、每小时 ≤5；白号（新号）不建议私信（0 条）、评论 ≤50/天。到量或出现验证/滑块必须停手。',
+      '每个陌生人（对方未回复/未关注）只能发 1 条文字消息；首条不要放价格、联系方式、链接，不要第一条就推销。send 仍是自动化操作，有触发验证/封号风险，只在小批量、真实意向目标上使用。',
+    ].join(' '),
+    parameters: {
+      action: {
+        type: 'string',
+        description: 'guide（默认）= 规则+配额+执行清单；list = 列话术；pick = 随机挑一条；draft = 生成待发文案；send = 受控发送私信（默认 dry-run）；record = 记一条已发；quota = 查用量。',
+      },
+      scene: {
+        type: 'string',
+        description: '场景：comment 评论互动 / dm 私信打招呼 / outreach 主动私信获客 / followup 追问邀约。不传 = 全部允许场景。',
+      },
+      accountType: {
+        type: 'string',
+        description: '账号类型：enterprise 蓝V企业号 / personal 个人账号（含个人认证）/ unverified 白号（新号，注册不足 1 个月）。不传 = 按保守口径（白号）并提示去识别。',
+      },
+      account: {
+        type: 'string',
+        description: 'send 必填：店铺账号管理里的抖音账号（id 或名字）。不传 account 一律拒绝发送；账号类型按 account-profile.json 里该账号的记录做硬闸门。',
+      },
+      targets: {
+        type: 'string',
+        description: 'send 必填：逗号分隔的目标 sec_uid 或抖音主页链接（https://www.douyin.com/user/<sec_uid>）。建议只在采集结果里挑明确意向的评论者，每批 ≤5 人。',
+      },
+      max: {
+        type: 'integer',
+        description: 'send 可选：本批最多发几条（默认 5，硬上限 10，并受当天/本小时剩余私信额度限制）。',
+      },
+      dryRun: {
+        type: 'boolean',
+        description: 'send 可选：默认 true（只打开聊天窗、把文案填进输入框，停在发送前）；显式传 false 才会真的点「关注」和「发送」。',
+      },
+      follow: {
+        type: 'boolean',
+        description: 'send 可选：默认 true —— 发私信前先点目标的「关注」（已关注会自动识别并跳过；dryRun 时只检测不点）。传 false 则只发私信不关注。',
+      },
+      scriptId: {
+        type: 'string',
+        description: 'draft/send/record 可选：指定话术 id（如 o01、d01、c03）；draft/send 不传则按场景自动挑一条。',
+      },
+      variables: {
+        type: 'string',
+        description: 'draft/send 可选：JSON 字符串，把话术里的 {变量} 填掉，例如 {"city":"上海","direction":"短视频剪辑","need":"剪辑师"}。没填的变量会在 missing 里列出，send 会拒绝带未填变量的文案。',
+      },
+      target: {
+        type: 'string',
+        description: '可选：单个目标用户标识（昵称/uid/抖音号），用于 record 记账与「7 天内是否已私信过同一个人」检查。',
+      },
+      avoidIds: {
+        type: 'string',
+        description: 'pick/draft 可选：逗号分隔的最近用过的话术 id，尽量不要重复用同一句。',
+      },
+      note: {
+        type: 'string',
+        description: 'record 可选：备注（例如「评论区的意向客户」）。',
+      },
+      limit: {
+        type: 'integer',
+        description: 'list 可选：最多返回几条（默认全部）。',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          action: { type: 'string', required: true },
+          accountType: { type: 'string', required: true },
+          accountTypeLabel: { type: 'string', required: true },
+          scene: { type: 'string', required: true },
+          scriptId: { type: 'string', required: true },
+          title: { type: 'string', required: true },
+          text: { type: 'string', required: true },
+          warnings: { type: 'string', required: true },
+          quotaText: { type: 'string', required: true },
+          rules: { type: 'string', required: true },
+          checklist: { type: 'string', required: true },
+          scripts: { type: 'string', required: true },
+          file: { type: 'string', required: true },
+          message: { type: 'string', required: true },
+          dryRun: { type: 'boolean', required: true },
+          sent: { type: 'integer', required: true },
+          endedBy: { type: 'string', required: true },
+          details: { type: 'string', required: true },
+        },
+      },
+      render: (out) => {
+        const lines = [];
+        if (!out.ok) {
+          lines.push('douyin_outreach 失败：' + (out.message || '未知错误'));
+          return [{ type: 'text', text: lines.join('\n') }];
+        }
+        if (out.action === 'list') {
+          let items = [];
+          try { items = JSON.parse(out.scripts || '[]'); } catch { items = []; }
+          lines.push('可用话术 ' + items.length + ' 条' + (out.scene ? '（场景 ' + out.scene + '）' : '') + '：');
+          for (const it of items) {
+            lines.push('· [' + it.id + '] ' + it.title + '（' + it.sceneLabel + '）：' + it.text);
+          }
+        } else if (out.action === 'draft' || out.action === 'pick') {
+          if (out.title) lines.push('话术 [' + (out.scriptId || '-') + '] ' + out.title + '（' + (out.scene || '') + '）');
+          if (out.text) lines.push('待发文案：\n' + out.text);
+        } else if (out.action === 'send') {
+          lines.push((out.dryRun ? 'dry-run（只填文案、没有点发送）' : '真实发送') + '：' + (out.sent || 0) + ' 条 · endedBy=' + (out.endedBy || '-'));
+          if (out.text) lines.push('本次文案：\n' + out.text);
+          if (out.details) lines.push('逐条结果：\n' + out.details.split('\n').map((s) => '  ' + s).join('\n'));
+          if (out.quotaText) lines.push(out.quotaText);
+        } else if (out.action === 'guide') {
+          lines.push('账号类型：' + (out.accountTypeLabel || '未知'));
+          if (out.quotaText) lines.push(out.quotaText);
+          if (out.rules) lines.push('使用规则：\n' + out.rules.split('\n').map((s) => '· ' + s).join('\n'));
+          if (out.checklist) lines.push('执行清单：\n' + out.checklist.split('\n').map((s) => '  ' + s).join('\n'));
+        } else if (out.action === 'record' || out.action === 'quota') {
+          if (out.action === 'record' && out.message) lines.push(out.message);
+          lines.push(out.quotaText || out.message || '');
+        }
+        if (out.warnings) lines.push('⚠️ ' + out.warnings.split('；').join('\n⚠️ '));
+        if (out.action === 'guide' && out.file) lines.push('记账文件：' + out.file);
+        if (out.message && out.action !== 'quota' && out.action !== 'record') lines.push(out.message);
+        return [{ type: 'text', text: lines.join('\n') }];
+      },
+    },
+    isConcurrencySafe: () => true,
+    async execute(args) {
+      const action = String(args.action || 'guide').trim().toLowerCase();
+      const accountType = String(args.accountType || '').trim().toLowerCase();
+      const scene = String(args.scene || '').trim().toLowerCase();
+      const scriptId = String(args.scriptId || '').trim().toLowerCase();
+      const target = String(args.target || '').trim();
+      const note = String(args.note || '').trim();
+      const limit = Number(args.limit) || 0;
+      const avoidIds = String(args.avoidIds || '').split(/[,，\s]+/u).filter(Boolean);
+      let variables = {};
+      if (typeof args.variables === 'string' && args.variables.trim()) {
+        try { variables = JSON.parse(args.variables); } catch { variables = {}; }
+      } else if (args.variables && typeof args.variables === 'object') {
+        variables = args.variables;
+      }
+      const empty = {
+        ok: true, action, accountType: '', accountTypeLabel: '', scene: '', scriptId, title: '', text: '',
+        warnings: '', quotaText: '', rules: '', checklist: '', scripts: '', file: '', message: '',
+        dryRun: false, sent: 0, endedBy: '', details: '',
+      };
+      const quotaTextOf = (q) => (q.accountTypeLabel + '：今天评论 ' + q.used.commentToday + '/' + q.limits.commentPerDay
+        + ' · 私信 ' + q.used.dmToday + '/' + q.limits.dmPerDay
+        + ' · 本小时私信 ' + q.used.dmThisHour + '/' + q.limits.dmPerHour
+        + ' · 今天关注 ' + (q.used.followsToday || 0) + ' 个'
+        + '（' + (q.unknownAccountType ? '本地记录，账号类型未识别，按保守口径' : '本地记录') + '）');
+      try {
+        if (action === 'list') {
+          const items = outreachList({ scene, accountType, limit });
+          return {
+            ...empty,
+            scene: scene || '',
+            accountType: accountType || '',
+            accountTypeLabel: (OUTREACH_QUOTAS[accountType] && OUTREACH_QUOTAS[accountType].label) || '',
+            scripts: JSON.stringify(items),
+            message: '共 ' + items.length + ' 条可用话术' + (scene ? '（' + scene + '）' : ''),
+          };
+        }
+        if (action === 'pick') {
+          const item = outreachPick({ scene, accountType, avoidIds });
+          if (!item) return { ...empty, ok: false, message: '这个场景下没有可用话术（当前账号类型不允许该场景）。' };
+          return { ...empty, scene: item.scene, scriptId: item.id, title: item.title, text: item.text, message: '已随机挑一条：' + item.id };
+        }
+        if (action === 'draft') {
+          const d = outreachDraft({ scene, accountType, scriptId, variables, target, avoidIds, home: DEFAULTS.home });
+          return {
+            ...empty,
+            action: 'draft',
+            accountType: d.quota.accountType,
+            accountTypeLabel: d.quota.accountTypeLabel,
+            scene: d.scene,
+            scriptId: d.scriptId,
+            title: d.title,
+            text: d.text,
+            warnings: d.warnings.join('；'),
+            quotaText: quotaTextOf(d.quota),
+            message: '待发文案已生成（插件不会自动发送）。',
+          };
+        }
+        if (action === 'record') {
+          const r = outreachRecord({ scene, scriptId, accountType, target, note, home: DEFAULTS.home });
+          return {
+            ...empty,
+            accountType: r.quota.accountType,
+            accountTypeLabel: r.quota.accountTypeLabel,
+            scene: r.entry.scene,
+            scriptId: r.entry.scriptId,
+            warnings: r.warnings.join('；'),
+            quotaText: quotaTextOf(r.quota),
+            file: r.file,
+            message: '已记账：' + r.entry.scene + (r.entry.scriptId ? ' / ' + r.entry.scriptId : '') + (r.entry.target ? ' → ' + r.entry.target : '')
+              + '（今天累计记录 ' + r.total + ' 条）',
+          };
+        }
+        if (action === 'quota') {
+          const q = outreachQuota({ accountType, home: DEFAULTS.home });
+          return {
+            ...empty,
+            accountType: q.accountType,
+            accountTypeLabel: q.accountTypeLabel,
+            warnings: q.warnings.join('；'),
+            quotaText: quotaTextOf(q),
+            message: '',
+          };
+        }
+        if (action === 'send') {
+          const accountRef = String(args.account || '').trim();
+          if (!accountRef) {
+            return { ...empty, ok: false, message: '发送私信必须指定 account（店铺账号管理里的抖音账号）；不传 account 一律拒绝。' };
+          }
+          const rawTargets = String(args.targets || '').split(/[,，\s]+/u).map((s) => {
+            const t = String(s || '').trim();
+            if (!t) return '';
+            const m = t.match(/\/user\/([A-Za-z0-9_-]{5,})/u);
+            if (m) return m[1];
+            if (/(https?|www\.)/u.test(t)) return '';
+            return t;
+          }).filter(Boolean);
+          const targets = Array.from(new Set(rawTargets));
+          if (!targets.length) {
+            return { ...empty, ok: false, message: '没有可发送的目标：targets 传逗号分隔的 sec_uid 或抖音主页链接（https://www.douyin.com/user/<sec_uid>）。' };
+          }
+          let shopAccount = null;
+          try { shopAccount = await resolveShopAccount(accountRef, { platform: 'douyin' }); } catch (e) {
+            return { ...empty, ok: false, message: '找不到店铺账号「' + accountRef + '」：' + String((e && e.message) || e) };
+          }
+          const store = readAccountProfiles({ home: DEFAULTS.home });
+          const entry = (store.entries || []).find((e) =>
+            String(e.key || '') === String(shopAccount.id || '')
+            || String(e.accountName || '') === String(shopAccount.name || '')
+            || String(e.accountRef || '') === String(shopAccount.id || ''));
+          if (!entry || !entry.accountType) {
+            return { ...empty, ok: false, message: '这个账号（' + shopAccount.name + '）还没识别过类型：先调用 douyin_account_info action=refresh account="' + accountRef + '" 识别一次；发送私信按账号类型硬限制配额。' };
+          }
+          const at = String(entry.accountType);
+          const q = outreachQuota({ accountType: at, home: DEFAULTS.home });
+          const sceneEff = scene || 'outreach';
+          const d = outreachDraft({ scene: sceneEff, accountType: at, scriptId, variables, target: targets[0], home: DEFAULTS.home });
+          if (d.missingVariables && d.missingVariables.length) {
+            return { ...empty, ok: false, accountType: at, accountTypeLabel: q.accountTypeLabel, scene: d.scene, scriptId: d.scriptId, title: d.title, text: d.text, warnings: '文案里还有没填的变量：' + d.missingVariables.map((k) => '{' + k + '}').join('、') + '；先把 variables 填全再发。', quotaText: quotaTextOf(q), message: '未发送：文案变量没填完。' };
+          }
+          if ((d.warnings || []).some((w) => String(w).includes('联系方式'))) {
+            return { ...empty, ok: false, accountType: at, accountTypeLabel: q.accountTypeLabel, scene: d.scene, scriptId: d.scriptId, title: d.title, text: d.text, warnings: d.warnings.join('；'), quotaText: quotaTextOf(q), message: '未发送：文案里带联系方式/导流词，先改文案。' };
+          }
+          const maxByQuota = Math.min(q.remaining.dmToday, q.remaining.dmThisHour);
+          const maxWant = Number(args.max) > 0 ? Number(args.max) : 5;
+          const max = Math.min(maxWant, 10, maxByQuota);
+          if (max <= 0) {
+            return { ...empty, ok: false, accountType: at, accountTypeLabel: q.accountTypeLabel, warnings: q.warnings.join('；'), quotaText: quotaTextOf(q), message: '未发送：今天/本小时的私信额度已用完。' };
+          }
+          const chosen = [];
+          const skipped = [];
+          for (const t of targets) {
+            if (chosen.length >= max) break;
+            const pre = outreachPrecheck({ scriptId: d.scriptId, target: t, accountType: at, home: DEFAULTS.home });
+            if (pre.warnings.some((w) => String(w).includes('7 天内已经发过私信'))) { skipped.push(t); continue; }
+            chosen.push(t);
+          }
+          if (!chosen.length) {
+            return { ...empty, ok: false, accountType: at, accountTypeLabel: q.accountTypeLabel, warnings: q.warnings.join('；'), quotaText: quotaTextOf(q), message: '未发送：目标都在 7 天内已私信过（共 ' + targets.length + ' 个）。' };
+          }
+          const dryRun = !(args.dryRun === false || String(args.dryRun) === 'false');
+          const follow = !(args.follow === false || String(args.follow) === 'false');
+          const items = chosen.map((t) => ({ targetSecUid: t, text: d.text, scriptId: d.scriptId }));
+          const batch = await sendDouyinDmBatch({ account: accountRef, items, dryRun, follow, maxPerRun: max, log: () => {} });
+          let recorded = null;
+          if (!dryRun && batch.sent > 0) {
+            for (const r of batch.results) {
+              if (r.status !== 'sent') continue;
+              recorded = outreachRecord({ scene: d.scene, scriptId: d.scriptId, accountType: at, target: r.targetSecUid, note: note || '', followed: r.followed === true, home: DEFAULTS.home });
+            }
+          }
+          const followedCount = batch.results.filter((r) => r.followed === true || r.followed === 'already').length;
+          const details = batch.results.map((r) => (r.status === 'sent' ? '[sent] ' : (r.status === 'dry-run' ? '[dry-run] ' : '[failed] ')) + r.targetSecUid + ' · ' + r.status
+            + (r.followed ? ' · 关注=' + r.followed : '')
+            + (r.reason ? ' · ' + r.reason : '')).join('\n');
+          const skipText = skipped.length ? '；跳过 ' + skipped.length + ' 个（7 天内已私信过）' : '';
+          const followText = dryRun ? '；dry-run 未点关注' : '；关注/已关注 ' + followedCount + ' 个';
+          const message = dryRun
+            ? 'dry-run 完成：' + batch.skipped + ' 条已填进输入框（没有点发送）、' + batch.failed + ' 条失败，endedBy=' + batch.endedBy + skipText + followText + '。确认文案没问题后，把 dryRun 传 false 才会先关注、再真发送。'
+            : '已发送 ' + batch.sent + ' 条、失败 ' + batch.failed + ' 条，endedBy=' + batch.endedBy + skipText + followText + '。';
+          return {
+            ...empty, ok: true, action: 'send', accountType: at, accountTypeLabel: q.accountTypeLabel,
+            scene: d.scene, scriptId: d.scriptId, title: d.title, text: d.text,
+            warnings: (d.warnings || []).join('；'),
+            quotaText: quotaTextOf((recorded && recorded.quota) || q),
+            file: (recorded && recorded.file) || '',
+            message, dryRun, sent: batch.sent, endedBy: batch.endedBy, details,
+          };
+        }
+        // guide
+        const g = outreachGuide({ accountType, home: DEFAULTS.home });
+        return {
+          ...empty,
+          action: 'guide',
+          accountType: g.accountType,
+          accountTypeLabel: g.accountTypeLabel,
+          rules: g.rules.join('\n'),
+          checklist: g.checklist.join('\n'),
+          warnings: g.quota.warnings.join('；'),
+          quotaText: quotaTextOf(g.quota),
+          file: g.logFile,
+          message: '场景：' + g.scenes.map((s) => s.id + '(' + s.label + ')').join('、'),
+        };
+      } catch (e) {
+        return { ...empty, ok: false, message: String((e && e.message) || e) };
+      }
+    },
+  }));
+
+  // 插件卸载时精确注销这些工具。
+  if (typeof ctx.effect === 'function') ctx.effect(() => () => { dispose(); disposeEnt(); disposeAccount(); disposeOutreach(); });
 
   // DSH Web 控制台 + 评论词云（v0.6.0 合并后一起挂载）：只在有 webServer 的宿主里挂；
   // headless / 纯工具模式没有这个服务，嵌套 inject 不会执行，原来的 douyin_comments 工具完全不受影响。
