@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const SCRIPT_LIBRARY_VERSION = '0.9.40';
+export const SCRIPT_LIBRARY_VERSION = '0.9.41';
 
 /** 自定义话术文件版本。 */
 export const USER_SCRIPTS_VERSION = 1;

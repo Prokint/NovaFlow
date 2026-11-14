@@ -857,18 +857,50 @@ body.is-empty .table-wrap { min-height: 140px; max-height: none; }
   }
 }
 
-/* v4.0 细节：窄屏评论表用两列网格 —— 文字/用户整行，元信息两列并排，单条不再过高 */
+/* v0.9.41：窄屏（DSH 侧边栏常落在这个宽度）评论表改成「卡片 + 元信息行」——
+   旧的两列 grid 会把时间/长文本挤到卡片右缘裁掉，也让「用户」标签与头像分家；
+   这里改为元信息自动换行、整行展示，窄屏也能一眼读完。 */
 @media (max-width: 620px) {
   #table tbody tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px 10px;
+    display: block;
     padding: 12px 12px 10px;
   }
-  #table tbody td.cell-text { grid-column: 1 / -1; padding-bottom: 4px; }
-  #table tbody td[data-label="用户"] { grid-column: 1 / -1; padding-bottom: 2px; }
-  #table tbody td { padding: 2px 0; }
-  #table tbody td::before { flex: 0 0 44px; }
+  #table tbody td {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0;
+    margin: 0 7px 6px 0;
+    border: 0;
+    font-size: 12.5px;
+    line-height: 1.7;
+    vertical-align: top;
+    white-space: normal;
+  }
+  #table tbody td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--meta);
+    font-size: 11.5px;
+    line-height: inherit;
+  }
+  #table tbody td.cell-text,
+  #table tbody td[data-label="用户"] {
+    display: block;
+    margin: 0 0 6px;
+  }
+  #table tbody td.cell-text::before,
+  #table tbody td[data-label="用户"]::before { content: none; }
+  #table tbody td.cell-text .txt { font-size: 14px; line-height: 1.62; }
+  #table tbody td.cell-text .video-link { display: inline-block; margin-top: 4px; font-size: 12px; }
+  #table tbody td[data-label="用户"] .user-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  #table tbody td[data-label="用户"] .user-meta { display: flex; flex-direction: column; min-width: 0; }
+  #table tbody td[data-label="用户"] .user-name,
+  #table tbody td[data-label="用户"] .user-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #table tbody td.num { text-align: left; }
+  #table tbody td:empty { display: none; }
 }
 
 /* v0.5.51：洞察卡片等高——卡片内竖向弹性，主题列表与左侧「地域分布」同高、超出在卡片内滚动 */
