@@ -868,3 +868,15 @@ body.outreach-mode .status-card,
 body.outreach-mode .exports-card { display: none !important; }
 body.outreach-mode .topbar-meta { display: none; }
 body.outreach-mode .acct-section { margin-top: 0; }
+
+/* v0.9.39：话术库「添加 / 删除」表单 */
+.script-form { border: 1px solid var(--line, #dde3ec); border-radius: 10px; padding: 12px; margin: 10px 0; background: var(--panel, #fff); }
+.script-form-row { margin-bottom: 8px; }
+.script-form-title, .script-form-text { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--line, #dde3ec); border-radius: 8px; background: #fff; color: inherit; }
+.script-form-text { resize: vertical; min-height: 72px; }
+.script-form-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.script-form-error { color: #c0392b; font-size: 12px; }
+.script-form-note { margin: 0; font-size: 12px; opacity: .65; }
+.script-item-actions { display: flex; flex-direction: column; gap: 6px; }
+.script-tag-custom { background: #fff3cd; color: #8a6100; }
+.script-del { color: #a33; }

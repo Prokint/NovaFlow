@@ -25,6 +25,7 @@ import {
 // v0.9.24：内置获客话术库（纯文案，插件不自动发送；页面上浏览 / 复制 / 随机轮换）
 import {
   SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, listScripts, pickScript, allowedScenes,
+  addUserScript, deleteScript,
 } from './scripts-library.mjs';
 import { entitlementEnabled, status as entitlementStatus, textOf } from './entitlement.mjs';
 import { listShopAccounts } from './shop-accounts-bridge.mjs';
@@ -50,7 +51,7 @@ async function freshScriptsLibrary() {
     }
     return freshLibraryCache.mod;
   } catch {
-    return { SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, listScripts, pickScript, allowedScenes };
+    return { SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, listScripts, pickScript, allowedScenes, addUserScript, deleteScript };
   }
 }
 
@@ -587,7 +588,7 @@ export function createConsole(options = {}) {
         const scene = String(url.searchParams.get('scene') || '').slice(0, 24);
         const accountType = String(url.searchParams.get('accountType') || '').slice(0, 24);
         const lib = await freshScriptsLibrary();
-        const scripts = lib.listScripts({ scene, accountType });
+        const scripts = lib.listScripts({ scene, accountType, home: DEFAULTS.home });
         // v0.9.36：把「今天/本小时发了多少条、关注了几个、最近发了谁」一并给页面
         let quota = null;
         let recentSends = [];
@@ -623,6 +624,7 @@ export function createConsole(options = {}) {
           accountType,
           scene,
           total: scripts.length,
+          customCount: scripts.filter((s) => s.custom === true).length,
           scripts,
           quota,
           recentSends,
@@ -636,9 +638,37 @@ export function createConsole(options = {}) {
         const accountType = String((body && body.accountType) || '').slice(0, 24);
         const avoidIds = Array.isArray(body && body.avoidIds) ? body.avoidIds.slice(0, 50).map(String) : [];
         const lib = await freshScriptsLibrary();
-        const script = lib.pickScript({ scene, accountType, avoidIds });
+        const script = lib.pickScript({ scene, accountType, avoidIds, home: DEFAULTS.home });
         if (!script) throw httpError('这个场景下没有可用话术（当前账号类型不允许该场景）', 400);
         return sendJson(res, 200, { ok: true, script });
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/scripts/add` && req.method === 'POST') {
+        // v0.9.39：用户自己往话术库里加一条（落在 <DOUYIN_HOME>/user-scripts.json，不进远端仓库）
+        const body = await readJson(req);
+        const lib = await freshScriptsLibrary();
+        const scene = String((body && body.scene) || 'outreach').slice(0, 24);
+        const title = String((body && body.title) || '').slice(0, 40);
+        const text = String((body && body.text) || '').slice(0, 600);
+        const accountTypes = Array.isArray(body && body.accountTypes) ? body.accountTypes.slice(0, 3).map(String) : null;
+        try {
+          const saved = lib.addUserScript({ scene, title, text, accountTypes, home: DEFAULTS.home });
+          return sendJson(res, 200, { ok: true, item: saved.item, file: saved.file, total: saved.total });
+        } catch (err) {
+          throw httpError(String((err && err.message) || '添加话术失败'), 400);
+        }
+      }
+
+      if (pathname === `${CONSOLE_PREFIX}/api/scripts/delete` && req.method === 'POST') {
+        // v0.9.39：删除一条话术（用户加的移除；内置的隐藏，可再次显示出厂 12 条）
+        const body = await readJson(req);
+        const lib = await freshScriptsLibrary();
+        try {
+          const result = lib.deleteScript({ id: String((body && body.id) || ''), home: DEFAULTS.home });
+          return sendJson(res, 200, Object.assign({ ok: true }, result));
+        } catch (err) {
+          throw httpError(String((err && err.message) || '删除话术失败'), 400);
+        }
       }
 
       if (pathname === `${CONSOLE_PREFIX}/api/config`) {

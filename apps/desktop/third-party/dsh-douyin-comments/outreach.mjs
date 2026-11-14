@@ -296,8 +296,8 @@ export function outreachRecord({
 } = {}) {
   const sceneId = String(scene || '').trim();
   const allowed = allowedScenes(String(accountType || '') || undefined);
-  if (!sceneId || !SCRIPT_SCENES.some((s) => s.id === sceneId)) throw new Error('record 需要合法 scene（comment / dm / outreach / followup）');
-  if (String(accountType || '') && !allowed.includes(sceneId)) throw new Error('当前账号类型不允许这个场景（白号只建议公开评论互动）');
+  if (!sceneId || !SCRIPT_SCENES.some((s) => s.id === sceneId)) throw new Error('record 需要合法 scene（v0.9.39 只保留 outreach：主动私信获客）');
+  if (String(accountType || '') && !allowed.includes(sceneId)) throw new Error('当前账号类型不允许这个场景（白号（新号）不建议私信获客）');
   const at = (now instanceof Date ? now : new Date(now)).toISOString();
   const entry = {
     at,

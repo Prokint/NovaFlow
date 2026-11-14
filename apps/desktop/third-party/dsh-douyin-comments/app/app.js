@@ -999,6 +999,85 @@
     return btn;
   }
 
+  // v0.9.39：删除一条话术（用户加的移除；内置的隐藏，出厂 12 条都在）
+  function makeDeleteButton(item) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn small script-del";
+    btn.textContent = "删除";
+    btn.addEventListener("click", function () {
+      var label = (item.custom ? "自定义话术" : "内置话术") + "「" + (item.title || item.id) + "」";
+      if (!window.confirm("删除" + label + "？" + (item.custom ? "" : "（内置话术只是隐藏，不在页面显示）"))) return;
+      btn.disabled = true;
+      btn.textContent = "删除中…";
+      api("scripts/delete", {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      }).then(function (data) {
+        if (!data || data.ok === false) throw new Error((data && data.error) || "删除失败");
+        scriptState.picked = null;
+        renderScriptPick();
+        loadScripts();
+        toast(data.hidden ? "已隐藏内置话术：" + (item.title || item.id) : "已删除话术：" + (item.title || item.id));
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = "删除";
+        toast("删除失败：" + err.message, true);
+      });
+    });
+    return btn;
+  }
+
+  function openScriptForm(open) {
+    var form = $("scriptForm");
+    if (!form) return;
+    form.classList.toggle("hidden", open === false);
+    if (open !== false) {
+      var t = $("sfText");
+      if (t) { t.value = ""; t.focus(); }
+      var ti = $("sfTitle");
+      if (ti) ti.value = "";
+      var err = $("sfError");
+      if (err) err.textContent = "";
+    }
+  }
+
+  // v0.9.39：把新话术存进本机 user-scripts.json（只在本机，不进远端仓库）
+  function saveUserScript() {
+    var btn = $("sfSave");
+    var err = $("sfError");
+    var textEl = $("sfText");
+    var titleEl = $("sfTitle");
+    if (!btn || !textEl) return;
+    var body = String(textEl.value || "").trim();
+    if (!body) {
+      if (err) err.textContent = "话术内容不能为空";
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    if (err) err.textContent = "";
+    api("scripts/add", {
+      method: "POST",
+      body: JSON.stringify({
+        scene: "outreach",
+        title: String((titleEl && titleEl.value) || "").trim(),
+        text: body,
+        accountTypes: ["enterprise", "personal"],
+      }),
+    }).then(function (data) {
+      if (!data || data.ok === false) throw new Error((data && data.error) || "添加失败");
+      openScriptForm(false);
+      loadScripts();
+      toast("已添加到本机话术库（共 " + (data.total || 0) + " 条）");
+    }).catch(function (e) {
+      if (err) err.textContent = String(e.message || e);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = "保存";
+    });
+  }
+
   function renderScriptPick() {
     var box = $("scriptPick");
     if (!box) return;
@@ -1054,13 +1133,23 @@
       tag.className = "script-tag";
       tag.textContent = scriptSceneLabel(item.scene) + " · " + (item.title || "");
       top.appendChild(tag);
+      if (item.custom) {
+        var customTag = document.createElement("span");
+        customTag.className = "script-tag script-tag-custom";
+        customTag.textContent = "自定义";
+        top.appendChild(customTag);
+      }
       main.appendChild(top);
       var text = document.createElement("div");
       text.className = "script-text";
       text.textContent = item.text;
       main.appendChild(text);
       row.appendChild(main);
-      row.appendChild(makeCopyButton(item.text));
+      var actions = document.createElement("div");
+      actions.className = "script-item-actions";
+      actions.appendChild(makeCopyButton(item.text));
+      actions.appendChild(makeDeleteButton(item));
+      row.appendChild(actions);
       list.appendChild(row);
     });
   }
@@ -1237,6 +1326,12 @@
     if ($("scriptRandom")) {
       $("scriptRandom").addEventListener("click", randomScript);
     }
+    // v0.9.39：添加 / 删除话术（存在本机 user-scripts.json，不进远端仓库）
+    if ($("scriptAdd")) {
+      $("scriptAdd").addEventListener("click", function () { openScriptForm(true); });
+    }
+    if ($("sfSave")) $("sfSave").addEventListener("click", saveUserScript);
+    if ($("sfCancel")) $("sfCancel").addEventListener("click", function () { openScriptForm(false); });
     var usage = $("scriptUsage");
     if (usage) usage.textContent = "今日已复制 " + scriptUsageToday() + " 条";
     syncKeywordUi();

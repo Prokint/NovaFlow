@@ -1,38 +1,44 @@
 /**
- * 抖音获客话术库（v0.9.27，v0.9.24 起内置；v0.9.25 增加「主动私信获客」场景，供 agent 调用）
+ * 抖音获客话术库（v0.9.39）
  *
- * 目的：给「agent 半自动获客 / 人工操作」提供成体系的、可轮换的话术，降低同一句话高频重复
- * 触发风控/验证的概率。这里是**纯文案资产**；agent 通过工具 `douyin_outreach`（outreach.mjs）
- * 读话术、填变量、做发送前检查与配额记账，`douyin_outreach action=send` 会走受控发送
- * （dryRun 默认 true；硬闸门在前端工具层，核心发送器在 core 的 `sendDouyinDmBatch`）。
+ * 目的：给「agent 半自动获客 / 人工操作」提供成体系的、可轮换的**主动私信获客**话术，
+ * 降低同一句话高频重复触发风控/验证的概率。这里是**纯文案资产**；agent 通过工具
+ * `douyin_outreach`（outreach.mjs）读话术、填变量、做发送前检查与配额记账，
+ * `douyin_outreach action=send` 会走受控发送（dryRun 默认 true；硬闸门在工具层，
+ * 核心发送器在 core 的 `sendDouyinDmBatch`）。
+ *
+ * v0.9.39：本库只保留「主动私信获客」12 条内置话术；用户可在采集页「获客话术库」
+ * 自己添加 / 删除话术（落在 `<DOUYIN_HOME>/user-scripts.json`，不进远端仓库）。
  *
  * 使用边界（务必看 SCRIPT_RULES）：
  *   · 默认不自动群发；真发必须显式 dryRun:false 且使用者已确认。
- *   · 账号类型不同，能用的场景不同：蓝V / 个人认证 / 注册满 1 个月的个人账号可私信获客；白号（新号）只建议公开评论
- *     （允许私信但配额更保守，遇验证立刻停）。
+ *   · 蓝V / 个人认证 / 注册满 1 个月的个人账号可私信获客；白号（新号）不建议私信。
  *   · 配额是运营经验值，不是抖音官方额度；到量就停，遇到验证立刻停。
  *   · 主动私信获客的第一句 = 打招呼 + 自我介绍（我是谁、做什么）+ 为什么找他 + 一句轻问，
  *     第一条不要放价格 / 联系方式 / 链接。
  *
- * 变量：文本里的 {identity} / {nickname} / {videoTitle} / {city} / {direction} / {business} / {need}
- *       等占位符，由 agent 调 draft 时填掉（插件不会自动填，避免填错成硬广）。
+ * 变量：文本里的 {identity} / {category} / {need} / {city} / {direction} / {business} 等占位符，
+ *       由 agent 调 draft 时填掉（插件不会自动填，避免填错成硬广）。
  */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-export const SCRIPT_LIBRARY_VERSION = '0.9.38';
+export const SCRIPT_LIBRARY_VERSION = '0.9.39';
 
-/** 场景（前端 tab 用） */
+/** 自定义话术文件版本。 */
+export const USER_SCRIPTS_VERSION = 1;
+
+/** 场景（前端 tab 用）：本库只保留主动私信获客。 */
 export const SCRIPT_SCENES = [
-  { id: 'comment', label: '评论互动', desc: '公开评论，最安全；白号（新号，注册不足 1 个月）只能用这一类' },
-  { id: 'dm', label: '私信打招呼', desc: '首条私信：先给理由，再提一个小问题' },
   { id: 'outreach', label: '主动私信获客', desc: '主动找目标用户：先打招呼、自我介绍（我是谁、做什么），再说为什么找他，首条不推销' },
-  { id: 'followup', label: '追问 / 邀约', desc: '对方回应之后再用，别第一条就推销' },
 ];
 
-/** 使用规则（页面上直接展示，也是配额提醒的文案来源） */
+/** 使用规则（页面上直接展示，也是配额提醒的文案来源）。 */
 export const SCRIPT_RULES = [
   '同一句话不要连续发给同一个人；对同一个人 7 天内最多 1 次',
   '同一账号每天用完全相同的句子不超过 3 次，尽量在库里轮换',
-  '白号（注册不足 1 个月的新号）：不建议私信（0 条），评论 ≤ 50 条/天；先从公开评论起步',
+  '白号（注册不足 1 个月的新号）：不建议私信（0 条），评论 ≤ 50 条/天',
   '个人认证：评论 100-200 条/天；私信 ≤ 30 条/天；每小时打招呼 ≤ 5 次',
   '蓝V企业号：评论 200-300 条/天；私信 ≤ 80 条/天；每小时打招呼 ≤ 30 次',
   '话术里不要放联系方式、导流词、敏感词；先聊内容，再谈需求',
@@ -44,109 +50,15 @@ export const SCRIPT_RULES = [
 /**
  * @typedef {Object} ScriptItem
  * @property {string} id
- * @property {'comment'|'dm'|'followup'} scene
+ * @property {'outreach'} scene
  * @property {string} title 风格标签
  * @property {string} text 话术正文（含 {变量}）
  * @property {string[]} accountTypes 适用账号类型（enterprise / personal / unverified）
+ * @property {boolean} [custom] 是否用户添加（true 时 id 以 u 开头）
  */
 
 /** @type {ScriptItem[]} */
 export const SCRIPTS = [
-  // ---- 评论互动（公开评论，风险最低）----
-  {
-    id: 'c01', scene: 'comment', title: '共鸣式',
-    text: '你这里说得太真实了，我前两天也遇到一模一样的情况',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c02', scene: 'comment', title: '认同式',
-    text: '看完这条一下想明白了，之前一直绕不过这个弯',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c03', scene: 'comment', title: '夸细节',
-    text: '细节讲得很清楚，比很多长篇大论有用多了',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c04', scene: 'comment', title: '提问式',
-    text: '想问下 {direction} 这块你一般怎么处理？想跟着学一下',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c05', scene: 'comment', title: '同城',
-    text: '同城路过支持一下，内容做得很用心',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c06', scene: 'comment', title: '收藏',
-    text: '这条先收藏了，回头照着试一遍',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c07', scene: 'comment', title: '替朋友问',
-    text: '你视频里提到的那个点，我朋友前两天也在问，正好找到答案了',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c08', scene: 'comment', title: '蹲后续',
-    text: '蹲个后续，有更新记得发出来',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c09', scene: 'comment', title: '补充经验',
-    text: '补充一点我的经验：{point}，你这条算是把关键说透了',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-  {
-    id: 'c10', scene: 'comment', title: '真诚提问',
-    text: '刚好在纠结 {topic}，你这条给了一个新角度，能展开讲讲吗',
-    accountTypes: ['enterprise', 'personal', 'unverified'],
-  },
-
-  // ---- 私信打招呼（首条，先给理由 + 一个小问题）----
-  {
-    id: 'd01', scene: 'dm', title: '就事论事',
-    text: '你好，刷到你「{videoTitle}」那条，讲得挺实在，想请教一个小问题：{question}？',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd02', scene: 'dm', title: '老粉冒泡',
-    text: '关注你挺久了，第一次冒泡。你做的 {direction} 内容对我帮助很大，方便交流一下吗？',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd03', scene: 'dm', title: '同频',
-    text: '看到你也在做 {industry}，我这边刚好整理了一份 {material}，需要的话发你参考',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd04', scene: 'dm', title: '找伙伴',
-    text: '你好，我在做 {business}，想找 {city} 做 {direction} 的伙伴聊聊，你这边方便吗？',
-    accountTypes: ['enterprise'],
-  },
-  {
-    id: 'd05', scene: 'dm', title: '具体需求',
-    text: '冒昧打扰，请问你最近还接 {need} 吗？有个具体的小问题想问问',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd06', scene: 'dm', title: '请教两句',
-    text: '你的「{videoTitle}」那条很有启发，我们这边正好在 {scene}，能不能请教两句？',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd07', scene: 'dm', title: '先自我介绍',
-    text: '先自我介绍下：我做 {business}。看到你的内容觉得方向挺近，想认识一下',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'd08', scene: 'dm', title: '不求推销',
-    text: '不推销也不打扰，就想问一句：你 {direction} 做了多久？想请教点经验',
-    accountTypes: ['enterprise', 'personal'],
-  },
-
-  // ---- 主动私信获客（v0.9.27：打招呼 + 自我介绍（{identity}/{business}）+ 一个具体理由 + 一句轻问；首条不报价、不推销）----
   {
     id: 'o01', scene: 'outreach', title: '源头厂家推荐款',
     text: '你好，我是{identity}，主要做{category}。看到你在关注{need}，可以先给你推荐几款看看，合适再细聊',
@@ -207,80 +119,140 @@ export const SCRIPTS = [
     text: '你好，我是{identity}；之前看到你在关注{industry}，最近这边有{change}，想跟你同步一下，也问问你现在的情况',
     accountTypes: ['enterprise', 'personal'],
   },
-
-  // ---- 追问 / 邀约（对方回应之后）----
-  {
-    id: 'f01', scene: 'followup', title: '同步情况',
-    text: '谢谢回复！那我先说下我的情况：{situation}，你看这样理解对吗？',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'f02', scene: 'followup', title: '先试再反馈',
-    text: '明白，那我按你说的先试一下，有进展再来跟你同步',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'f03', scene: 'followup', title: '给资料',
-    text: '方便的话我把整理好的 {material} 发你一份，你看要不要，不需要也没关系',
-    accountTypes: ['enterprise'],
-  },
-  {
-    id: 'f04', scene: 'followup', title: '不催',
-    text: '不着急，你先忙。等你有空我们再聊 {topic}',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'f05', scene: 'followup', title: '带回反馈',
-    text: '这条我先记下了，回头按你的思路做一版，再拿来请教你',
-    accountTypes: ['enterprise', 'personal'],
-  },
-  {
-    id: 'f06', scene: 'followup', title: '分享邀约',
-    text: '如果方便，下次我做 {direction} 的分享时叫你一声，一起看看',
-    accountTypes: ['enterprise', 'personal'],
-  },
 ];
 
-/** 账号类型 → 允许场景（白号=新号：只允许公开评论） */
+/** 账号类型 → 允许场景（白号=新号：不建议私信，本库只有主动私信获客，所以白号没有可用场景）。 */
 const ACCOUNT_SCENES = {
-  enterprise: ['comment', 'dm', 'outreach', 'followup'],
-  personal: ['comment', 'dm', 'outreach', 'followup'],
-  unverified: ['comment'],
+  enterprise: ['outreach'],
+  personal: ['outreach'],
+  unverified: [],
 };
+
+/** 插件工作目录，解析规则与 collector.mjs / outreach.mjs 保持一致。 */
+function homeDir(home) {
+  if (home) return String(home);
+  if (process.env.DOUYIN_HOME) return process.env.DOUYIN_HOME;
+  if (process.env.DSH_HOME) return path.join(process.env.DSH_HOME, 'douyin-collector');
+  return path.join(os.homedir(), '.dsh', 'douyin-collector');
+}
+
+export function userScriptsPath(home) {
+  return path.join(homeDir(home), 'user-scripts.json');
+}
+
+/** 读用户自定义话术文件；坏了/不存在都退化成空。 */
+export function readUserScripts({ home } = {}) {
+  try {
+    const raw = fs.readFileSync(userScriptsPath(home), 'utf8');
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed.items) ? parsed.items.filter((it) => it && typeof it.text === 'string' && it.text.trim()) : [];
+    const removed = Array.isArray(parsed.removed) ? parsed.removed.map(String) : [];
+    return { version: USER_SCRIPTS_VERSION, items, removed };
+  } catch (err) {
+    return { version: USER_SCRIPTS_VERSION, items: [], removed: [] };
+  }
+}
+
+function writeUserScripts(data, { home } = {}) {
+  const file = userScriptsPath(home);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const next = { version: USER_SCRIPTS_VERSION, items: data.items || [], removed: data.removed || [] };
+  fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n', 'utf8');
+  return { file, data: next };
+}
+
+/** 内置 + 用户自定义，并去掉被隐藏/删除的。 */
+function mergedScripts({ home } = {}) {
+  const user = readUserScripts({ home });
+  const removed = new Set(user.removed.map(String));
+  const builtin = SCRIPTS.filter((item) => !removed.has(item.id));
+  const custom = user.items
+    .filter((item) => !removed.has(String(item.id)))
+    .map((item) => ({
+      id: String(item.id),
+      scene: 'outreach',
+      title: String(item.title || '自定义'),
+      text: String(item.text),
+      accountTypes: Array.isArray(item.accountTypes) && item.accountTypes.length
+        ? item.accountTypes.filter((t) => t === 'enterprise' || t === 'personal' || t === 'unverified')
+        : ['enterprise', 'personal'],
+      custom: true,
+    }));
+  return builtin.concat(custom);
+}
+
+/** 添加一条自定义话术（用户自己维护的库，落在 user-scripts.json）。 */
+export function addUserScript({ scene = 'outreach', title = '', text = '', accountTypes, home, now = new Date() } = {}) {
+  const body = String(text || '').trim();
+  if (!body) throw new Error('话术内容不能为空');
+  if (body.length > 500) throw new Error('话术太长（≤500 字）');
+  const sceneId = String(scene || 'outreach');
+  if (!SCRIPT_SCENES.some((s) => s.id === sceneId)) throw new Error('未知场景：' + sceneId);
+  const types = Array.isArray(accountTypes) && accountTypes.length
+    ? accountTypes.filter((t) => t === 'enterprise' || t === 'personal' || t === 'unverified')
+    : ['enterprise', 'personal'];
+  if (!types.length) throw new Error('适用账号类型不能为空');
+  const suffix = Math.random().toString(36).slice(2, 6);
+  const id = 'u' + String(now.getTime()).slice(-9) + suffix;
+  const data = readUserScripts({ home });
+  const item = { id, scene: 'outreach', title: String(title || '').trim() || '自定义', text: body, accountTypes: types, createdAt: now.toISOString() };
+  data.items.push(item);
+  if (data.items.length > 300) data.items = data.items.slice(-300);
+  const saved = writeUserScripts(data, { home });
+  return { item: Object.assign({ custom: true }, item), file: saved.file, total: mergedScripts({ home }).length };
+}
+
+/** 删除一条话术：用户添加的直接移除；内置的记入 removed（隐藏，可恢复）。 */
+export function deleteScript({ id = '', home } = {}) {
+  const target = String(id || '').trim();
+  if (!target) throw new Error('缺少要删除的话术 id');
+  const data = readUserScripts({ home });
+  const userIdx = data.items.findIndex((it) => String(it.id) === target);
+  if (userIdx >= 0) {
+    data.items.splice(userIdx, 1);
+    data.removed = data.removed.filter((x) => String(x) !== target);
+    const saved = writeUserScripts(data, { home });
+    return { ok: true, id: target, hidden: false, file: saved.file, total: mergedScripts({ home }).length };
+  }
+  if (!SCRIPTS.some((item) => item.id === target)) throw new Error('没有找到这条话术：' + target);
+  if (!data.removed.includes(target)) data.removed.push(target);
+  if (data.removed.length > 300) data.removed = data.removed.slice(-300);
+  const saved = writeUserScripts(data, { home });
+  return { ok: true, id: target, hidden: true, file: saved.file, total: mergedScripts({ home }).length };
+}
 
 export function sceneLabel(id) {
   const hit = SCRIPT_SCENES.find((s) => s.id === id);
   return hit ? hit.label : String(id || '');
 }
 
-/** 账号类型可用的场景 id 列表（白号只允许公开评论） */
+/** 账号类型可用的场景 id 列表（白号没有可用场景）。 */
 export function allowedScenes(accountType) {
   if (!accountType) return SCRIPT_SCENES.map((s) => s.id);
-  return (ACCOUNT_SCENES[accountType] || ['comment']).slice();
+  return (ACCOUNT_SCENES[accountType] || []).slice();
 }
 
 /**
- * 列出话术（按场景 / 账号类型过滤）。
- * @param {{scene?: string, accountType?: string}} [options]
+ * 列出话术（按场景 / 账号类型过滤，含用户自定义）。
+ * @param {{scene?: string, accountType?: string, home?: string}} [options]
  */
-export function listScripts({ scene = '', accountType = '' } = {}) {
-  const allowed = accountType ? (ACCOUNT_SCENES[accountType] || ['comment']) : null;
-  // v0.9.30：白号（新号）只给公开评论话术；老号（个人账号/个人认证）不受影响
-  const effectiveType = accountType === 'unverified' ? 'personal' : accountType;
-  return SCRIPTS.filter((item) => {
+export function listScripts({ scene = '', accountType = '', home } = {}) {
+  const allowed = accountType ? (ACCOUNT_SCENES[accountType] || []) : null;
+  const items = mergedScripts({ home });
+  return items.filter((item) => {
     if (scene && item.scene !== scene) return false;
     if (allowed && !allowed.includes(item.scene)) return false;
-    if (effectiveType && !item.accountTypes.includes(effectiveType)) return false;
+    if (accountType && !item.accountTypes.includes(accountType)) return false;
     return true;
   });
 }
 
 /**
  * 随机挑一条（尽量避开最近用过的 id）。
- * @param {{scene?: string, accountType?: string, avoidIds?: string[], random?: () => number}} [options]
+ * @param {{scene?: string, accountType?: string, avoidIds?: string[], home?: string, random?: () => number}} [options]
  */
-export function pickScript({ scene = '', accountType = '', avoidIds = [], random = Math.random } = {}) {
-  const pool = listScripts({ scene, accountType });
+export function pickScript({ scene = '', accountType = '', avoidIds = [], home, random = Math.random } = {}) {
+  const pool = listScripts({ scene, accountType, home });
   if (!pool.length) return null;
   const avoided = new Set((avoidIds || []).map(String));
   const fresh = pool.filter((item) => !avoided.has(item.id));
@@ -289,4 +261,8 @@ export function pickScript({ scene = '', accountType = '', avoidIds = [], random
   return list[Math.max(0, index)];
 }
 
-export default { SCRIPT_LIBRARY_VERSION, SCRIPT_SCENES, SCRIPT_RULES, SCRIPTS, listScripts, pickScript, sceneLabel, allowedScenes };
+export default {
+  SCRIPT_LIBRARY_VERSION, USER_SCRIPTS_VERSION, SCRIPT_SCENES, SCRIPT_RULES, SCRIPTS,
+  listScripts, pickScript, sceneLabel, allowedScenes,
+  userScriptsPath, readUserScripts, addUserScript, deleteScript,
+};

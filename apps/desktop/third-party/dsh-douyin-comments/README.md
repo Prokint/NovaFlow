@@ -1,7 +1,16 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.38；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.39；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.39 变更**（2026-11-14）：**话术库瘦身到只保留主动私信获客的 12 条，并支持用户自己添加 / 删除话术**。
+- 内置库只留 o01–o12（主动私信获客）；评论互动 / 私信打招呼 / 追问邀约三类已删（获客只做主动私信，避免场景分散）。
+- 页面上：话术卡新增「＋ 添加话术」按钮 + 表单（风格标签 + 正文 + 保存/取消），每条话术旁新增「删除」；自定义条目带「自定义」标签。
+- 新增接口：`POST /api/scripts/add`（`{scene,title,text,accountTypes}`，校验非空 / ≤500 字 / 合法场景，落 `<DOUYIN_HOME>/user-scripts.json`，最多 300 条）、`POST /api/scripts/delete`（`{id}`；用户加的直接移除，内置的记入 `removed` 隐藏）。
+- 存储：自定义话术只在本机 `user-scripts.json`，**不进远端仓库**；`listScripts` / `pickScript` 会合并内置 + 自定义（删掉被隐藏的）。
+- agent 侧：`douyin_outreach` 的 list/pick/draft 走同一个合并库，所以用户自己加的话术 agent 也能用。
+- 自检新增 v0.9.39 断言组（`scripts-v0939-lib` / `scripts-v0939-console` / `scripts-v0939-page` / `scripts-v0939-readme`）。
+- 说明：v0.9.24–0.9.38 的旧 36 条话术仍存在于**已公开的历史提交**里（NovaFlow 公开仓 `3cc67cfd` 及更早），新提交只含 12 条；自定义话术文件不会进 git。
 
 **0.9.38 变更**（2026-11-14）：**新增「获客工作台」页（NovaFlow 付费版专用），付费墙与「不显示采集页」的设计都不动**。
 - 动机：NovaFlow 里同事的设计是付费版不展示采集页（未开通直接是授权页），但账号识别 / 收藏客户 / 话术库 / 发送记录都在采集页上。
