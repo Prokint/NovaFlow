@@ -289,7 +289,6 @@ window.__ModuleLoader__.load({
 			"list.noFileHint": "该技能没有本地 SKILL.md 文件，无法在此启用/禁用、编辑或删除。",
 			"list.providerFile": "由插件提供",
 			"list.providerFileTooltip": "该技能的文件由插件 provider 提供，未落在本面板扫描的技能根目录下",
-			"list.providerFileHint": "该技能由插件提供、确有 SKILL.md 文件，但不在本面板扫描的技能根目录下，因此无法在此编辑或删除；模型是否加载由提供它的插件负责，本面板不提供开关。",
 			"list.mark.model": "模型",
 			"list.mark.user": "用户",
 			"provider.filesystem": "文件系统",
@@ -406,7 +405,6 @@ window.__ModuleLoader__.load({
 			"list.noFileHint": "This skill has no local SKILL.md file, so it cannot be enabled/disabled, edited, or deleted here.",
 			"list.providerFile": "Provided by plugin",
 			"list.providerFileTooltip": "This skill has a file supplied by its plugin provider, outside the skill roots this panel scans",
-			"list.providerFileHint": "This skill is supplied by a plugin and does have a SKILL.md file, but it sits outside the skill roots this panel scans, so it cannot be edited or deleted here. Whether the model loads it belongs to that plugin, so this panel shows no switch for it.",
 			"list.mark.model": "model",
 			"list.mark.user": "user",
 			"provider.filesystem": "Filesystem",
@@ -1581,9 +1579,15 @@ window.__ModuleLoader__.load({
 				tooltip: tt("list.noFileTooltip")
 			};
 		}
-		/** The explanation shown under a row the write routes cannot serve. */
+		/**
+		* The explanation shown under a row the write routes cannot serve. A
+		* plugin-provided row already says so with its badge and needs no long
+		* paragraph, so only a fileless registration carries this line.
+		* @param skill - the row's entry.
+		* @returns the hint copy.
+		*/
 		function localFileHint(skill) {
-			return skill.fileState === "provider-file" ? tt("list.providerFileHint") : tt("list.noFileHint");
+			return tt("list.noFileHint");
 		}
 		/** Marks shown next to a skill (model/user invocable). */
 		function invokableMarks(skill) {
@@ -1768,7 +1772,7 @@ window.__ModuleLoader__.load({
 							})
 						]
 					}),
-					skill.path === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					skill.path === void 0 && skill.fileState !== "provider-file" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 						className: panel_module_css_default.skillWhen,
 						children: localFileHint(skill)
 					}),
