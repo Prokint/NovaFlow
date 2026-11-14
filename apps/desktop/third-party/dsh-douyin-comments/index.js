@@ -264,6 +264,12 @@ export function apply(ctx, config = {}) {
   const dispose = ctx.tools.register(defineTool({
     name: 'douyin_comments',
     description: [
+      '【v0.9.40 使用流程 —— 先问清楚，再调用】NovaFlow 付费版客户端**没有「新建采集」页面**，采集只能由 AI 通过本工具触发。所以每次采集前，你必须先按下面的顺序把信息问清楚，并把整理结果回给用户确认，**不要替用户默认/编造参数**：',
+      '第 0 步 · 先确认账号：①调用 `douyin_account_info`（action=status）读本机已识别账号；②如果需要别的账号，先调用店铺账号管理插件 `shop_accounts`（action=list，platform=douyin）列出抖音账号，只能选 **买家账户**（seller/「抖店」这类卖家账户不可用于采集），把返回的账号 id 或名字填进本工具的 `account` 参数；③没激活订阅时先 `douyin_entitlement` action=status/activate。',
+      '第 1 步 · 确认采集方式：问用户是「指定视频/图文链接（url，可多条，直接粘分享文案或短链也行）」还是「关键词搜视频再采评论（keyword）」。',
+      '第 2 步 · 关键词模式必须逐项问清楚：关键词 keyword 是什么；要采多少个视频 videoCount（1~100，默认 10）；排序 sortType（综合排序 / 最新发布 / 最多点赞）；发布时间 publishTime（不限 / 一天内 / 一周内 / 半年内）；视频时长 duration（不限 / 1分钟以下 / 1-5分钟 / 5分钟以上）；内容形式 contentType（不限 / 视频 / 图文）。这 6 项都要问，不确定的要说明默认值再让用户确认。',
+      '第 3 步 · 补充确认（非必须但建议问）：是否要采二级回复 replies（默认 true）；目标一级评论条数 max（默认 80000）；是否清空旧缓存 clearBefore（默认 false，清空会丢断点续采）；输出目录 outDir（默认会话工作区 douyin-comments/）；要不要顺手导交互词云 cloud（默认 false）。',
+      '第 4 步 · 把「账号 + 链接或关键词 + 上述参数」整理成一句话复述给用户，用户确认后再调用本工具；调用后把返回的 csvPath/jsonPath/videoListPath 与条数告诉用户。',
       '采集抖音公开评论，导出 CSV（UTF-8 BOM，Excel 直接打开）和 JSON，返回文件路径与条数。两种用法：①给 url 采一条视频/图文的评论；②给 keyword 按关键词搜索视频，再采前 videoCount 条（默认 10，每条视频的评论全采）的评论，合并成一份 CSV/JSON + 一份视频清单。',
       '关键词模式可带筛选（都可选，默认不限）：sortType=综合排序/最新发布/最多点赞；publishTime=不限/一天内/一周内/半年内；duration=不限/1分钟以下/1-5分钟/5分钟以上；contentType=不限/视频/图文。网页版没有「内容形式」这个原生筛选项：视频走视频搜索接口，图文走综合搜索并只保留图文帖（aweme_type=68），不限=视频接口。搜索做法是打开搜索页、拿页面自己发出的带签名请求在页面内重放（只改 offset/翻页数与筛选参数、并置 is_filter_search=1），不点筛选浮层、不改扩展、不计算签名。整个关键词任务的时间预算是 keywordTimeoutMs（默认 4 小时），单条视频仍用 timeoutMs（默认 30 分钟）。',
       'CSV/JSON **默认写到当前会话的工作区**（<工作区>/douyin-comments/），调用方直接用返回值里的 csvPath/jsonPath 就能引用；要换位置用 outDir。',
@@ -746,7 +752,7 @@ export function apply(ctx, config = {}) {
   // 不发私信、不发评论、不改资料。
   const disposeAccount = ctx.tools.register(defineTool({
     name: 'douyin_account_info',
-    description: '识别当前登录的抖音账号属于哪类：蓝V企业号 / 个人账号（注册满 1 个月、无官方认证）/ 白号（新号，注册不足 1 个月），并把昵称、uid、粉丝数、作品数、注册时间写进 account-profile.json。只读识别，不发私信、不发评论、不改资料。action=status 读已缓存的结果；action=refresh 打开抖音自己的主页重新识别一次（需要该账号已登录，可能要扫码）。',
+    description: '识别当前登录的抖音账号属于哪类：蓝V企业号 / 个人账号（注册满 1 个月、无官方认证）/ 白号（新号，注册不足 1 个月），并把昵称、uid、粉丝数、作品数、注册时间写进 account-profile.json。只读识别，不发私信、不发评论、不改资料。**采集/获客前建议先调 action=status 做第 0 步**，确认是哪个账号、能不能发私信、配额档位；action=refresh 打开抖音自己的主页重新识别一次（需要该账号已登录，可能要扫码）。',
     parameters: {
       action: {
         type: 'string',
