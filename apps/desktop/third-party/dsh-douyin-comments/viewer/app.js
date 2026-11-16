@@ -1207,19 +1207,11 @@
 
 /* ---------- v0.5.56：AI 解读（只发摘要，模型不参与计算） ---------- */
 const AI_CONSENT_KEY = 'cw.ai.consent';
-const AI_EFFORT_KEY = 'cw.ai.effort';
 let aiText = '';
 let aiAbort = null;
 
-/* v0.9.44：思考档 —— 用户可选，后端按目标模型能力映射（选中不支持的档会自动就近换档）。
-   auto = 能关就关；off/low/medium/high/max = 希望想多深。 */
-function aiEffortValue() {
-  try {
-    return localStorage.getItem(AI_EFFORT_KEY) || 'auto';
-  } catch (e) {
-    return 'auto';
-  }
-}
+/* v0.9.45：思考档不再由用户选，后端固定按「高」思考并按目标模型能力就近映射；
+   这里只负责把「思考字数（不显示）」和处理后的 JSON 展示出来。 */
 
 /* v0.9.44：剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON（与后端 normalizeAiAnswer 同一口径）。 */
 function stripAiInlineReasoning(input) {
@@ -1411,7 +1403,7 @@ async function runAiExplain() {
     const res = await fetch(api, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ digest: digest, effort: aiEffortValue() }),
+      body: JSON.stringify({ digest: digest }),
       signal: aiAbort.signal,
     });
     if (!res.ok) {
@@ -1508,16 +1500,6 @@ async function runAiExplain() {
 function bindAiEvents() {
   const btn = $('#btnAi');
   if (btn) btn.addEventListener('click', function () { void runAiExplain(); });
-  // v0.9.44：思考档选择（本机记住，后端按模型能力映射）
-  const effortSel = $('#aiEffort');
-  if (effortSel) {
-    effortSel.value = aiEffortValue();
-    if (effortSel.value !== aiEffortValue()) effortSel.value = 'auto';
-    effortSel.addEventListener('change', function () {
-      try { localStorage.setItem(AI_EFFORT_KEY, effortSel.value || 'auto'); } catch (e) { /* 忽略 */ }
-      toast('思考档：' + effortSel.options[effortSel.selectedIndex].textContent.replace('思考：', ''));
-    });
-  }
   const retry = $('#btnAiRetry');
   if (retry) retry.addEventListener('click', function () { void runAiExplain(); });
   const copy = $('#btnAiCopy');

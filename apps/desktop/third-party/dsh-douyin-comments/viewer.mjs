@@ -543,7 +543,11 @@ function handleExplain(ctx, req, res) {
       // 前端可传 auto/off/low/medium/high/max；后端按目标模型实际支持的档
       // 精确匹配 → 名称匹配 → 深度等级就近映射（见 pickEffortForModel）。
       // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试用）。
-      const requestedEffort = String((body && body.effort) || "").trim().toLowerCase();
+      // v0.9.45：不再让用户在页面上调思考档 —— 固定按「高」思考（分析更准）。
+      // 目标模型如果没有 high，就由 pickEffortForModel 就近映射到它支持的档
+      // （如 medium/low/max；能自动关思考的模型也优先按 high 想，除非被拒绝）。
+      // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试/特殊模型用）。
+      const requestedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim().toLowerCase() || "high";
       const forcedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim();
       let effort;
       let effortHow = "";

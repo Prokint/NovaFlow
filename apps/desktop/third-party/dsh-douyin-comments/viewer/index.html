@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>评论分析台 · 词云 + 评论表 + 地域客户</title>
-<link rel="stylesheet" href="styles.css?v=0.9.44">
+<link rel="stylesheet" href="styles.css?v=0.9.45">
 </head>
 <body class="is-empty">
 <header class="topbar">
@@ -127,15 +127,7 @@
       <span id="insightSub" class="panel-sub"></span>
     </div>
     <div class="panel-actions">
-      <select id="aiEffort" class="ai-effort" title="思考档：默认「自动」= 模型支持关闭思考时就关闭（最快最省）；想更细致可选低/中/高/最高，代价是更慢更贵，思考内容不会显示在结果里">
-        <option value="auto">思考：自动</option>
-        <option value="off">思考：关闭</option>
-        <option value="low">思考：低</option>
-        <option value="medium">思考：中</option>
-        <option value="high">思考：高</option>
-        <option value="max">思考：最高</option>
-      </select>
-      <button id="btnAi" class="btn small" type="button" title="把统计摘要交给 DSH 已配置的模型，输出结论与建议（只发摘要，不发原始数据）">AI 解读</button>
+      <button id="btnAi" class="btn small" type="button" title="把统计摘要交给 DSH 已配置的模型，输出结论与建议（只发摘要，不发原始数据；思考档由插件按模型能力自动选「高」，思考内容不显示）">AI 解读</button>
     </div>
   </div>
   <div class="insight-grid" id="insightGrid"></div>
@@ -249,6 +241,6 @@
   </div>
 </div>
 
-<script src="app.js?v=0.9.44"></script>
+<script src="app.js?v=0.9.45"></script>
 </body>
 </html>
