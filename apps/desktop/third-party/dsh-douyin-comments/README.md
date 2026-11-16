@@ -1326,6 +1326,22 @@ douyin_comments      keyword=墙纸 videoCount=20 sortType=综合排序 publishT
 - 平台限制：**对方回复或关注你之前，只能发送一条文字消息**；所以每批只发首条、7 天内不重复、首条不推销（先给理由/价值，再问一个小问题）。
 - 风险：自动私信仍可能触发验证甚至封号，只在小批量、真实意向目标上用；不做绕验证、不多账号轮换、不代理规避。
 
+## 本地情感小模型（0.9.48+，约 103MB，不入 git）
+
+评论统计里「情感」一列分两层：先跑内置词典规则（瞬间完成），再把 103MB 的 weibo-BERT int8 小模型放进 Web Worker，只对「规则判为中性」的评论做一次批量推理，置信 ≥ 0.45 才改判（回退纯规则时页面会显示「情感模型不可用（规则结果仍可用）」）。
+
+- 模型文件：`viewer/sentiment/weibo-bert-int8.onnx`（103,169,605 字节，sha256 `df1f6ebc1262d1c206ab67ec287cfa6dfa0f12db368a0ce7ded2b4acd7364951`）
+- 配套文件（都在 git 里）：`viewer/sentiment/vocab.txt`、`tokenizer.js`、`worker.js`、`viewer/vendor/ort/*`（ORT wasm 子集约 15MB）
+- **为什么不在 git 里**：GitHub 单文件限制 100MB，它被挂到 NovaFlow 的公开 release 当资产：
+  `https://github.com/Prokint/NovaFlow/releases/download/v0.2.8/weibo-bert-int8.onnx`
+- 拉取（缺失/损坏会自动重下并校验 sha256；NovaFlow 打包流程也会在打包前自动执行这一步）：
+  ```bash
+  node scripts/fetch-sentiment-model.mjs          # 需要时下载
+  node scripts/fetch-sentiment-model.mjs --force  # 强制重下
+  DYC_SENT_MODEL_URL=<你的地址> node scripts/fetch-sentiment-model.mjs   # 换成自建对象存储
+  ```
+- 不带模型也能用：页面自动退回纯规则情感分析，词云、AI 解读、LLM 复核都不受影响。
+
 ## 输出格式
 
 - **CSV**（UTF-8 BOM，Excel 直接打开）19 列：`cid,create_time,create_time_str,text,text_clean,text_len,digg_count,reply_comment_total,ip_label,is_hot,is_folded,level,stick_position,user_nickname,user_uid,is_reply,parent_cid,user_sec_uid,user_unique_id`。
