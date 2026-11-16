@@ -453,22 +453,52 @@ function handleExplain(ctx, req, res) {
     let usage = null;
     try {
       const userMessage = await makeUserMessage("数据摘要：\n" + digestJson);
-      // v0.5.59：这个任务是「读摘要→输出固定 JSON」，不需要长思考。
-      // 但 dsh-llm-deepseek 的默认 reasoningEffort 是 high，思考内容走
-      // `reasoning-delta`（我们不计入正文），于是 900 token 全被思考吃掉、
-      // 可见正文 0 字，finish.kind === 'max-tokens' —— 表现为「没有返回内容」。
-      // 这里显式关掉推理，并支持一次「预算加倍」重试。
-      const runOnce = async (maxTokens) => {
-        const stream = llm.stream({
+      // v0.9.42：不再把 reasoningEffort 写死成 "off"。
+      // 这个任务是「读摘要→输出固定 JSON」，不需要长思考；但有的供应商/模型
+      // 根本不支持思考档参数（传了会直接报错），有的支持但档名不叫 "off"。
+      // 所以先问 DSH 这个路由支持哪些档（llm.resolveModelInfo → reasoning.efforts）：
+      //  - 没有 reasoning / efforts 为空 → 不传该字段
+      //  - 支持 "off" → 传 "off"（最省 token）
+      //  - 支持思考但没有 "off" → 不传，交给连接默认值（不猜 "none"/"minimal" 之类：
+      //    DSH 对不支持的档直接拒绝，不做钳制）
+      // 万一适配器仍然拒绝（finish.kind='error' 且 code=UNSUPPORTED_REASONING_EFFORT），
+      // 自动去掉该字段重试一次；仍保留「预算加倍」重试。
+      // DYC_AI_REASONING_EFFORT=auto|off|low|high|max 可强制覆盖（调试用）。
+      const forcedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim();
+      let effort;
+      if (forcedEffort && forcedEffort !== "auto") {
+        effort = forcedEffort;
+      } else if (typeof llm.resolveModelInfo === "function") {
+        try {
+          const info = await llm.resolveModelInfo(selection.provider, selection.model, controller.signal);
+          const supported = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : [];
+          effort = supported.some((e) => String((e && e.id) || "") === "off") ? "off" : undefined;
+        } catch {
+          effort = "off";
+        }
+      } else {
+        effort = "off";
+      }
+      appendDebug({
+        event: "effort",
+        provider: selection.provider,
+        model: selection.model,
+        effort: effort === undefined ? "(omit)" : effort,
+        forced: forcedEffort || undefined,
+      });
+
+      const runOnce = async (maxTokens, useEffort) => {
+        const options = {
           provider: selection.provider,
           model: selection.model,
           system: AI_SYSTEM_PROMPT,
           messages: [userMessage],
           temperature: 0.3,
           maxTokens,
-          reasoningEffort: "off",
           signal: controller.signal,
-        });
+        };
+        if (useEffort !== undefined) options.reasoningEffort = useEffort;
+        const stream = llm.stream(options);
         for await (const chunk of stream) {
           if (!chunk) continue;
           if (chunk.type === "text-delta" && chunk.text) {
@@ -485,13 +515,40 @@ function handleExplain(ctx, req, res) {
           }
         }
         const kind = finish && (finish.kind || finish);
-        return kind;
+        const failureCode = finish && finish.kind === "error" && finish.failure ? String(finish.failure.code || "") : "";
+        return { kind, failureCode };
       };
-      let kind = await runOnce(AI_MAX_TOKENS);
+      const resetAttempt = () => {
+        text = "";
+        reasonChars = 0;
+        finish = null;
+      };
+      let attempt;
+      try {
+        attempt = await runOnce(AI_MAX_TOKENS, effort);
+      } catch (err) {
+        const msg = String((err && err.message) || err);
+        if (effort !== undefined && /reasoning effort/i.test(msg)) {
+          appendDebug({ event: "retry", reason: "unsupported-reasoning-effort-throw", message: msg });
+          resetAttempt();
+          effort = undefined;
+          attempt = await runOnce(AI_MAX_TOKENS, undefined);
+        } else {
+          throw err;
+        }
+      }
+      if (!text && attempt.kind === "error" && attempt.failureCode === "UNSUPPORTED_REASONING_EFFORT") {
+        appendDebug({ event: "retry", reason: "unsupported-reasoning-effort", tried: effort === undefined ? "(omit)" : effort });
+        resetAttempt();
+        effort = undefined;
+        attempt = await runOnce(AI_MAX_TOKENS, undefined);
+      }
+      let kind = attempt.kind;
       if (!text && kind === "max-tokens" && !controller.signal.aborted) {
         appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: AI_MAX_TOKENS });
-        finish = null;
-        kind = await runOnce(AI_MAX_TOKENS * 2);
+        resetAttempt();
+        const second = await runOnce(AI_MAX_TOKENS * 2, effort);
+        kind = second.kind;
       }
       appendDebug({
         event: "finish",
@@ -506,7 +563,13 @@ function handleExplain(ctx, req, res) {
       if (finish && kind !== "stop" && kind !== "max-tokens") {
         send({ error: "模型返回失败：" + describeFinish(finish) });
       } else if (!text && kind === "max-tokens" && reasonChars > 0) {
-        send({ error: "模型把 token 预算都用在思考上了（思考 " + reasonChars + " 字、正文 0 字）。已在请求里关闭推理，如仍出现请把这份摘要复制给任意 AI。" });
+        send({
+          error:
+            "模型把 token 预算都用在思考上了（思考 " + reasonChars + " 字、正文 0 字）。" +
+            (effort === undefined
+              ? "这个模型/供应商关闭不了思考（或不支持思考档参数），DSH 只按模型能力传参；可以换一个不需要长思考的模型，或把摘要复制给任意 AI。"
+              : "已在请求里关闭推理；如仍出现请把这份摘要复制给任意 AI。"),
+        });
       } else if (!text) {
         send({ error: "模型没有返回内容（可点「重新生成」再试一次）" });
       } else {

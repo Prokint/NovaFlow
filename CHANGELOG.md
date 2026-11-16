@@ -2,6 +2,10 @@
 
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
+## 0.2.13
+
+- 内置插件 `dsh-douyin-comments` 升级到 0.9.42：AI 解读不再把思考程度写死成 `reasoningEffort: "off"`。现在先读 DSH 里该模型的思考档能力（支持 `off` 才传、支持思考但没有 `off` 就不传、完全不支持也不传），并在适配器返回 `UNSUPPORTED_REASONING_EFFORT` 时自动去掉该参数重试一次，避免换模型后「AI 解读没有内容/直接报错」。
+
 ## 0.2.12
 
 - 内置插件 `dsh-douyin-comments` 升级到 0.9.41：修 DSH 侧边栏窄宽度下「评论表」的排版——原先两列网格会把「时间」挤到右缘裁掉、把「用户」标签和头像拆开；现在窄屏改为卡片式（正文整行 → 头像昵称整行 → 点赞/回复/属地/时间/层级/情感/收藏 一行自动换行），宽屏表格不变。
