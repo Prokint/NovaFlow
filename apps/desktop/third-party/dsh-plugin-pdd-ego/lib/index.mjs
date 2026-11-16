@@ -217,7 +217,7 @@ export function apply(ctx, config) {
       return {
         ok: false,
         json: null,
-        text: '未找到可用的 Python 解释器：请设置插件配置 pythonPath、环境变量 PDD_PYTHON，或把 python 放进 PATH',
+        text: '未找到可用的 Python 解释器：正常应自动使用 DSH 自带 Python（~/.dsh/dsh-runtimes/*/dependencies/python）；也可设置插件配置 pythonPath、环境变量 PDD_PYTHON，或把 python 放进 PATH',
       }
     }
     const result = await runCmd(interpreter, ['-X', 'utf8', file, ...args], { timeoutMs: 300000 })
@@ -378,7 +378,7 @@ export function apply(ctx, config) {
           missing,
           requirement: [
             'ego-browser：需在本机安装（默认探测 ~/.local/share/ego/active_version_dir 与 PATH），也可在插件配置里填 egoBrowser 或设 PDD_EGO_BROWSER。',
-            'Python 3 + openpyxl：需本机安装，或在插件配置里填 pythonPath 或设 PDD_PYTHON。',
+            'Python 3 + openpyxl：**默认直接用 DSH 自带那份**（~/.dsh/dsh-runtimes/*/dependencies/python，已带 openpyxl），用户不需要另装；也可在插件配置里填 pythonPath 或设 PDD_PYTHON 覆盖。',
             '拼多多商家后台：需用户自行在 ego 浏览器里登录目标店铺（本插件不代登录、不碰账号密码）。',
           ],
           hint: missing.length === 0
