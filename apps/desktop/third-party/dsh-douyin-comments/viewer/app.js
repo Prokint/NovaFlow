@@ -1260,11 +1260,15 @@ function buildDigest(list) {
   const negatives = [];
   let placeholder = 0;
   for (const c of rows) {
+    // v0.9.46：c.sentiment 是 { score, label, hits } 对象，不是字符串；
+    // 之前用 c.sentiment === 'neg' 永远不成立，导致 negatives=[] 而 sentiment.neg=11、趋势 neg=0 自相矛盾。
+    const sLabel = (c.sentiment && c.sentiment.label) || '';
+    const isNeg = sLabel === 'neg';
     const day = String(c.createTimeStr || '').slice(0, 10);
     if (day) {
       const d = byDay.get(day) || { day: day, n: 0, neg: 0 };
       d.n += 1;
-      if (c.sentiment === 'neg') d.neg += 1;
+      if (isNeg) d.neg += 1;
       byDay.set(day, d);
     }
     if (c.sku) skuCount.set(c.sku, (skuCount.get(c.sku) || 0) + 1);
@@ -1273,7 +1277,7 @@ function buildDigest(list) {
     const nick = (c.user && (c.user.nickname || c.user.uid)) || '';
     if (nick) users.add(nick);
     if (c.textPlaceholder) placeholder += 1;
-    if (c.sentiment === 'neg' && negatives.length < 10) {
+    if (isNeg && negatives.length < 10) {
       negatives.push({ text: aiClip(c.textClean || c.text, 80), rating: c.rating || '', sku: aiClip(c.sku, 40) });
     }
   }
@@ -1304,6 +1308,14 @@ function buildDigest(list) {
     })),
     skus: Array.from(skuCount.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map((kv) => ({ name: aiClip(kv[0], 40), count: kv[1] })),
     negatives: negatives,
+    // v0.9.46：把「字段为什么是空的」直接告诉模型，避免它把平台本来就没有的字段当成数据缺失。
+    notes: (() => {
+      const out = [];
+      if (!ratingCount.size) out.push('ratings 为空：抖音评论没有星级评分字段，属正常');
+      if (!skuCount.size) out.push('skus 为空：抖音评论没有 SKU 字段，属正常');
+      if (!(state.topics || []).length) out.push('topics 为空：本次样本未生成主题聚类，请用 keywords 与 negatives 分析');
+      return out;
+    })(),
     trend: Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-30),
     filters: {
       videoId: state.filters.videoId || '',
@@ -1416,7 +1428,7 @@ async function runAiExplain() {
     let model = '';
     let usage = 0;
     let reasonChars = 0;
-    let effortText = '';
+    // v0.9.46：思考档是插件内部按模型能力自动选的，不再把「映射到哪档 / 没有该档」提示给用户。
     // v0.5.60：流式期间模型输出的是 JSON 原文（带 { } 和字段名），直接打字机展示很难看。
     // 这里只显示一个「正在生成」提示 + 实时字数，等流结束后再由 renderAiResult() 渲染成结构化卡片。
     const p = document.createElement('p');
@@ -1429,8 +1441,7 @@ async function runAiExplain() {
     const refreshNote = () => {
       if (!noteEl) return;
       noteEl.textContent = '正在生成… ' + aiText.length + ' 字' +
-        (reasonChars ? '（思考 ' + reasonChars + ' 字，不显示）' : '') +
-        (effortText ? ' · ' + effortText : '');
+        (reasonChars ? '（思考 ' + reasonChars + ' 字，内容不展示）' : '');
     };
     for (;;) {
       const step = await reader.read();
@@ -1447,13 +1458,7 @@ async function runAiExplain() {
         if (!obj) continue;
         if (obj.model) model = obj.model;
         if (obj.start) {
-          if (obj.effortHow === 'nearest' || obj.effortHow === 'name') {
-            effortText = '思考档已按该模型就近映射为 ' + String(obj.effort || '').toUpperCase();
-          } else if (obj.effortHow === 'unknown-request' || obj.effortHow === 'no-mappable') {
-            effortText = '该模型没有这个思考档，已交给默认设置';
-          } else if (obj.effortHow === 'no-probe' || obj.effortHow === 'probe-failed') {
-            effortText = '查不到该模型的思考能力，按默认设置';
-          }
+          // v0.9.46：思考档映射细节只留在调试日志里，不再把「映射到哪档/没有该档」提示给用户
           refreshNote();
         }
         if (obj.delta) {
@@ -1479,7 +1484,7 @@ async function runAiExplain() {
     // v0.9.44：兜底剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON
     aiText = sanitizeAiAnswer(aiText);
     const secs = ((Date.now() - t0) / 1000).toFixed(1) + 's';
-    const info = [model, usage ? usage + ' tokens' : '', secs, reasonChars ? '思考 ' + reasonChars + ' 字（不显示）' : '', effortText]
+    const info = [model, usage ? usage + ' tokens' : '', secs, reasonChars ? '思考 ' + reasonChars + ' 字（内容不展示）' : '']
       .filter(Boolean).join(' · ');
     renderAiResult(aiText, info);
     meta.textContent = info;
