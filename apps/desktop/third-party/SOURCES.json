@@ -4,13 +4,14 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.50",
+      "version": "0.9.51",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "318ddbe0f0fab8c6d82327e897d5161a92dcb7bd",
+      "commit": "cab0afd9885242f042d9c9a50a5f3cf92cbd71be",
       "optional": true,
-      "tag": "v0.9.50"
+      "tag": "v0.9.51",
+      "localChanges": "账号资质识别、获客话术库与受控私信、本地情感小模型、LLM 复核、AI 解读付费闸门（0.9.51：规则校准 + 模型只补负面）"
     },
     {
       "name": "dsh-comment-viewer",

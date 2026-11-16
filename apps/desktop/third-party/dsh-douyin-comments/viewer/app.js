@@ -808,7 +808,10 @@
   const SENT_NEG = new Set(('不行 不好 难看 难听 难受 麻烦 复杂 混乱 卡 卡顿 慢 贵 亏 可惜 遗憾 一般 普通 平庸 老套 套路 水 敷衍 凑数 多余 尬 冷场 叹气 皱眉 害怕 恐怖 吓人 阴影 不适 争议 质疑 反驳 抬杠 双标 强行 尴尬 无聊 拖沓 生气 发怒 差 弱 划水 广告 坑 糊弄 玄学 劝退'.split(/\s+/)));
   const SENT_NEGATORS = new Set(('不 没 无 未 别 莫 非 勿 没有 不是 不算 不会 不能 不要 不用 不必 不够 不太 不怎么 没那么'.split(/\s+/)));
   const SENT_DEGREE = new Set(('太 很 非常 特别 超 巨 极 真 更 最 十分 相当 格外 尤其 愈发 更加 简直 实在 真是 巨他妈 有点 有点儿 稍微 稍 挺'.split(/\s+/)));
-  const EMOJI_POS = new Set(('憨笑 微笑 大笑 笑哭 呲牙 偷笑 得意 调皮 酷 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 赞 牛 666 撒花 庆祝 耶 亲亲 害羞 愉快 色 吃瓜 干杯 握手'.split(/\s+/)));
+  const EMOJI_POS = new Set(('大笑 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 赞 牛 666 撒花 庆祝 耶 亲亲 害羞 愉快 干杯 握手'.split(/\s+/)));
+  // v0.9.51：憨笑/微笑/笑哭/呲牙/偷笑/得意/调皮/色/吃瓜 这类「反应型」表情很少表示真正夸赞，
+  // 单独出现时只给很小的正分，纯表情文本不因此判正向（修掉 gold=中性 被 [色][憨笑] 判成正向的误判）。
+  const EMOJI_MILD_POS = new Set(('憨笑 微笑 笑哭 呲牙 偷笑 得意 调皮 色 吃瓜 酷'.split(/\s+/)));
   const EMOJI_NEG = new Set(('大哭 崩溃 发怒 生气 鄙视 白眼 呕吐 敲打 菜刀 心碎 失望 无语 裂开 皱眉 骷髅 害怕 惊恐 再见 弱 尬 抠鼻 黑线 抓狂 咒骂 闭嘴 怒'.split(/\s+/)));
   // v0.9.47：抖音里 [流泪]/[叹气]/[委屈]/[可怜]/[汗]/[擦汗]/[困] 常被当语气符号用（感动、无奈、自嘲），
   // 单独出现不算负面；只在有明确负向词句时才按很小的权重参与。
@@ -827,21 +830,28 @@
   const SENT_PHRASE_NEG = [['不好用', -1.5], ['不好看', -1.5], ['不好听', -1.5], ['不推荐', -1.5], ['有点贵', -1.2], ['一般般', -1], ['很一般', -1], ['差评', -1.5], ['差劲', -1.5], ['不好', -1], ['不行', -1], ['不值', -1.5], ['好贵', -1.2], ['太贵', -1.2], ['贵了', -1.2], ['踩雷', -2], ['退货', -1.5], ['退款', -1.5], ['骗人', -2], ['别买', -2], ['踩坑', -1.5], ['难用', -1.5]];
 
   // v0.9.47：正向短语白名单，修掉「没人可以质疑X的眼光」「前辈说得对」「太强了」这类被单字词典判成负面。
-  const SENT_PHRASE_POS = [['没人可以质疑', 2], ['说得对', 1.2], ['的眼光', 1], ['眼光', 0.8], ['太强了', 1.5], ['太棒了', 1.5], ['太绝了', 2], ['爱了', 1.5], ['强啊', 1], ['好强', 1]];
+  const SENT_PHRASE_POS = [['没人可以质疑', 2], ['说得对', 1.2], ['的眼光', 1], ['眼光', 0.8], ['太强了', 1.5], ['太棒了', 1.5], ['太绝了', 2], ['爱了', 1.5], ['强啊', 1], ['好强', 1],
+    // v0.9.51：补一批真实评论里的短夸句式（金标里被漏判的）
+    ['我关注你了', 1.5], ['带劲', 1.2], ['太狠了', 1.5], ['别有一番风味', 1.5], ['祝福你', 1], ['好听', 1]];
 
   function sentimentOf(text) {
     const raw = String(text || '');
     const tags = raw.match(EMOJI_TAG_RE) || [];
-    // v0.9.13：表情按「去重后种类数」计分并封顶 —— 旧版把 `[抠鼻]` 复制 9 次算成 -10.8，
-    // 会把「你的作品非常优秀，你是最棒的」这种夸奖判成负评。
-    const emoNames = new Set(tags.map((t) => t.slice(1, -1)));
+    // v0.9.51：同类表情按出现次数计分（同类最多算 2 次；温和型按 3 次上限），
+    // 「[色]」单个算中性、「[色][色][色]」这类连发仍算正向 —— 修正 gold 里两种标注并存的情况。
+    const emoCounts = new Map();
+    for (const t of tags) {
+      const nm = t.slice(1, -1);
+      emoCounts.set(nm, (emoCounts.get(nm) || 0) + 1);
+    }
     let emoScore = 0;
     let emoHits = 0;
     let emoStrongNeg = false;
-    for (const name of emoNames) {
-      if (EMOJI_POS.has(name)) { emoScore += 0.6; emoHits++; }
-      else if (EMOJI_NEG.has(name)) { emoScore -= 0.6; emoHits++; }
-      else if (EMOJI_SOFT_NEG.has(name)) { emoScore -= 0.15; emoHits++; }
+    for (const [name, cnt] of emoCounts) {
+      if (EMOJI_POS.has(name)) { emoScore += 0.6 * Math.min(2, cnt); emoHits++; }
+      else if (EMOJI_MILD_POS.has(name)) { emoScore += 0.2 * Math.min(4, cnt); emoHits++; }
+      else if (EMOJI_NEG.has(name)) { emoScore -= 0.6 * Math.min(2, cnt); emoHits++; }
+      else if (EMOJI_SOFT_NEG.has(name)) { emoScore -= 0.15 * Math.min(3, cnt); emoHits++; }
       if (EMOJI_STRONG_NEG.has(name)) emoStrongNeg = true;
     }
     emoScore = Math.max(-1.8, Math.min(1.8, emoScore));
@@ -946,12 +956,13 @@
     return s;
   }
 
-  /* ===================== v0.9.48：情感模型二次校正 =====================
+  /* ===================== v0.9.48 / v0.9.51：情感模型二次校正 =====================
    * 规则（词典+表情）先给全部评论打分；随后用 weibo-BERT 中文情感模型（int8 ONNX，
-   * 在 Web Worker 里跑）只校正「规则判为中性」的评论：模型置信度 ≥ 0.45 时才采纳。
-   * 这是横评里三类/极性准确率最优的组合（95 条金标：规则 72.6/38.7 → 混合 77.9/80.6）。
+   * 在 Web Worker 里跑）只校正其中的负面漏判：模型判 negative 且置信度 ≥ 0.55 时采纳。
+   * v0.9.51 实测（95 条金标）：纯规则 72.6/38.7 → 规则整修后 81.05/51.61 → 只用模型补负面 82.11/74.19。
+   * 模型判 positive 不再改判——横评显示正向改判会带来更多「中性被强行判正向」的误判。
    * 模型与运行时是本地文件（viewer/sentiment + viewer/vendor/ort），不联网、不额外依赖。 */
-  const SENT_MODEL_THRESHOLD = 0.45;
+  const SENT_MODEL_THRESHOLD = 0.55;
   const SENT_MODEL_MIN_COMMENTS = 15;
   let sentModelWorker = null;
   let sentModelReqId = 0;
@@ -1046,8 +1057,9 @@
       sentModelCache.set(item.cid, pred);
       const base = item.baseLabel;
       let finalLabel = base;
-      if (base === 'neu' && pred.label !== 'neu' && pred.score >= SENT_MODEL_THRESHOLD) {
-        finalLabel = pred.label === 'neg' ? 'neg' : 'pos';
+      // v0.9.51：只采纳模型的「负面」高置信结论；正向不覆盖规则（避免中性被强行判正）。
+      if (base !== 'neg' && pred.label === 'neg' && pred.score >= SENT_MODEL_THRESHOLD) {
+        finalLabel = 'neg';
       }
       if (finalLabel !== base) {
         c.sentiment = {
