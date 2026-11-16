@@ -70,30 +70,63 @@ export function detectEgoBrowser(options = {}) {
 }
 
 /**
+ * Directories that may hold the runtime DSH already ships.
+ *
+ * NovaFlow relocates the data home with `DSH_HOME` (for example
+ * `~/.hallucodex`), so `~/.dsh/dsh-runtimes` is only the standalone default; the
+ * packaged app also carries a runtime under `Resources/runtime/`, which covers
+ * the first launch before the runtime is materialized into the data home.
+ * @param home - User home directory.
+ * @returns existing runtime roots, most specific first.
+ */
+function dshRuntimeRoots(home) {
+  const roots = []
+  for (const [value, suffix] of [
+    [process.env.DSH_HOME, 'dsh-runtimes'],
+    [join(home, '.dsh'), 'dsh-runtimes'],
+    [process.env.DSH_DESKTOP_APP_PATH, 'runtime'],
+    [process.env.DSH_DESKTOP_RESOURCES_PATH, 'runtime'],
+  ]) {
+    const root = value ? join(value, suffix) : ''
+    if (root && existsSync(root) && !roots.includes(root)) roots.push(root)
+  }
+  return roots
+}
+
+/**
  * 列出 DSH 自带的 Python 解释器。
  *
  * 用户都是用 DSH 跑本插件的，不该为了读 Excel 再单独装一份 Python：
- * DSH 运行时（`~/.dsh/dsh-runtimes/<runtime>/dependencies/python`）自带
+ * DSH 运行时（`<DSH_HOME>/dsh-runtimes/<runtime>/dependencies/python`）自带
  * python + openpyxl（`/office-xlsx` 用的就是这一份），优先用它。
  * @param home - 用户主目录。
  * @returns 找到的解释器绝对路径数组（没有 DSH 运行时时为空数组）。
  */
 export function listDshPythons(home = homedir()) {
-  const base = join(home, '.dsh', 'dsh-runtimes')
   const found = []
-  let entries = []
-  try {
-    entries = readdirSync(base, { withFileTypes: true })
-  } catch {
-    return found
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    for (const exe of [`python${EXE_SUFFIX}`, 'python', 'python3']) {
-      const candidate = join(base, entry.name, 'dependencies', 'python', exe)
-      if (existsSync(candidate)) {
-        found.push(candidate)
-        break
+  for (const base of dshRuntimeRoots(home)) {
+    let entries = []
+    try {
+      entries = readdirSync(base, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      // The shipped runtime is a virtualenv: the interpreter lives in `bin/`
+      // (`dependencies/python/bin/python3`), not next to the directory itself.
+      const runtimePython = join(base, entry.name, 'dependencies', 'python')
+      for (const [dir, exe] of [
+        [join(runtimePython, 'bin'), 'python3'],
+        [join(runtimePython, 'bin'), 'python'],
+        [runtimePython, `python${EXE_SUFFIX}`],
+        [runtimePython, 'python3'],
+      ]) {
+        const candidate = join(dir, exe + (exe.startsWith('python') && !exe.endsWith(EXE_SUFFIX) ? EXE_SUFFIX : ''))
+        if (existsSync(candidate) && !found.includes(candidate)) {
+          found.push(candidate)
+          break
+        }
       }
     }
   }

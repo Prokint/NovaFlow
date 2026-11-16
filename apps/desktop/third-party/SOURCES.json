@@ -29,7 +29,7 @@
     },
     {
       "name": "dsh-plugin-pdd-ego",
-      "version": "1.1.9",
+      "version": "1.1.10",
       "upstreamPath": "dsh-plugin-pdd-ego",
       "declaredLicense": "MIT",
       "branch": "local",
