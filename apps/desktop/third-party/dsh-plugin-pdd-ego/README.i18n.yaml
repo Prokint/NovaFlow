@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/desktop/third-party/dsh-plugin-pdd-ego/README.md
+/dsh-plugin-pdd-ego:
+  en: 1f6aed6fbee80260
+  zh: 5dcb8a9e071ca088
+/dsh-plugin-pdd-ego/layout:
+  en: 1ab8b509e0fe148b
+  zh: c5295d9510d025f5
+/dsh-plugin-pdd-ego/path-resolution-no-hard-coded-paths:
+  en: 00e78ffa31a56575
+  zh: 506448c540bc480b
+/dsh-plugin-pdd-ego/installation:
+  en: 873f3b55b39d71ad
+  zh: eb0c5e43e4535129
+/dsh-plugin-pdd-ego/tools:
+  en: 5cff178e6e6f67aa
+  zh: 2248b65ea708d0bc
+/dsh-plugin-pdd-ego/ask-before-listing:
+  en: 8a454e259c626e0a
+  zh: 4232aee6d8bc6bcc
+/dsh-plugin-pdd-ego/troubleshooting:
+  en: 02a8686c34e465dc
+  zh: 9af733f08d3f685c
+/dsh-plugin-pdd-ego/uninstall:
+  en: daedad566c24c4f3
+  zh: b729714b970fd55e
