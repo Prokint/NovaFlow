@@ -422,6 +422,8 @@ export function apply(ctx, config) {
     }
     return {
       name: 'pdd-ego-listing',
+      // 声明真实的指令文件路径：面板据此把它标为「由插件提供」，而不是「无本地文件」。
+      path: existsSync(file) ? file : undefined,
       description:
         '拼多多多店铺上架（ego 版）。读素材包 product.json，经 ego-browser 打开商家后台发品页，依次填主图/标题/类目/详情图/品牌/属性/规格/SKU/预览图/参考价/运费模板，最后跑 34 项 validateForm；只填空与校验，绝不提交。运行前提：ego 浏览器、带 openpyxl 的 Python 3、已登录的拼多多商家后台。',
       content: merged,
