@@ -914,6 +914,19 @@ body.is-empty .table-wrap { min-height: 140px; max-height: none; }
 }
 /* v0.5.56：AI 解读卡（DSH 内由插件 /api/explain 提供流式结果） */
 .panel-head .panel-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* v0.9.44：思考档下拉（与「AI 解读」按钮并排，窄屏时自动换行） */
+.ai-effort {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ai-effort:focus { outline: 2px solid var(--accent-weak, var(--accent)); outline-offset: 1px; }
 .ai-card { margin: 0; border-top: 1px solid var(--line); background: var(--surface); padding: 14px clamp(16px, 2vw, 22px) 16px; }
 .ai-card[hidden] { display: none; }
 .ai-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
