@@ -1210,6 +1210,33 @@ const AI_CONSENT_KEY = 'cw.ai.consent';
 let aiText = '';
 let aiAbort = null;
 
+/* v0.9.45：思考档不再由用户选，后端固定按「高」思考并按目标模型能力就近映射；
+   这里只负责把「思考字数（不显示）」和处理后的 JSON 展示出来。 */
+
+/* v0.9.44：剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON（与后端 normalizeAiAnswer 同一口径）。 */
+function stripAiInlineReasoning(input) {
+  let out = String(input || '');
+  [[/<think\b[^>]*>[\s\S]*?<\/think[^>]*>/gi, ''], [/<reasoning\b[^>]*>[\s\S]*?<\/reasoning[^>]*>/gi, ''],
+   [/<\|thinking\|>[\s\S]*?<\|\/thinking\|>/gi, ''], [/<\|reasoning\|>[\s\S]*?<\|\/reasoning\|>/gi, '']].forEach(function (pair) {
+    out = out.replace(pair[0], pair[1]);
+  });
+  return out.trim();
+}
+function sanitizeAiAnswer(rawText) {
+  let text = stripAiInlineReasoning(rawText);
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch (e) { /* 继续 */ }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.stringify(JSON.parse(text.slice(start, end + 1)));
+    } catch (e) { /* 放弃 */ }
+  }
+  return text;
+}
+
 function aiApiPath() {
   const p = String(location.pathname || '');
   // v0.6.0：合并进 dsh-douyin-comments 后挂载点是 /plugins/<pkg>/viewer，不再写死旧包名
@@ -1388,6 +1415,8 @@ async function runAiExplain() {
     let buf = '';
     let model = '';
     let usage = 0;
+    let reasonChars = 0;
+    let effortText = '';
     // v0.5.60：流式期间模型输出的是 JSON 原文（带 { } 和字段名），直接打字机展示很难看。
     // 这里只显示一个「正在生成」提示 + 实时字数，等流结束后再由 renderAiResult() 渲染成结构化卡片。
     const p = document.createElement('p');
@@ -1396,6 +1425,13 @@ async function runAiExplain() {
     body.innerHTML = '';
     body.classList.add('is-streaming');
     body.appendChild(p);
+    const noteEl = p.querySelector('.ai-streaming-text');
+    const refreshNote = () => {
+      if (!noteEl) return;
+      noteEl.textContent = '正在生成… ' + aiText.length + ' 字' +
+        (reasonChars ? '（思考 ' + reasonChars + ' 字，不显示）' : '') +
+        (effortText ? ' · ' + effortText : '');
+    };
     for (;;) {
       const step = await reader.read();
       if (step.done) break;
@@ -1410,21 +1446,41 @@ async function runAiExplain() {
         try { obj = JSON.parse(line.slice(6)); } catch (e) { obj = null; }
         if (!obj) continue;
         if (obj.model) model = obj.model;
+        if (obj.start) {
+          if (obj.effortHow === 'nearest' || obj.effortHow === 'name') {
+            effortText = '思考档已按该模型就近映射为 ' + String(obj.effort || '').toUpperCase();
+          } else if (obj.effortHow === 'unknown-request' || obj.effortHow === 'no-mappable') {
+            effortText = '该模型没有这个思考档，已交给默认设置';
+          } else if (obj.effortHow === 'no-probe' || obj.effortHow === 'probe-failed') {
+            effortText = '查不到该模型的思考能力，按默认设置';
+          }
+          refreshNote();
+        }
         if (obj.delta) {
           aiText += obj.delta;
-          const note = p.querySelector('.ai-streaming-text');
-          if (note) note.textContent = '正在生成… ' + aiText.length + ' 字';
+          refreshNote();
+        }
+        if (obj.reasoningChars) {
+          reasonChars = Number(obj.reasoningChars) || 0;
+          refreshNote();
         }
         if (obj.usage) {
           const u = obj.usage || {};
           usage = Number(u.inputTokens || u.promptTokens || 0) + Number(u.outputTokens || u.completionTokens || 0);
         }
+        if (obj.done) {
+          if (obj.reasonChars) reasonChars = Number(obj.reasonChars) || reasonChars;
+          if (Number(obj.reasoningChars)) reasonChars = Number(obj.reasoningChars);
+        }
         if (obj.error) throw new Error(obj.error);
       }
     }
     body.classList.remove('is-streaming');
+    // v0.9.44：兜底剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON
+    aiText = sanitizeAiAnswer(aiText);
     const secs = ((Date.now() - t0) / 1000).toFixed(1) + 's';
-    const info = [model, usage ? usage + ' tokens' : '', secs].filter(Boolean).join(' · ');
+    const info = [model, usage ? usage + ' tokens' : '', secs, reasonChars ? '思考 ' + reasonChars + ' 字（不显示）' : '', effortText]
+      .filter(Boolean).join(' · ');
     renderAiResult(aiText, info);
     meta.textContent = info;
     $('#btnAiRetry').hidden = false;

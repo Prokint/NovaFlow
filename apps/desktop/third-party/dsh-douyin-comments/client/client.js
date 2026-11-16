@@ -288,6 +288,29 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /** v0.9.38：获客工作台（同一个 app 页面的 ?view=outreach 模式）。
+     *  只显示「我的抖音账号 / 收藏客户 / 话术库 + 发送记录」，不显示采集表单与导出记录；
+     *  NovaFlow 付费版用它替代「采集页」，既遵守同事「不展示采集页」的设计，又保留获客功能。 */
+    function OutreachPage() {
+      var theme = useDshTheme();
+      var p = dshPalette(theme);
+      return h('iframe', {
+        src: CONSOLE_PATH + '/?embed=1&view=outreach&theme=' + theme,
+        title: '获客工作台',
+        allow: 'clipboard-read; clipboard-write',
+        style: {
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          minHeight: 0,
+          flex: 1,
+          border: 0,
+          background: p.bg,
+          colorScheme: theme,
+        },
+      });
+    }
+
     function ConsoleIcon() {
       return h(
         'svg',
@@ -364,11 +387,11 @@ window.__ModuleLoader__.load({
       });
     }
 
-    /** 面板子页状态：console = 采集控制台，viewer = 评论词云（同一面板内切换） */
+    /** 面板子页状态：console = 采集控制台，outreach = 获客工作台，viewer = 评论词云（同一面板内切换） */
     var panelMode = 'console';
     var panelModeSubscribers = new Set();
     function setPanelMode(mode) {
-      if (mode !== 'console' && mode !== 'viewer') return;
+      if (mode !== 'console' && mode !== 'outreach' && mode !== 'viewer') return;
       if (mode === panelMode) return;
       panelMode = mode;
       panelModeSubscribers.forEach(function (fn) {
@@ -611,12 +634,9 @@ window.__ModuleLoader__.load({
       var licenseOn = ent && ent.enabled === true;
       var licensed = licenseOn && ent.activated === true;
       React.useEffect(function () {
-        if (licenseOn && panelMode === 'console') setPanelMode('viewer');
+        // v0.9.38：NovaFlow 收费模式下默认进「获客工作台」；采集仍由 AI 工具触发，面板不显示采集页。
+        if (licenseOn && panelMode === 'console') setPanelMode('outreach');
       }, [licenseOn]);
-      // v0.9.26：授权未开通或已到期时整页拦截，评论词云也不渲染。
-      if (licenseOn && !licensed) {
-        return h(LicenseGatePage, { ent: ent, p: p, theme: theme, onRefresh: reloadEnt });
-      }
       var paneStyle = function (active) {
         return { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, display: active ? 'block' : 'none' };
       };
@@ -629,12 +649,21 @@ window.__ModuleLoader__.load({
           style: panelTabStyle(mode === 'console', p),
         }, '采集'));
       }
+      // v0.9.38：获客工作台永远可用（账号识别 / 收藏客户 / 话术库 / 发送记录）。
       tabs.push(h('button', {
-        key: 'viewer',
+        key: 'outreach',
         type: 'button',
-        onClick: function () { setPanelMode('viewer'); },
-        style: panelTabStyle(mode === 'viewer', p),
-      }, '评论词云'));
+        onClick: function () { setPanelMode('outreach'); },
+        style: panelTabStyle(mode === 'outreach', p),
+      }, '获客工作台'));
+      if (!licenseOn || licensed) {
+        tabs.push(h('button', {
+          key: 'viewer',
+          type: 'button',
+          onClick: function () { setPanelMode('viewer'); },
+          style: panelTabStyle(mode === 'viewer', p),
+        }, '评论词云'));
+      }
       if (licenseOn) {
         var subText = ent.activated === true
           ? ('订阅有效' + (ent.remainingDays > 0 ? ' · 剩 ' + ent.remainingDays + ' 天' : ''))
@@ -676,7 +705,10 @@ window.__ModuleLoader__.load({
         }, tabs),
         h('div', { key: 'body', style: { position: 'relative', flex: 1, minHeight: 0, background: p.bg } }, [
           h('div', { key: 'console-pane', style: paneStyle(mode === 'console' && !licenseOn) }, h(ConsolePage, { key: 'console' })),
-          h('div', { key: 'viewer-pane', style: paneStyle(mode === 'viewer' || licenseOn) }, h(ViewerPage, { key: 'viewer' })),
+          h('div', { key: 'outreach-pane', style: paneStyle(mode === 'outreach') }, h(OutreachPage, { key: 'outreach' })),
+          h('div', { key: 'viewer-pane', style: paneStyle(mode === 'viewer' && (!licenseOn || licensed)) },
+            (!licenseOn || licensed) ? h(ViewerPage, { key: 'viewer' })
+              : h(LicenseGatePage, { key: 'gate', ent: ent, p: p, theme: theme, onRefresh: reloadEnt })),
         ]),
       ]);
     }
@@ -721,6 +753,9 @@ window.__ModuleLoader__.load({
       var lastPath = null;
       var primed = false;
       var stopped = false;
+      // 挂载时刻：用来区分「挂载前就存在的旧导出」（当基线，不展开）与「挂载后才落盘的新导出」（真·新导出，展开）。
+      // 旧逻辑只要还没上膛就把第一份有效响应吞掉当基线 ⇒ 工作区里第一份导出永远不会自动展开。
+      var mountedAt = Date.now();
       function poll() {
         if (stopped) return;
         fetch(VIEWER_PATH + '/api/latest', { cache: 'no-store' }).then(function (r) {
@@ -728,9 +763,21 @@ window.__ModuleLoader__.load({
         }).then(function (data) {
           var file = data && data.file;
           if (!file || !file.path) return;
-          if (!primed) { primed = true; lastPath = String(file.path); return; }
-          if (String(file.path) === lastPath) return;
-          lastPath = String(file.path);
+          var nextPath = String(file.path);
+          var mtime = Number(file.mtime);
+          if (!primed) {
+            // 第一份有效响应：只有「比挂载时刻还新」才算真·新导出（后端刚落盘），否则当基线吞掉。
+            // 留 1 秒余量，避免把「挂载瞬间刚好写盘」的旧文件误判成新导出（/api/latest 的 mtime 是 mtimeMs）。
+            if (!(Number.isFinite(mtime) && mtime > mountedAt + 1000)) {
+              primed = true;
+              lastPath = nextPath;
+              return;
+            }
+            primed = true;
+          } else if (nextPath === lastPath) {
+            return;
+          }
+          lastPath = nextPath;
           setPanelMode('viewer');
           bumpViewerGeneration();
           openPanelTab(ctx);

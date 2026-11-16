@@ -92,7 +92,93 @@ const AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 const AI_MAX_DIGEST_CHARS = 12000;
-const AI_MAX_TOKENS = 1600;
+// v0.9.43：1600 是「我们给这次输出设的上限」，不是供应商的硬限制。
+// 之所以默认不大：AI 解读只需要一段固定 JSON（几百到 1-2K token 就够），
+// 上限开太大时，一旦思考丢不掉，模型会先烧掉更多预算/时间才给出 0 字正文。
+// 需要时可用 DYC_AI_MAX_TOKENS=200..32000 覆盖基础预算（调试/长摘要用）。
+const AI_MAX_TOKENS = (() => {
+  const raw = Number.parseInt(String(process.env.DYC_AI_MAX_TOKENS || "").trim(), 10);
+  return Number.isFinite(raw) && raw >= 200 ? Math.min(raw, 32000) : 1600;
+})();
+// 思考关不掉时（effort 为 undefined），思考 token 与正文共用同一个输出预算，
+// 所以基础预算自动放大（默认 4 倍、封顶 6400），留给正文一些空间。
+const AI_MAX_TOKENS_THINKING = Math.max(AI_MAX_TOKENS, Math.min(AI_MAX_TOKENS * 4, 6400));
+
+// v0.9.44：思考档跨模型适配。
+// 不同供应商的档位 id 五花八门（off/none/minimal/low/medium/high/max/xhigh…），
+// DSH 对接层不做钳制：传了不支持的档会直接报 UNSUPPORTED_REASONING_EFFORT。
+// 所以这里做「请求档 → 该模型实际支持的档」的映射：
+//   1) 档位 id 精确匹配（忽略大小写）→ 直接用
+//   2) 档位 name 匹配 → 用它的 id
+//   3) 否则按「思考深度等级」映射到最接近的受支持档（同距离时取更省的那档）
+//   4) 都映射不到 → 不传（交给供应商默认值）
+// 等级表只用于跨模型换算，不是抖音/DSH 的官方定义。
+const AI_EFFORT_RANK = { off: 0, none: 0, disabled: 0, minimal: 1, low: 2, medium: 3, high: 4, max: 5, xhigh: 5 };
+function effortRankOf(id) {
+  const key = String(id || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(AI_EFFORT_RANK, key) ? AI_EFFORT_RANK[key] : null;
+}
+function pickEffortForModel(supported, requested) {
+  const req = String(requested || "").trim().toLowerCase();
+  if (!req || req === "auto") {
+    const off = (supported || []).find((e) => String((e && e.id) || "").toLowerCase() === "off");
+    return off ? { effort: String(off.id), how: "auto-off" } : { effort: undefined, how: "auto-omit" };
+  }
+  const byId = (supported || []).find((e) => String((e && e.id) || "").toLowerCase() === req);
+  if (byId) return { effort: String(byId.id), how: "exact" };
+  const byName = (supported || []).find((e) => String((e && e.name) || "").toLowerCase() === req);
+  if (byName) return { effort: String(byName.id), how: "name" };
+  const target = effortRankOf(req);
+  if (target === null) return { effort: undefined, how: "unknown-request" };
+  let best = null;
+  let bestDiff = Infinity;
+  for (const e of supported || []) {
+    const r = effortRankOf(String((e && e.id) || ""));
+    if (r === null) continue;
+    const diff = Math.abs(r - target);
+    if (diff < bestDiff || (diff === bestDiff && best && r < effortRankOf(String(best.id))) ) {
+      best = e;
+      bestDiff = diff;
+    }
+  }
+  if (!best) return { effort: undefined, how: "no-mappable" };
+  return { effort: String(best.id), how: "nearest" };
+}
+
+// v0.9.44：有的模型会把「思考」直接写进正文（而不是走 reasoning-delta，例如带
+// 思考标签的推理模型 / 某些中转网关）。正常情况我们只把 reasoning-delta 计入字数、
+// 不显示内容；但若思考漏进正文，这里兜底把常见的思考标签整段剥掉，
+// 只留下真正的 JSON 正文。剥完仍解析不出 JSON 时，退化为「截取最外层 {}」。
+function stripInlineReasoning(input) {
+  let out = String(input || "");
+  const tagPairs = [
+    [/<think\b[^>]*>[\s\S]*?<\/think[^>]*>/gi, ""],
+    [/<reasoning\b[^>]*>[\s\S]*?<\/reasoning[^>]*>/gi, ""],
+    [/<\|thinking\|>[\s\S]*?<\|\/thinking\|>/gi, ""],
+    [/<\|reasoning\|>[\s\S]*?<\|\/reasoning\|>/gi, ""],
+  ];
+  for (const [re, rep] of tagPairs) out = out.replace(re, rep);
+  return out.trim();
+}
+function normalizeAiAnswer(rawText) {
+  let text = stripInlineReasoning(rawText);
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch {
+    /* 不是纯 JSON，继续尝试截取 */
+  }
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const slice = text.slice(start, end + 1);
+    try {
+      return JSON.stringify(JSON.parse(slice));
+    } catch {
+      /* 放弃 */
+    }
+  }
+  return text;
+}
 
 /** 页面与接口的挂载前缀（index.js 也用它打印日志） */
 export const VIEWER_PREFIX = "/plugins/dsh-douyin-comments/viewer";
@@ -445,38 +531,99 @@ function handleExplain(ctx, req, res) {
         if (!res.writableEnded) controller.abort();
       });
     }
-    send({ start: true, provider: selection.provider, model: selection.model });
 
     let text = "";
     let reasonChars = 0;
+    let lastReasonSent = 0;
     let finish = null;
     let usage = null;
     try {
       const userMessage = await makeUserMessage("数据摘要：\n" + digestJson);
-      // v0.5.59：这个任务是「读摘要→输出固定 JSON」，不需要长思考。
-      // 但 dsh-llm-deepseek 的默认 reasoningEffort 是 high，思考内容走
-      // `reasoning-delta`（我们不计入正文），于是 900 token 全被思考吃掉、
-      // 可见正文 0 字，finish.kind === 'max-tokens' —— 表现为「没有返回内容」。
-      // 这里显式关掉推理，并支持一次「预算加倍」重试。
-      const runOnce = async (maxTokens) => {
-        const stream = llm.stream({
+      // v0.9.44：思考档支持「用户指定（body.effort）」+「跨模型映射」。
+      // 前端可传 auto/off/low/medium/high/max；后端按目标模型实际支持的档
+      // 精确匹配 → 名称匹配 → 深度等级就近映射（见 pickEffortForModel）。
+      // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试用）。
+      // v0.9.45：不再让用户在页面上调思考档 —— 固定按「高」思考（分析更准）。
+      // 目标模型如果没有 high，就由 pickEffortForModel 就近映射到它支持的档
+      // （如 medium/low/max；能自动关思考的模型也优先按 high 想，除非被拒绝）。
+      // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试/特殊模型用）。
+      const requestedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim().toLowerCase() || "high";
+      const forcedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim();
+      let effort;
+      let effortHow = "";
+      let supportedEfforts = [];
+      if (forcedEffort && forcedEffort !== "auto") {
+        effort = forcedEffort;
+        effortHow = "forced";
+      } else {
+        let supported = null;
+        if (typeof llm.resolveModelInfo === "function") {
+          try {
+            const info = await llm.resolveModelInfo(selection.provider, selection.model, controller.signal);
+            supported = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : [];
+          } catch {
+            supported = null;
+            effortHow = "probe-failed";
+          }
+        }
+        if (supported === null) {
+          // 查不到模型能力：显式请求「非 off」的档时也不瞎传（DSH 会直接拒绝）；
+          // off / auto 沿用旧的 "off" 行为，真被拒时靠下面的自动重试兜底。
+          effort = requestedEffort && requestedEffort !== "off" ? undefined : "off";
+          effortHow = effortHow || "no-probe";
+        } else {
+          supportedEfforts = supported.map((e) => String((e && e.id) || "")).filter(Boolean);
+          const picked = pickEffortForModel(supported, requestedEffort);
+          effort = picked.effort;
+          effortHow = picked.how;
+        }
+      }
+      send({
+        start: true,
+        provider: selection.provider,
+        model: selection.model,
+        requestedEffort: requestedEffort || "auto",
+        effort: effort === undefined ? "(omit)" : effort,
+        effortHow,
+        supportedEfforts,
+      });
+      appendDebug({
+        event: "effort",
+        provider: selection.provider,
+        model: selection.model,
+        effort: effort === undefined ? "(omit)" : effort,
+        effortHow,
+        requested: requestedEffort || "auto",
+        supportedEfforts,
+        forced: forcedEffort || undefined,
+      });
+
+      const runOnce = async (maxTokens, useEffort) => {
+        const options = {
           provider: selection.provider,
           model: selection.model,
           system: AI_SYSTEM_PROMPT,
           messages: [userMessage],
           temperature: 0.3,
           maxTokens,
-          reasoningEffort: "off",
           signal: controller.signal,
-        });
+        };
+        if (useEffort !== undefined) options.reasoningEffort = useEffort;
+        const stream = llm.stream(options);
         for await (const chunk of stream) {
           if (!chunk) continue;
           if (chunk.type === "text-delta" && chunk.text) {
             text += chunk.text;
             send({ delta: chunk.text });
           } else if (chunk.type === "reasoning-delta") {
-            // 仅统计，不发给前端（摘要要求只输出 JSON）
+            // 只统计字数、不把思考内容发给前端（结果里只应有 JSON 正文）。
+            // v0.9.44：把思考进度也推给前端（前端只显示字数，不显示内容），
+            // 便于用户确认「模型在认真想」以及预算是否被思考吃掉。每 200 字推一次。
             reasonChars += String(chunk.text || "").length;
+            if (reasonChars - lastReasonSent >= 200) {
+              lastReasonSent = reasonChars;
+              send({ reasoningChars: reasonChars });
+            }
           } else if (chunk.type === "usage") {
             usage = chunk.usage;
             send({ usage: chunk.usage });
@@ -485,14 +632,47 @@ function handleExplain(ctx, req, res) {
           }
         }
         const kind = finish && (finish.kind || finish);
-        return kind;
+        const failureCode = finish && finish.kind === "error" && finish.failure ? String(finish.failure.code || "") : "";
+        return { kind, failureCode };
       };
-      let kind = await runOnce(AI_MAX_TOKENS);
-      if (!text && kind === "max-tokens" && !controller.signal.aborted) {
-        appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: AI_MAX_TOKENS });
+      const resetAttempt = () => {
+        text = "";
+        reasonChars = 0;
+        lastReasonSent = 0;
         finish = null;
-        kind = await runOnce(AI_MAX_TOKENS * 2);
+      };
+      // v0.9.43：思考关不掉时（effort 为 undefined），思考 token 和正文共用
+      // 同一个输出预算，所以基础预算自动放大；能关掉思考时仍用 1600 这个小上限。
+      const budgetNow = () => (effort === "off" ? AI_MAX_TOKENS : AI_MAX_TOKENS_THINKING);
+      let attempt;
+      try {
+        attempt = await runOnce(budgetNow(), effort);
+      } catch (err) {
+        const msg = String((err && err.message) || err);
+        if (effort !== undefined && /reasoning effort/i.test(msg)) {
+          appendDebug({ event: "retry", reason: "unsupported-reasoning-effort-throw", message: msg });
+          resetAttempt();
+          effort = undefined;
+          attempt = await runOnce(budgetNow(), undefined);
+        } else {
+          throw err;
+        }
       }
+      if (!text && attempt.kind === "error" && attempt.failureCode === "UNSUPPORTED_REASONING_EFFORT") {
+        appendDebug({ event: "retry", reason: "unsupported-reasoning-effort", tried: effort === undefined ? "(omit)" : effort });
+        resetAttempt();
+        effort = undefined;
+        attempt = await runOnce(budgetNow(), undefined);
+      }
+      let kind = attempt.kind;
+      if (!text && kind === "max-tokens" && !controller.signal.aborted) {
+        appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: budgetNow() });
+        resetAttempt();
+        const second = await runOnce(budgetNow() * 2, effort);
+        kind = second.kind;
+      }
+      // v0.9.44：兜底剥掉「漏进正文的思考标签」；能截出 JSON 就只保留 JSON。
+      if (text) text = normalizeAiAnswer(text);
       appendDebug({
         event: "finish",
         provider: selection.provider,
@@ -500,17 +680,33 @@ function handleExplain(ctx, req, res) {
         kind,
         chars: text.length,
         reasonChars,
-        maxTokens: AI_MAX_TOKENS,
+        effort: effort === undefined ? "(omit)" : effort,
+        effortHow,
+        maxTokens: budgetNow(),
         digestChars: digestJson.length,
       });
       if (finish && kind !== "stop" && kind !== "max-tokens") {
         send({ error: "模型返回失败：" + describeFinish(finish) });
       } else if (!text && kind === "max-tokens" && reasonChars > 0) {
-        send({ error: "模型把 token 预算都用在思考上了（思考 " + reasonChars + " 字、正文 0 字）。已在请求里关闭推理，如仍出现请把这份摘要复制给任意 AI。" });
+        send({
+          error:
+            "模型把 token 预算都用在思考上了（思考 " + reasonChars + " 字、正文 0 字）。" +
+            (effort === undefined
+              ? "这个模型/供应商关闭不了思考（或不支持思考档参数），DSH 只按模型能力传参；可以换一个不需要长思考的模型，或把摘要复制给任意 AI。"
+              : "已在请求里关闭推理；如仍出现请把这份摘要复制给任意 AI。"),
+        });
       } else if (!text) {
         send({ error: "模型没有返回内容（可点「重新生成」再试一次）" });
       } else {
-        send({ done: true, chars: text.length });
+        send({
+          done: true,
+          chars: text.length,
+          reasoningChars: reasonChars,
+          effort: effort === undefined ? "(omit)" : effort,
+          effortHow,
+          requestedEffort: requestedEffort || "auto",
+          supportedEfforts,
+        });
       }
     } catch (err) {
       appendDebug({ event: "throw", message: String((err && err.message) || err) });
