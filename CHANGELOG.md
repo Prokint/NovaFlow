@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.2.21
+
+- dsh-douyin-comments 升级到 0.9.50：AI 解读 / LLM 情感复核改为只有在 NovaFlow 订阅激活后才可用（未激活返回 402 并给出购买引导）；词云和本地统计不受影响。
+
+
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
 ## 0.2.20

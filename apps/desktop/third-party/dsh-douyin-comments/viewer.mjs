@@ -471,13 +471,59 @@ function upsertFavorite(store, raw, note) {
   return { user: next };
 }
 
+// v0.9.50：付费功能闸门。
+// 词云的授权校验目前只在 client.js 里做（LicenseGatePage 盖板 + 购买链接），
+// 直接访问 /plugins/dsh-douyin-comments/viewer/ 能绕过；所以这里在**后端接口**上再拦一层：
+// - entitlementEnabled() 为 false（独立 DSH / 未开启收费模式）时一律放行；
+// - 查询服务端失败时沿用最近一次缓存状态（grace），避免断网把已付费用户锁死。
+const ENT_GATE_CACHE = { at: 0, state: null };
+const ENT_GATE_TTL_MS = 60 * 1000;
+async function entitlementGateState() {
+  if (!entitlementEnabled()) return { on: false, activated: true };
+  const now = Date.now();
+  if (ENT_GATE_CACHE.state && now - ENT_GATE_CACHE.at < ENT_GATE_TTL_MS) {
+    return { on: true, activated: ENT_GATE_CACHE.state.activated === true };
+  }
+  try {
+    const st = await entitlementStatus();
+    ENT_GATE_CACHE.state = st || {};
+    ENT_GATE_CACHE.at = now;
+  } catch (error) {
+    const code = String((error && error.code) || "");
+    // 明确的「没开通/已到期/版本停用」不是网络问题 ⇒ 直接判定未激活，并缓存下来。
+    if (code === "NOT_ACTIVATED" || code === "EXPIRED" || code === "VERSION_RETIRED" || code === "DEVICE_LIMIT" || code === "TOKEN_INVALID") {
+      ENT_GATE_CACHE.state = { activated: false, code };
+      ENT_GATE_CACHE.at = now;
+    } else if (!ENT_GATE_CACHE.state) {
+      // 服务不可达且没有历史状态：fail-open，避免断网把已付费用户锁死。
+      return { on: true, activated: true };
+    }
+  }
+  return { on: true, activated: Boolean(ENT_GATE_CACHE.state && ENT_GATE_CACHE.state.activated === true) };
+}
+function replyNotActivated(res, feature) {
+  sendJson(res, 402, {
+    ok: false,
+    code: "NOT_ACTIVATED",
+    error: "这个功能需要 NovaFlow 订阅",
+    feature,
+    hint: "在「订阅/激活」里输入激活码，或点购买链接开通后重启 DSH Desktop",
+    purchaseUrl: "https://collect.lanjiaotrade.com/buy",
+  });
+}
+
 /**
  * v0.2.10：把前端算好的 digest 交给 DSH 已配置的模型，SSE 流式返回文字。
  * 模型只做「解读」，不参与任何统计计算。
  */
-function handleExplain(ctx, req, res) {
+async function handleExplain(ctx, req, res) {
   if (req.method !== "POST") {
     sendJson(res, 405, { ok: false, error: "只支持 POST" });
+    return;
+  }
+  const gate = await entitlementGateState().catch(() => ({ on: false, activated: true }));
+  if (gate.on && !gate.activated) {
+    replyNotActivated(res, "ai-explain");
     return;
   }
   const llm = optionalService(ctx, "llm");
@@ -852,10 +898,15 @@ async function classifyWithLlm(llm, selection, items) {
   return parseSentLlmLabels(text);
 }
 
-function handleSentimentLlm(ctx, req, res) {
+async function handleSentimentLlm(ctx, req, res) {
   if (req.method !== "POST") {
     res.writeHead(405, { Allow: "POST" });
     res.end();
+    return;
+  }
+  const gate = await entitlementGateState().catch(() => ({ on: false, activated: true }));
+  if (gate.on && !gate.activated) {
+    replyNotActivated(res, "sentiment-llm");
     return;
   }
   const llm = optionalService(ctx, "llm");

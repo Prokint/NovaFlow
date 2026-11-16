@@ -1,8 +1,93 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.39；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.46；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.50 变更**（2026-11-16）：给 AI 解读 / LLM 复核补上「付费功能闸门」。
+
+- 背景：词云的授权校验此前只在 `client.js` 里做（`LicenseGatePage` 盖板 + 购买链接），直接访问 `/plugins/dsh-douyin-comments/viewer/` 能绕过；AI 解读与 LLM 复核同样只在客户端做了引导，没有后端拦截。
+- 做法：`viewer.mjs` 增加 `entitlementGateState()`（60s 状态缓存），在 `POST /viewer/api/explain` 与 `POST /viewer/api/sentiment-llm` 入口检查订阅状态；未激活直接回 **402**（`code=NOT_ACTIVATED`）并带 `purchaseUrl`。`entitlementEnabled()` 为 false（独立 DSH / 未开启收费模式）时一律放行；查询服务端失败时沿用最近一次缓存（grace），避免断网锁死付费用户。
+- 前端：AI 解读收到 402 时显示「AI 解读是 NovaFlow 付费功能」+「去购买 / 开通订阅」按钮（`collect.lanjiaotrade.com/buy`），不再当成普通失败；LLM 复核收到 402 时状态显示「LLM 复核需开通订阅」，不在页面上报错。
+- 边界：静态页面与 103MB 模型文件仍可被直接访问（HTTP 静态资源难按订阅授权），但凡是**产生模型调用/分析的接口**都由后端拦截；真正可信的激活状态仍以服务端 `collect.lanjiaotrade.com` 为准。
+- 自检：`pay-gate-explain` / `pay-gate-llm` / `pay-gate-ui` / `pay-gate-readme`。
+
+**0.9.49 变更**（2026-11-16）：本地情感分析再加一层「LLM 复核兜底」。
+
+- 背景：规则 + 本地小模型（weibo-BERT int8）在 95 条金标上仍有 22 条错，其中 16 条是「中性被误判成有情绪」；这类短句/反讽只靠词典和 110M 小模型修不动。
+- 做法：`viewer.mjs` 新增 `POST /viewer/api/sentiment-llm` —— 只把「规则和本地模型都判中性」的评论（每份导出最多 40 条、10 条一批）交给 DSH 当前默认模型复核，返回 `{cid,label,conf}`；置信 ≥ 0.6 才改判，模型判断为中性则保持中性。
+- 缓存：按评论文本 sha1 落盘 `<DOUYIN_HOME>/sentiment-llm-cache.json`，同一句评论重复导出时直接命中缓存、不再调用模型。
+- 状态：评论表标题旁显示「LLM 复核 N 条 · 改判 K 条」；DSH 未配置模型时显示「LLM 复核不可用（已用本地结果）」，不影响规则/小模型结果。
+- 成本：不新增包体、不下载模型；每份导出最多 4 次模型调用（每次 ≤10 条），只在打开词云页时触发；有缓存后重复查看免费。
+- 自检：`sent-llm-route` / `sent-llm-cache` / `sent-llm-page` / `sent-llm-readme`。
+
+**0.9.48 变更**（2026-11-16）：**本地情感分析升级为「规则 + 小模型混合」**，不再只靠词典判断。
+
+- 规则先跑（快、零依赖）；再把「规则判为中性」的评论交给内置 weibo-BERT 中文三分类小模型复核，模型判成正面/负面且置信 ≥ 0.45 时才改判。
+- 模型与运行时：`viewer/sentiment/weibo-bert-int8.onnx`（int8 量化约 103MB，基于 `chinese-bert-wwm-ext`，Negative/Positive/Neutral 三分类）、自写 WordPiece `viewer/sentiment/tokenizer.js`、`viewer/sentiment/worker.js`（Web Worker + onnxruntime-web WASM，`viewer/vendor/ort/` 共约 15MB）。多线程 WASM 需要 COOP/COEP（`viewer.mjs` 已给所有静态资源带 CORP，否则 Worker 会被 `net::ERR_BLOCKED_BY_RESPONSE` 拦掉）。首次加载模型约 2 秒，1000 条约 9 秒。
+- 效果（95 条人工金标）：三类准确率 72.6% → **76.8%**，极性（正/负）准确率 38.7% → **77.4%**；真实 123 条评论实测模型改判 8 条（`嘻嘻嘻` 等纯表情/短句从「中性」变「正面」）。
+- 失败自动退回纯规则：模型文件缺失或 Worker 初始化失败时，评论表标题旁显示「情感模型不可用（规则结果仍可用）」。
+- 代价：安装包约 +120MB；模型文件**不进 git**（超过 GitHub 100MB 限制），本地插件目录与安装副本自带，插件仓与 NovaFlow 打包暂不含。
+- 自检：`sent-model-file` / `sent-worker` / `sent-tokenizer` / `sent-headers` / `sent-page` / `sent-readme`。
+
+**0.9.47 变更**（2026-11-16）：本地情感分析收紧，修掉「把夸赞判成负面」
+
+- 问题：把最新 123 条评论跑本地情感，得到 24 正面 / 88 中性 / 11 负面，11 条「负面」里 10 条其实是误判——纯 `[流泪]/[叹气]` 表情、`没人可以质疑十二秋的眼光[看]`、`前辈说得对[流泪][流泪]`、`太强了 太强了[流泪]`、`还是吗[流泪]` 都被旧词典判负。
+- 修法：`EMOJI_SOFT_NEG`（流泪/叹气/委屈/可怜/汗/擦汗/困/哼）改为弱表情（-0.15，纯表情时不计正负）；`EMOJI_STRONG_NEG`（大哭/崩溃/发怒/呕吐/心碎/咒骂…）单独出现仍判负；有文字时表情权重砍半；新增正向短语白名单（`没人可以质疑`、`说得对`、`的眼光`、`太强了`、`太棒了`、`太绝了`…）；短问句（「还是吗」「是吗」）没命中情感词时归中性。
+- 效果：同一份导出从 24/88/11 → **29 正面 / 93 中性 / 1 负面**（唯一负面是「不强呀」这种真轻微负向）；AI 解读摘要里的 `negatives` 条数与 `sentiment` 统计一致（0.9.46 已修摘要 bug）。
+- 注意：这是本地词典+表情的轻量情感分析，不是模型级判定；边界样本仍可能偏。AI 解读会拿到负面原文，可自行复核。
+- 自检：`sent-soft-emoji` / `sent-phrase-pos` / `sent-question-neu` / `sent-readme`（`node verify-tool.mjs` 全绿）。
+**0.9.46 变更**（2026-11-16）：修复 AI 解读「摘要自相矛盾」的关键 bug + 界面上不再显示思考档映射提示。
+
+- **修复摘要情绪字段**：`buildDigest()` 里 `c.sentiment` 是对象 `{ score, label, hits }`，旧代码用 `c.sentiment === 'neg'` 判断（永远不成立），导致 `negatives: []`、趋势里 `neg: 0`，而 `sentiment.neg=11` 自相矛盾——模型就会说「负面无法定位」「趋势与总负面不一致」。现在统一用 `c.sentiment.label === 'neg'`，负面样本会真正带进 digest，趋势也一致。
+- **摘要加 `notes` 字段**：抖音评论没有星级评分/SKU 字段，空 `ratings`/`skus` 是正常的；主题聚类样本不足时 `topics` 也会为空。这些原因现在直接写进 digest 的 `notes`，避免模型把它们误判成「数据缺失」而整篇都在挑数据问题。
+- **界面文案**：思考字数改为「思考 N 字（内容不展示）」；删除「思考档已按该模型就近映射为 X」「该模型没有这个思考档，已交给默认设置」等提示（内部只记调试日志），用户只关心结果。
+
+自检：`digest-sentiment-label`、`digest-notes`、`ai-reasoning-wording`、`ai-no-effort-hint`。
+**0.9.45 变更**（2026-11-16）：AI 解读的思考档改为**固定「高」思考、用户无需也不允许调整**。
+
+- 去掉页面的「思考档」下拉：分析准确性优先，默认就按「高」思考，不把调档的负担丢给用户。
+- 其他模型不一定有 `high` 档：后端 `pickEffortForModel()` 按 4 步映射（id 精确 → name 匹配 → 按思考深度等级**就近**取档（同距离取更省的一档）→ 都不可用则不传、交供应商默认）；被适配器拒绝时自动去参数重试一次。所以「固定高」不会在某些模型上报错或退化成不思考。
+- 思考内容依旧**只统计字数、不显示**；内联思考标签由 `stripInlineReasoning()` / `normalizeAiAnswer()` 剥掉后只留 JSON。
+- `DYC_AI_REASONING_EFFORT=off|low|medium|high|max` 仍可强制覆盖（调试/特殊模型用）。输出预算仍按 0.9.43 的自适应规则（思考档非 off → 6400 起步）。
+
+自检：`ai-effort-default`（后端默认 requestedEffort="high"）、`ai-effort-map`、`ai-reasoning-filter`、`ai-effort-no-ui`（页面不再有 aiEffort 下拉）、`ai-effort-readme`。
+**0.9.44 变更**（2026-11-16）：AI 解读支持**自选思考档**，并做了**跨模型档位映射**与**思考内容过滤**。
+
+- 页面「洞察」卡片新增「思考：自动 / 关闭 / 低 / 中 / 高 / 最高」下拉（本机记住选择）。想要更准的分析可以选高/最高；默认「自动」= 模型支持关闭思考时就关闭（最快最省）。
+- 后端按目标模型真实支持的档做映射：档位 id 精确匹配 → 名称匹配 → 按思考深度等级就近取档（同距离取更省的一档）；都不支持就不传（交给供应商默认值），被适配器拒绝时自动去参数重试一次。实现是 `viewer.mjs` 的 `pickEffortForModel()`。
+- **思考内容不会出现在结果里**：正常思考由流式 `reasoning-delta` 承载，只统计字数、不显示；如果某个模型把思考直接写进正文（内联思考标签），`viewer.mjs` 的 `stripInlineReasoning()` / `normalizeAiAnswer()` 会整段剥掉，再截取最外层 JSON。
+- 生成中会显示「正在生成… N 字（思考 M 字，不显示）」；结束后 meta 里也带「思考 M 字」，方便判断是不是被思考吃掉了预算。
+- 思考档为 `auto` 时仍会尽量关思考；想开思考就显式选低/中/高/最高。长段落/长摘要仍可用 `DYC_AI_MAX_TOKENS` 放大输出预算。
+
+自检：`ai-effort-request`（后端接收 `body.effort` 并回传 `supportedEfforts`/`effortHow`）、`ai-effort-map`（跨模型档位映射）、`ai-reasoning-filter`（思考过滤/正文 JSON 截取）、`ai-effort-page`（页面上有思考档下拉）、`ai-effort-readme`。
+**0.9.43 变更**（2026-11-16）：AI 解读的输出预算不再固定 1600，改为「按思考能不能关掉」自适应，并可用环境变量调。
+
+- 1600 是**插件自己设的单次输出上限**（不是供应商硬限制）：这个任务只输出一段固定 JSON，默认不需要更大。
+- 思考关得掉（effort=`off`）→ 仍用 1600；思考关不掉（没 `off` 档 / 模型不支持思考参数 / 适配器拒绝后去掉参数）→ 基础预算自动放大到 4 倍（默认 6400，封顶 6400），因为思考 token 与正文共用同一个输出预算。
+- 仍保留兜底：`finish.kind === "max-tokens"` 且正文为空时，预算再翻倍重试一次。
+- 需要更大的基础预算时设 `DYC_AI_MAX_TOKENS=200..32000`（例如长摘要）；`reasonChars` 与所选档会写进 `D:/dycopy/devkit/_ai-explain-debug.jsonl` 便于排查。
+- 自检：`ai-budget-adaptive`（思考关不掉时预算放大）、`ai-budget-readme`（README 记录该行为）。
+**0.9.42 变更**（2026-11-16）：AI 解读不再把思考程度写死成 `reasoningEffort: "off"`。
+
+- 先通过 DSH 的 `llm.resolveModelInfo(provider, model)` 看这个路由支持哪些思考档：
+  - 模型/供应商完全不支持思考控制 → **不传** `reasoningEffort`（以前硬传 `"off"` 会被直接拒绝，报 `UNSUPPORTED_REASONING_EFFORT`）；
+  - 支持且包含 `off` → 传 `"off"`（最省 token，读摘要这种任务不需要长思考）；
+  - 支持思考但没有 `off`（档名可能是 `none`/`medium` 之类）→ **不传**，交给供应商默认值；DSH 对不支持的档是直接拒绝、不做钳制，所以不猜档名。
+- 万一某个适配器仍然拒绝（`finish.kind === "error"` 且 `failure.code === "UNSUPPORTED_REASONING_EFFORT"`，或抛出的错误文案提到 reasoning effort），**自动去掉该字段重试一次**；仍保留原来的「思考吃光预算 → 预算加倍重试」。
+- 如果模型确实关不掉思考，错误提示会明确说「这个模型/供应商关闭不了思考」，而不是误报成「没有返回内容」。
+- 调试时可设环境变量 `DYC_AI_REASONING_EFFORT=auto|off|low|high|max` 强制覆盖（`auto` 为默认的自适应）。
+- 自检：`ai-effort-adaptive`（按能力选档）、`ai-effort-fallback`（拒绝后去参数重试）、`ai-effort-readme`。
+**0.9.41 变更**（2026-11-14）：**修窄屏（DSH 侧边栏宽度）评论表的排版**。
+- 现象：词云「评论表」在 ≤620px 时用两列 grid 叠字段，`时间`（2026-11-14 13:25 这种长文本）会被挤到卡片右缘裁掉，「用户」标签和头像还会分家，看起来像一堆错位的表单。
+- 修法：`viewer/styles.css` 的窄屏分支改成「卡片 + 元信息行」——评论正文整行、用户头像+昵称整行，其余元信息（点赞 / 回复 / 属地 / 时间 / 层级 / 情感 / 收藏）自动换行排一行，不再两列、不再裁剪；宽屏表格布局不变。
+- 截图：`_probe/viewer-narrow-0942.png`（560px）、`_probe/viewer-wide-0942.png`（1280px）。
+- 自检新增 `viewer-narrow-layout` 断言。
+**0.9.40 变更**（2026-11-14）：**让 AI 知道「没有采集页时怎么问清楚再采集」**。
+- 背景：NovaFlow 付费版客户端不展示「新建采集」页面，采集只能由 AI 调用 `douyin_comments` 触发；以前工具描述只讲能力不讲流程，AI 容易直接替你编参数。
+- 做法：`douyin_comments` 的 description 开头写死「第 0~4 步」使用流程 —— 先确认账号（`douyin_account_info` + 店铺账号管理 `shop_accounts` 只选买家账户）→ 问采集方式（链接 / 关键词）→ 关键词模式必须逐项问清楚 `keyword` / `videoCount` / `sortType` / `publishTime` / `duration` / `contentType` → 补充确认 `replies` / `max` / `clearBefore` / `outDir` / `cloud` → 复述给用户确认后再调用、调用后把文件路径与条数告诉用户。
+- `douyin_account_info` 的 description 标注「采集/获客前建议先调 action=status 做第 0 步」。
+- 完整流程见下一节「AI / NovaFlow 付费版：没有采集页时怎么用」。
+- 自检新增 v0.9.40 断言组（`ai-usage-flow` / `acct-step0` / `ai-flow-readme`）。
 **0.9.39 变更**（2026-11-14）：**话术库瘦身到只保留主动私信获客的 12 条，并支持用户自己添加 / 删除话术**。
 - 内置库只留 o01–o12（主动私信获客）；评论互动 / 私信打招呼 / 追问邀约三类已删（获客只做主动私信，避免场景分散）。
 - 页面上：话术卡新增「＋ 添加话术」按钮 + 表单（风格标签 + 正文 + 保存/取消），每条话术旁新增「删除」；自定义条目带「自定义」标签。
@@ -57,7 +142,7 @@ DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**
 
 **0.9.28 变更**（2026-11-13）：**账号资质的判定口径修正——「白号」不是抖音的账号类型**。抖音账号只有三种**官方认证状态**：**无官方认证 / 个人认证 / 企业认证（蓝V企业号）**；「白号」是获客圈对「刚注册、还没实名的新号」的口语称呼，不是字段、也不是账号类型，而且**网页端判断不了实名状态**（`realname_verify_status` 这个字段在 web 接口语义不可靠）。之前的版本把「无官方认证」写成「疑似白号」，容易被误读成一种独立账号，0.9.28 起统一叫「**个人账号（无官方认证）**」——普通个人账号就是普通个人账号，不代表没实名。
 - 判定依据（截 `/aweme/v1/web/user/profile/self/` 返回的 `user` 对象）：企业认证看 `enterprise_verify_reason` 非空、或 `verification_type === 2`；个人认证看 `custom_verify` / `personal_verify` 非空、或 `verification_type === 1`；两者都为空 = 没有官方认证（按个人账号口径给配额）。`account_cert_info` 常见是字符串 `"{}"`，**不能当认证**；`enterprise_user_info` 只是企业号功能配置，也不代表蓝V。
-- 统一常量 `ACCOUNT_TYPE_LABELS = { enterprise: '蓝V企业号', personal: '个人认证', unverified: '个人账号（无官方认证）' }`；`readAccountProfiles()` 读取档案时按 `accountType` 把旧版写进去的「未认证（疑似白号）」自动归一化成新文案，页面和 `douyin_account_info action=status` 都不再显示「白号」。
+- 统一常量 `ACCOUNT_TYPE_LABELS = { enterprise: '蓝V企业号', personal: '个人认证', unverified: '个人账号（无官方认证）' }`；`readAccountProfiles()` 读取档案时按 `accountType` 把旧版写进去的「个人账号（无官方认证）」自动归一化成新文案，页面和 `douyin_account_info action=status` 都不再显示「白号」。
 - 采集页账号卡：无官方认证时显示「判定依据：企业认证字段（enterprise_verify_reason）和个人认证字段（custom_verify）都为空」，并明确「未认证 ≠ 白号（白号指未实名新号，网页端判断不了）」；风险档位仍按个人账号口径（评论 ≤150/天、私信 ≤30/天、每小时 ≤5 次）。
 - 自检新增 v0.9.28 断言组（`acct-label-map` / `acct-label-normalize` / `acct-type-v0928` / `acct-copy-waibai` / `acct-readme-v0928`）。
 
@@ -80,17 +165,17 @@ DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**
 - **插件仍不发送任何内容**：工具只产出话术与配额记账，发送由 agent 或使用者完成（不自动群发、不绕验证）。agent 正确流程：`douyin_account_info` 确认账号类型 → `douyin_comments` 采目标 → `douyin_outreach draft` 生成文案 → 人工/agent 发送 → `douyin_outreach record` 记账。
 - 自检新增 v0.9.25 一组断言（模块/配额三档/工具/参数/输出 schema/打包白名单/README）。
 
-**0.9.24 变更**（2026-11-12）：**新增「获客话术库」**（采集页直接浏览、复制、随机轮换；**插件不自动发送**）——内置 24 条话术，按场景分三类：**评论互动**（公开评论，最安全）、**私信打招呼**（首条私信）、**追问 / 邀约**（对方回应后用）；按账号类型自动过滤：**未认证（疑似白号）只给公开评论话术**（私信/追问 tab 不显示），蓝V 与个人认证三类都能用。话术里用 `{videoTitle}` / `{direction}` / `{business}` 等占位符，复制后自己替换。页面同时列出**使用规则 + 配额经验值**（白号评论 ≤ 50 条/天、不建议私信；个人 私信 ≤ 30 条/天、每小时打招呼 ≤ 5 次；蓝V 私信 ≤ 80 条/天、每小时打招呼 ≤ 30 次；同一句别连续用、同一人 7 天内最多 1 次），并记录「今日已复制 N 条」提醒自己控量。
+**0.9.24 变更**（2026-11-12）：**新增「获客话术库」**（采集页直接浏览、复制、随机轮换；**插件不自动发送**）——内置 24 条话术，按场景分三类：**评论互动**（公开评论，最安全）、**私信打招呼**（首条私信）、**追问 / 邀约**（对方回应后用）；按账号类型自动过滤：**个人账号（无官方认证）只给公开评论话术**（私信/追问 tab 不显示），蓝V 与个人认证三类都能用。话术里用 `{videoTitle}` / `{direction}` / `{business}` 等占位符，复制后自己替换。页面同时列出**使用规则 + 配额经验值**（白号评论 ≤ 50 条/天、不建议私信；个人 私信 ≤ 30 条/天、每小时打招呼 ≤ 5 次；蓝V 私信 ≤ 80 条/天、每小时打招呼 ≤ 30 次；同一句别连续用、同一人 7 天内最多 1 次），并记录「今日已复制 N 条」提醒自己控量。
 - 资产文件 `scripts-library.mjs`（纯数据 + `listScripts` / `pickScript` / `allowedScenes`，可直接改文案扩库）；后端 `GET /api/scripts`、`POST /api/scripts/pick`（带 `avoidIds` 避免刚挑过的重复）；前端 `.scripts-card` 全宽卡片。
 - 边界：**只读 + 文案辅助**，不提供自动群发、不绕过验证、不发送任何内容；配额数字是运营经验值，不是抖音官方额度。
 - 自检新增 v0.9.24 一组断言（话术库条数/场景/过滤/接口/页面/样式/打包白名单）。
 
-**0.9.23 变更**（2026-11-12）：**新增「识别自己的抖音账号资质」**（只读）——注册第三个工具 `douyin_account_info`，判定当前登录账号是**蓝V企业号 / 个人认证 / 未认证（疑似白号）**，并在**抖音采集页**（`/plugins/dsh-douyin-comments/app/`「新建采集」卡片内）直接展示徽标、昵称、uid、抖音号、粉丝数、作品数、认证文案和风险档位提示；识别结果写进 `<DOUYIN_HOME>/account-profile.json`（不写「店铺账号管理」插件），为后续「按账号类型控制打招呼/评论配额 + 话术库」打基础。
+**0.9.23 变更**（2026-11-12）：**新增「识别自己的抖音账号资质」**（只读）——注册第三个工具 `douyin_account_info`，判定当前登录账号是**蓝V企业号 / 个人认证 / 个人账号（无官方认证）**，并在**抖音采集页**（`/plugins/dsh-douyin-comments/app/`「新建采集」卡片内）直接展示徽标、昵称、uid、抖音号、粉丝数、作品数、认证文案和风险档位提示；识别结果写进 `<DOUYIN_HOME>/account-profile.json`（不写「店铺账号管理」插件），为后续「按账号类型控制打招呼/评论配额 + 话术库」打基础。
 - 做法：用和采集相同的登录态打开 `https://www.douyin.com/user/self`，**截页面自己发出的「我的资料」签名请求响应**（`/aweme/v1/web/user/profile/self/` 等，a_bogus/msToken 都由页面计算，插件不自己造签名），再从 `j.user` 的 `enterprise_verify_reason` / `account_cert_info` / `custom_verify` / `personal_verify` 判定类型；截不到响应时用页面发过的签名 URL 重放一次，仍不行才退回读页面文案（只分「认证/未认证」）。持久化 profile 会留着旧缓存，识别前会先清浏览器缓存保证主页重新发请求。
 - 注意：没认证的账号 `account_cert_info` 是字符串 `"{}"`，**不能当「有认证」**（本版专门解析并排除，否则会把白号误判成蓝V）。
 - 工具用法：`action=status` 读已识别的缓存（不发浏览器）；`action=refresh` 重新识别（需要登录，可能要扫码，默认等 180s）；`account` 可传「店铺账号管理」里某个已登录抖音账号的 id/名字（走它的隔离 profile + cookie，不传就用插件自己的登录态）。
-- 边界：**只读识别，不发私信、不发评论、不关注、不改资料**；「白号」没有官方字段，只能给「未认证（疑似白号）」的推断。
-- 自检新增 v0.9.23 一组断言；真机实测（`nagisa`）拿到 `uid=1694788236093520`、`抖音号 69163407913`、粉丝 92、作品 6、类型「未认证（疑似白号）」，约 14s。
+- 边界：**只读识别，不发私信、不发评论、不关注、不改资料**；「白号」没有官方字段，只能给「个人账号（无官方认证）」的推断。
+- 自检新增 v0.9.23 一组断言；真机实测（`nagisa`）拿到 `uid=1694788236093520`、`抖音号 69163407913`、粉丝 92、作品 6、类型「个人账号（无官方认证）」，约 14s。
 
 **0.9.26 变更**（2026-11-12）：**未开通/到期改成整页拦截**——此前未激活只是隐藏「采集」tab、评论词云仍可用；现在点「抖音评论」直接是授权页：标题（未开通 / 已到期）、到期时间、套餐与价格、「开通/续费订阅」按钮（跳购买页）、「我已有激活码」展开输入框（就地激活，成功后自动进入面板）。词云与采集入口都不再出现。
 
@@ -1169,15 +1254,37 @@ dsh plugin --profile web add file:dsh-douyin-comments
   `status.json`（收工原因 `endedBy`、面板 `status` 快照、日志尾部 80 行）+ `screenshot.png` + `page.html` + `run.log`；
   正常采完是空串。保留份数由设置 `keepSnapshots`（默认 20）决定。抛错时这两个路径也会拼进 `error` 文本。
 
+## AI / NovaFlow 付费版：没有采集页时怎么用（v0.9.40）
+
+NovaFlow 付费版客户端不展示「新建采集」页面，采集只能由 AI 调用 `douyin_comments` 触发。为了让 AI 不乱填参数，工具描述里已经写死了必须先问清楚的四步（v0.9.40 起）：
+
+0. **先确认账号**：`douyin_account_info` action=status 读本机已识别账号；需要换账号就先调店铺账号管理插件 `shop_accounts`（action=list，platform=douyin）列出抖音账号，**只能用买家账户**（seller /「抖店」这类卖家账户不可用于采集），把账号 id 或名字填进 `account`；未激活订阅时先 `douyin_entitlement`。
+1. **问采集方式**：是「指定视频/图文链接」（`url`，可多条，可直接粘分享文案或短链）还是「关键词搜视频再采评论」（`keyword`）。
+2. **关键词模式必问 6 项**：`keyword`、`videoCount`（1~100，默认 10）、`sortType`（综合排序 / 最新发布 / 最多点赞）、`publishTime`（不限 / 一天内 / 一周内 / 半年内）、`duration`（不限 / 1分钟以下 / 1-5分钟 / 5分钟以上）、`contentType`（不限 / 视频 / 图文）。
+3. **补充确认**：`replies`（是否采二级回复，默认 true）、`max`（一级评论目标条数，默认 80000）、`clearBefore`（是否清空旧缓存，默认 false）、`outDir`（输出目录）、`cloud`（是否顺手导交互词云）。
+4. **复述确认后再调用**：把「账号 + 链接或关键词 + 上述参数」整理成一句话复述给用户，用户确认后再调用；调用完把 `csvPath` / `jsonPath` / `videoListPath` 与条数告诉用户。
+
+可以直接这样对 AI 说（示例）：
+
+> 用 nagisa 这个账号，帮我按关键词「墙纸」采集前 20 个视频的评论：综合排序、不限发布时间、1-5 分钟的视频、不限内容形式；二级回复也要采，最多 8 万条一级评论，输出到默认目录。
+
+```
+douyin_account_info  action=status                          # 第 0 步：确认账号
+shop_accounts        action=list platform=douyin            # 需要多账号时：只取 buyer
+douyin_comments      keyword=墙纸 videoCount=20 sortType=综合排序 publishTime=不限 duration=1-5分钟 contentType=不限 replies=true max=80000 account=nagisa
+```
+
+自检断言 `ai-usage-flow` / `acct-step0` / `ai-flow-readme` 保证这段流程不会被后续改动悄悄删掉。
+
 ## 账号资质识别（v0.9.23：`douyin_account_info`）
 
 第三个工具，**只读**识别当前登录的抖音账号资质，并在**抖音采集页**直接展示（不写「店铺账号管理」插件）：
 
-- 展示位置：采集控制台「新建采集」卡片里的「我的抖音账号」区域（`app/index.html` 的 `#acctCard`）——徽标（蓝V企业号 / 个人认证 / 未认证（疑似白号））、昵称、uid、抖音号、粉丝、作品、认证文案、上次识别时间；下面一行按类型给风险档位提示（运营经验值，不是官方额度）。
+- 展示位置：采集控制台「新建采集」卡片里的「我的抖音账号」区域（`app/index.html` 的 `#acctCard`）——徽标（蓝V企业号 / 个人认证 / 个人账号（无官方认证））、昵称、uid、抖音号、粉丝、作品、认证文案、上次识别时间；下面一行按类型给风险档位提示（运营经验值，不是官方额度）。
 - 采集页后端：`GET /plugins/dsh-douyin-comments/api/account`（读档案，`?account=` 可选）、`POST /plugins/dsh-douyin-comments/api/account/refresh`（点「识别我的账号」才打开浏览器，未登录等扫码 180s）。页面加载时只读档案，不进浏览器。
 - 参数：`action`（`status` 读缓存 / `refresh` 打开抖音重新识别）、`account`（可选：店铺账号管理里的抖音账号 id 或名字，仅用于选登录态）、`waitLoginSec`（默认 180）、`keepOpen`（调试保留窗口）。
 - 结果文件：`<DOUYIN_HOME>/account-profile.json`（默认 `~/.dsh/douyin-collector/account-profile.json`），结构 `{ version: 1, updatedAt, entries: [{ key, machine, accountType, accountTypeLabel, nickname, uid, secUid, uniqueId, followers, awemeCount, avatar, verifyReason, source, checkedAt }] }`；`key` 是店铺账号 id（只作区分），插件自己的登录态用 `default`。
-- `accountType`：`enterprise`（蓝V企业号）/ `personal`（个人认证）/ `unverified`（未认证，疑似白号，这是推断不是官方字段）；`source`：`api`（截到页面签名请求）/ `dom`（只读页面文案的兜底）。
+- `accountType`：`enterprise`（蓝V企业号）/ `personal`（个人认证）/ `unverified`（白号（新号）：无官方认证且注册不足 1 个月，按注册天数推断；抖音没有「白号」这个官方类型）；`source`：`api`（截到页面签名请求）/ `dom`（只读页面文案的兜底）。
 - 判定字段：`enterprise_verify_reason`、`account_cert_info`（**没认证时是字符串 `"{}"`，要解析排除**）、`custom_verify`、`personal_verify`。
 - 登录：与采集共用登录态（`~/.dsh/douyin-collector/chrome-profile`），未登录会等扫码；传 `account` 时走「店铺账号管理」插件的隔离 profile + cookie。
 - 不发送任何内容：不发私信、不发评论、不关注、不改资料。

@@ -944,6 +944,18 @@ body.is-empty .table-wrap { min-height: 140px; max-height: none; }
 .ai-body .ai-sev-low { color: var(--meta); }
 .ai-body .ai-note { margin-top: 10px; font-size: 12px; color: var(--meta); }
 .ai-body .ai-err { color: var(--neg); }
+/* v0.9.50：AI 解读的付费提示（与词云 LicenseGatePage 同一购买入口） */
+.ai-body .ai-pay-link {
+  display: inline-block;
+  margin: 6px 0 2px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ai-body .ai-pay-link:hover { background: rgba(0, 0, 0, 0.05); }
 .ai-cursor::after { content: "▍"; color: var(--accent); animation: ai-blink 1s steps(1) infinite; }
 @keyframes ai-blink { 50% { opacity: 0; } }
 @media (max-width: 700px) { .panel-head .panel-actions { width: 100%; } .panel-head .panel-actions .btn { flex: 1 1 auto; } }

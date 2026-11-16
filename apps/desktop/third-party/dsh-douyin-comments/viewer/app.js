@@ -1080,10 +1080,11 @@
   let sentLlmRunning = false;
   let sentLlmTimer = null;
   let sentLlmDisabled = false;
+  let sentLlmPaywall = false;
   const sentLlmState = { done: 0, changed: 0, error: '' };
 
   function llmStatusText() {
-    if (sentLlmDisabled) return '';
+    if (sentLlmDisabled) return sentLlmPaywall ? 'LLM 复核需开通订阅' : '';
     if (sentLlmRunning) return 'LLM 复核中…';
     if (sentLlmState.error) return 'LLM 复核不可用（已用本地结果）';
     if (sentLlmState.done) return 'LLM 复核 ' + sentLlmState.done + ' 条 · 改判 ' + sentLlmState.changed + ' 条';
@@ -1157,6 +1158,13 @@
         .then((data) => {
           sentLlmRunning = false;
           if (!data || data.ok !== true) {
+            if (data && data.code === 'NOT_ACTIVATED') {
+              // v0.9.50：付费功能闸门（后端 402），不当作故障，只是没开通。
+              sentLlmPaywall = true;
+              sentLlmDisabled = true;
+              renderModelStatus();
+              return;
+            }
             sentLlmState.error = String((data && (data.hint || data.error)) || 'LLM 复核失败');
             sentLlmDisabled = /LLM_UNAVAILABLE|NO_MODEL/.test(sentLlmState.error);
             renderModelStatus();
@@ -1714,6 +1722,12 @@ async function runAiExplain() {
     });
     if (!res.ok) {
       const info = await res.json().catch(function () { return {}; });
+      if (res.status === 402) {
+        const payErr = new Error(info.hint || info.error || '需要 NovaFlow 订阅');
+        payErr.paywall = true;
+        payErr.purchaseUrl = info.purchaseUrl || 'https://collect.lanjiaotrade.com/buy';
+        throw payErr;
+      }
       throw new Error(info.hint || info.error || ('HTTP ' + res.status));
     }
     const reader = res.body.getReader();
@@ -1787,9 +1801,18 @@ async function runAiExplain() {
   } catch (err) {
     const msg = String((err && err.message) || err);
     body.classList.remove('is-streaming');
-    body.innerHTML = '<p class="ai-err">AI 解读失败：' + valEsc(msg) + '</p>' +
-      '<p class="ai-sev-low">本地统计不受影响。可以点「重新生成」，或把摘要复制出来交给任意 AI。</p>';
-    meta.textContent = '失败';
+    if (err && err.paywall) {
+      // v0.9.50：和词云一致的付费提示（后端接口 402），本地统计/规则分析不受影响。
+      const url = valEsc(err.purchaseUrl || 'https://collect.lanjiaotrade.com/buy');
+      body.innerHTML = '<p class="ai-err">AI 解读是 NovaFlow 付费功能：' + valEsc(msg) + '</p>' +
+        '<p><a class="ai-pay-link" href="' + url + '" target="_blank" rel="noreferrer">去购买 / 开通订阅</a></p>' +
+        '<p class="ai-sev-low">本地统计与规则情感分析不受影响。</p>';
+      meta.textContent = '需要订阅';
+    } else {
+      body.innerHTML = '<p class="ai-err">AI 解读失败：' + valEsc(msg) + '</p>' +
+        '<p class="ai-sev-low">本地统计不受影响。可以点「重新生成」，或把摘要复制出来交给任意 AI。</p>';
+      meta.textContent = '失败';
+    }
   } finally {
     btn.disabled = false;
     aiAbort = null;
