@@ -806,8 +806,13 @@
   const SENT_NEG = new Set(('不行 不好 难看 难听 难受 麻烦 复杂 混乱 卡 卡顿 慢 贵 亏 可惜 遗憾 一般 普通 平庸 老套 套路 水 敷衍 凑数 多余 尬 冷场 叹气 皱眉 害怕 恐怖 吓人 阴影 不适 争议 质疑 反驳 抬杠 双标 强行 尴尬 无聊 拖沓 生气 发怒 差 弱 划水 广告 坑 糊弄 玄学 劝退'.split(/\s+/)));
   const SENT_NEGATORS = new Set(('不 没 无 未 别 莫 非 勿 没有 不是 不算 不会 不能 不要 不用 不必 不够 不太 不怎么 没那么'.split(/\s+/)));
   const SENT_DEGREE = new Set(('太 很 非常 特别 超 巨 极 真 更 最 十分 相当 格外 尤其 愈发 更加 简直 实在 真是 巨他妈 有点 有点儿 稍微 稍 挺'.split(/\s+/)));
-  const EMOJI_POS = new Set(('憨笑 微笑 大笑 笑哭 呲牙 偷笑 得意 调皮 酷 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 撒花 庆祝 耶 亲亲 害羞 愉快 色 吃瓜 调皮'.split(/\s+/)));
-  const EMOJI_NEG = new Set(('流泪 大哭 崩溃 发怒 生气 鄙视 白眼 呕吐 敲打 菜刀 心碎 失望 无语 裂开 叹气 皱眉 骷髅 害怕 惊恐 再见 弱 尬 汗 擦汗 抠鼻 黑线 委屈 可怜 抓狂 咒骂 闭嘴 哼 怒 困'.split(/\s+/)));
+  const EMOJI_POS = new Set(('憨笑 微笑 大笑 笑哭 呲牙 偷笑 得意 调皮 酷 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 赞 牛 666 撒花 庆祝 耶 亲亲 害羞 愉快 色 吃瓜 干杯 握手'.split(/\s+/)));
+  const EMOJI_NEG = new Set(('大哭 崩溃 发怒 生气 鄙视 白眼 呕吐 敲打 菜刀 心碎 失望 无语 裂开 皱眉 骷髅 害怕 惊恐 再见 弱 尬 抠鼻 黑线 抓狂 咒骂 闭嘴 怒'.split(/\s+/)));
+  // v0.9.47：抖音里 [流泪]/[叹气]/[委屈]/[可怜]/[汗]/[擦汗]/[困] 常被当语气符号用（感动、无奈、自嘲），
+  // 单独出现不算负面；只在有明确负向词句时才按很小的权重参与。
+  const EMOJI_SOFT_NEG = new Set(('流泪 叹气 委屈 可怜 汗 擦汗 困 哼'.split(/\s+/)));
+  // v0.9.47：明确的强负面表情，单个种类重复出现也应按负面处理（如 [发怒][发怒]）。
+  const EMOJI_STRONG_NEG = new Set(('大哭 崩溃 发怒 生气 呕吐 敲打 菜刀 心碎 失望 无语 裂开 骷髅 害怕 惊恐 咒骂 抓狂 怒'.split(/\s+/)));
 
   const EMOJI_TAG_RE = /\[[^\[\]]{1,12}\]/g;
   // v0.9.13：求推荐 / 求链接这类「提问型」文案不算夸奖；「推荐」当需求词时不计入情感
@@ -819,36 +824,57 @@
   // v0.9.13：分词器会把「差评/不好/太贵」拆散，先按整词短语扫一遍再删掉，避免碎片重复计分
   const SENT_PHRASE_NEG = [['不好用', -1.5], ['不好看', -1.5], ['不好听', -1.5], ['不推荐', -1.5], ['有点贵', -1.2], ['一般般', -1], ['很一般', -1], ['差评', -1.5], ['差劲', -1.5], ['不好', -1], ['不行', -1], ['不值', -1.5], ['好贵', -1.2], ['太贵', -1.2], ['贵了', -1.2], ['踩雷', -2], ['退货', -1.5], ['退款', -1.5], ['骗人', -2], ['别买', -2], ['踩坑', -1.5], ['难用', -1.5]];
 
+  // v0.9.47：正向短语白名单，修掉「没人可以质疑X的眼光」「前辈说得对」「太强了」这类被单字词典判成负面。
+  const SENT_PHRASE_POS = [['没人可以质疑', 2], ['说得对', 1.2], ['的眼光', 1], ['眼光', 0.8], ['太强了', 1.5], ['太棒了', 1.5], ['太绝了', 2], ['爱了', 1.5], ['强啊', 1], ['好强', 1]];
+
   function sentimentOf(text) {
     const raw = String(text || '');
     const tags = raw.match(EMOJI_TAG_RE) || [];
-    // v0.9.13：表情按「去重后种类数」计分并封顶 ±1.2 —— 旧版把 `[抠鼻]` 复制 9 次算成 -10.8，
+    // v0.9.13：表情按「去重后种类数」计分并封顶 —— 旧版把 `[抠鼻]` 复制 9 次算成 -10.8，
     // 会把「你的作品非常优秀，你是最棒的」这种夸奖判成负评。
     const emoNames = new Set(tags.map((t) => t.slice(1, -1)));
     let emoScore = 0;
     let emoHits = 0;
+    let emoStrongNeg = false;
     for (const name of emoNames) {
       if (EMOJI_POS.has(name)) { emoScore += 0.6; emoHits++; }
       else if (EMOJI_NEG.has(name)) { emoScore -= 0.6; emoHits++; }
+      else if (EMOJI_SOFT_NEG.has(name)) { emoScore -= 0.15; emoHits++; }
+      if (EMOJI_STRONG_NEG.has(name)) emoStrongNeg = true;
     }
-    emoScore = Math.max(-1.2, Math.min(1.2, emoScore));
+    emoScore = Math.max(-1.8, Math.min(1.8, emoScore));
     const s = raw.replace(EMOJI_TAG_RE, ' ').replace(/@[^\s@]+|#[^\s#]+/g, ' ');
     if (!s.trim()) {
       const norm0 = Math.tanh(emoScore / 2);
-      return { score: Math.round(norm0 * 100) / 100, label: norm0 > 0.15 ? 'pos' : (norm0 < -0.15 ? 'neg' : 'neu'), hits: emoHits };
+      // v0.9.47：纯表情文本——单个明确的正面表情仍算正向；负面要「明确强负面表情」或两种以上负面表情，
+      // 单个 [流泪]/[叹气] 先归中性（抖音里常被当语气符号用）。
+      const label = emoScore >= 0.6 ? 'pos' : ((emoStrongNeg && emoScore <= -0.6) || emoScore <= -1 ? 'neg' : 'neu');
+      return { score: Math.round(norm0 * 100) / 100, label, hits: emoHits };
     }
     const request = SENT_REQUEST_RE.test(s);
-    let score = emoScore;
+    // v0.9.47：有文字时表情权重砍半，避免一个 [流泪] 就把整句夸赞压成负向。
+    let score = emoScore * 0.5;
     let hits = emoHits;
     // v0.9.13：按标点/空白切子句，否定词只在子句内生效（「不要制冰 求推荐」不会把「推荐」翻成负向）
     const clauses = s.split(/[。！？!?，,；;、\n\r]+|\s+/).filter((x) => x && x.trim());
+    let wordHits = 0;
     for (const clause of clauses) {
       let clauseText = clause;
+      // v0.9.47：正向短语优先（比单词更可靠），命中后从句子里删掉避免重复计分
+      for (const [phrase, weight] of SENT_PHRASE_POS) {
+        if (clauseText.indexOf(phrase) >= 0) {
+          score += weight;
+          hits++;
+          wordHits++;
+          clauseText = clauseText.split(phrase).join(' ');
+        }
+      }
       // v0.9.13：整词短语优先（并把命中的词从待分词文本里删掉，避免「差评」又按「差」「评」重复算分）
       for (const [phrase, weight] of SENT_PHRASE_NEG) {
         if (clauseText.indexOf(phrase) >= 0) {
           score += weight;
           hits++;
+          wordHits++;
           clauseText = clauseText.split(phrase).join(' ');
         }
       }
@@ -878,9 +904,14 @@
         }
         score += base * mult;
         hits++;
+        wordHits++;
       }
     }
     const norm = Math.tanh(score / 2);
+    // v0.9.47：短问句（「还是吗」「是吗」「真的吗」）没命中任何情感词时归中性，不要被表情带成负向。
+    if (wordHits === 0 && /\S{0,10}[吗呢吧]$/.test(s.trim())) {
+      return { score: Math.round(norm * 100) / 100, label: 'neu', hits };
+    }
     return {
       score: Math.round(norm * 100) / 100,
       label: norm > 0.15 ? 'pos' : (norm < -0.15 ? 'neg' : 'neu'),
