@@ -2,6 +2,10 @@
 
 本文件记录 NovaFlow 桌面端各版本的变化，格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。每次发布 `v<版本>` 标签前，先在这里添加标题为 `## <版本>` 的小节；发布流程把该小节作为 GitHub Release 说明，应用内的更新提示也显示这部分内容。
 
+## 0.2.14
+
+- 内置插件 `dsh-douyin-comments` 升级到 0.9.43：AI 解读的输出预算不再固定 1600，改成「思考能不能关掉」自适应（关得掉用 1600；关不掉自动放大到 4 倍、封顶 6400），并可用 `DYC_AI_MAX_TOKENS` 调整；保留「思考吃光预算 → 预算翻倍重试」。
+
 ## 0.2.13
 
 - 内置插件 `dsh-douyin-comments` 升级到 0.9.42：AI 解读不再把思考程度写死成 `reasoningEffort: "off"`。现在先读 DSH 里该模型的思考档能力（支持 `off` 才传、支持思考但没有 `off` 就不传、完全不支持也不传），并在适配器返回 `UNSUPPORTED_REASONING_EFFORT` 时自动去掉该参数重试一次，避免换模型后「AI 解读没有内容/直接报错」。

@@ -92,7 +92,17 @@ const AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 const AI_MAX_DIGEST_CHARS = 12000;
-const AI_MAX_TOKENS = 1600;
+// v0.9.43：1600 是「我们给这次输出设的上限」，不是供应商的硬限制。
+// 之所以默认不大：AI 解读只需要一段固定 JSON（几百到 1-2K token 就够），
+// 上限开太大时，一旦思考丢不掉，模型会先烧掉更多预算/时间才给出 0 字正文。
+// 需要时可用 DYC_AI_MAX_TOKENS=200..32000 覆盖基础预算（调试/长摘要用）。
+const AI_MAX_TOKENS = (() => {
+  const raw = Number.parseInt(String(process.env.DYC_AI_MAX_TOKENS || "").trim(), 10);
+  return Number.isFinite(raw) && raw >= 200 ? Math.min(raw, 32000) : 1600;
+})();
+// 思考关不掉时（effort 为 undefined），思考 token 与正文共用同一个输出预算，
+// 所以基础预算自动放大（默认 4 倍、封顶 6400），留给正文一些空间。
+const AI_MAX_TOKENS_THINKING = Math.max(AI_MAX_TOKENS, Math.min(AI_MAX_TOKENS * 4, 6400));
 
 /** 页面与接口的挂载前缀（index.js 也用它打印日志） */
 export const VIEWER_PREFIX = "/plugins/dsh-douyin-comments/viewer";
@@ -523,16 +533,19 @@ function handleExplain(ctx, req, res) {
         reasonChars = 0;
         finish = null;
       };
+      // v0.9.43：思考关不掉时（effort 为 undefined），思考 token 和正文共用
+      // 同一个输出预算，所以基础预算自动放大；能关掉思考时仍用 1600 这个小上限。
+      const budgetNow = () => (effort === "off" ? AI_MAX_TOKENS : AI_MAX_TOKENS_THINKING);
       let attempt;
       try {
-        attempt = await runOnce(AI_MAX_TOKENS, effort);
+        attempt = await runOnce(budgetNow(), effort);
       } catch (err) {
         const msg = String((err && err.message) || err);
         if (effort !== undefined && /reasoning effort/i.test(msg)) {
           appendDebug({ event: "retry", reason: "unsupported-reasoning-effort-throw", message: msg });
           resetAttempt();
           effort = undefined;
-          attempt = await runOnce(AI_MAX_TOKENS, undefined);
+          attempt = await runOnce(budgetNow(), undefined);
         } else {
           throw err;
         }
@@ -541,13 +554,13 @@ function handleExplain(ctx, req, res) {
         appendDebug({ event: "retry", reason: "unsupported-reasoning-effort", tried: effort === undefined ? "(omit)" : effort });
         resetAttempt();
         effort = undefined;
-        attempt = await runOnce(AI_MAX_TOKENS, undefined);
+        attempt = await runOnce(budgetNow(), undefined);
       }
       let kind = attempt.kind;
       if (!text && kind === "max-tokens" && !controller.signal.aborted) {
-        appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: AI_MAX_TOKENS });
+        appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: budgetNow() });
         resetAttempt();
-        const second = await runOnce(AI_MAX_TOKENS * 2, effort);
+        const second = await runOnce(budgetNow() * 2, effort);
         kind = second.kind;
       }
       appendDebug({
@@ -557,7 +570,7 @@ function handleExplain(ctx, req, res) {
         kind,
         chars: text.length,
         reasonChars,
-        maxTokens: AI_MAX_TOKENS,
+        maxTokens: budgetNow(),
         digestChars: digestJson.length,
       });
       if (finish && kind !== "stop" && kind !== "max-tokens") {
