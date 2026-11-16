@@ -1148,3 +1148,20 @@ td .txt .hl { background: var(--accent-dim); color: var(--accent); }
   color: var(--muted, #6b7280);
   font-weight: 500;
 }
+
+/* v0.9.52：评论意图（购买意向 / 售前咨询 / 售后问题 / 体验分享 / 广告无效） */
+.ibadge { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.ibadge.buy { color: var(--warn, #e0a94a); background: rgba(224, 169, 74, .16); font-weight: 600; }
+.ibadge.ask { color: #6f9fd8; background: rgba(111, 159, 216, .14); }
+.ibadge.aftersale { color: var(--neg); background: rgba(224, 138, 132, .14); }
+.ibadge.share { color: var(--pos); background: rgba(108, 197, 154, .12); }
+.ibadge.noise { color: var(--muted); background: rgba(142, 142, 148, .12); }
+.cell-intent { white-space: nowrap; }
+.intent-list .sw-dot.buy { background: var(--warn, #e0a94a); }
+.intent-list .sw-dot.ask { background: #6f9fd8; }
+.intent-list .sw-dot.aftersale { background: var(--neg); }
+.intent-list .sw-dot.share { background: var(--pos); }
+.intent-list .sw-dot.noise { background: var(--line-strong); }
+@media (max-width: 620px) {
+  .cell-intent { display: inline-flex; align-items: baseline; gap: 5px; }
+}

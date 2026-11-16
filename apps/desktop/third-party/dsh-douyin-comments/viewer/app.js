@@ -121,7 +121,7 @@
     comments: [],              // 全部评论（已归一化、已去重）
     videos: new Map(),         // videoId -> { id, title, url, collectedAt }
     sources: [],               // 已载入文件名
-    filters: { videoId: '', search: '', onlyHasProfile: false, onlyTopLevel: false, onlyNonEmpty: false, onlyContent: true, sentiment: '', topic: '', region: '', favoritesOnly: false },
+    filters: { videoId: '', search: '', onlyHasProfile: false, onlyTopLevel: false, onlyNonEmpty: false, onlyContent: true, sentiment: '', intent: '', topic: '', region: '', favoritesOnly: false },
     favorites: new Map(),      // v0.7.0：已收藏目标客户 uid -> { uid, nickname, region, savedAt, … }
     favReady: false,
     topics: [],                // v3.0：主题聚类结果（TF-IDF + k-means）
@@ -647,6 +647,8 @@
       if (f.onlyNonEmpty && !c.text) return false;
       // v3.0：情感 / 主题筛选（主题由 baseFiltered 的聚类结果给出，避免自我循环）
       if (f.sentiment && ((c.sentiment && c.sentiment.label) || 'neu') !== f.sentiment) return false;
+      // v0.9.52：意图筛选（购买意向 / 售前咨询 / 售后 / 体验分享）
+      if (f.intent && (c.intent || 'none') !== f.intent) return false;
       if (f.topic !== '' && f.topic != null && String(c.topic == null ? -1 : c.topic) !== String(f.topic)) return false;
       // v0.7.0：属地筛选 + 只看已收藏客户
       if (f.region) { const r = c.ip || '未知属地'; if (r !== f.region) return false; }
@@ -939,13 +941,50 @@
         const r = String(c.rating);
         const label = /好评|推荐|5星|五星/.test(r) ? 'pos' : (/差评|1星|2星/.test(r) ? 'neg' : 'neu');
         c.sentiment = { score: label === 'pos' ? 0.6 : (label === 'neg' ? -0.6 : 0), label, hits: 0, fromRating: true };
+        c.intent = 'none';
         continue;
       }
       c.sentiment = sentimentOf(c.text);
+      c.intent = intentOf(c.text);
     }
   }
 
   const SENT_LABEL = { pos: '正向', neu: '中性', neg: '负向' };
+
+  /* ===================== v0.9.52：评论意图识别 =====================
+   * 规则法给每条评论打一个「意图」标签，用于表格展示 / 筛选 / 导出，以及给获客挑「购买意向」线索。
+   * 标签：buy 购买意向 / ask 售前咨询 / aftersale 售后问题 / share 体验分享 / noise 广告或无效 / none 常规情绪。
+   * 意图独立于情感：只影响展示与筛选，不改 sentiment。 */
+  const INTENT_LABEL = { buy: '购买意向', ask: '售前咨询', aftersale: '售后问题', share: '体验分享', noise: '广告/无效', none: '' };
+  const INTENT_ORDER = ['aftersale', 'buy', 'ask', 'share', 'noise'];
+  const INTENT_BUY_RE = /(多少钱|几多钱|什么价|价格|价位|报价|询价|问价|优惠|活动价|折扣|便宜点|包邮|现货|有货|库存|发货|下单|拍了|已拍|入手|想买|要买|想要|想入手|求购|求同款|求链接|求个链接|来个链接|要链接|链接呢|链接有吗|有链接吗|给个链接|有没有链接|哪里买|哪买|在哪买|哪里卖|怎么买|怎么卖|怎么下单|能不能买|能买吗|可以买|批发|拿货|进货|代理|加盟|合作|团购|上车|冲了|蹲|蹲一个|蹲链接|尺码|码数|型号|规格|\d+(?:\.\d+)?\s*元|块钱)/;
+  const INTENT_ASK_RE = /(能用吗|可以用吗|能不能用|适合|支持|兼容|怎么用|如何使用|好用吗|安全吗|耐用吗|多久|多长时间|几个|多少条|有没有|是什么|有什么区别|参数|材质|功率|尺寸|安装|使用方法|注意事项|防水吗|保修吗|好清洗吗|好洗吗|能洗吗|洗吗|干净吗|好闻吗)/;
+  const INTENT_AFTERSALE_RE = /(退货|退款|换货|售后|客服|维修|保修|坏了|坏的|坏掉|漏了|漏电|裂了|破了|碎了|故障|没收到|没发货|物流|快递|发错|少发|缺件|补发|投诉|赔付|退钱)/;
+  const INTENT_SHARE_RE = /(我用过|我买过|买了|买回来|亲测|实测|用了|收到货|到货了|同感|我也是|分享|推荐给|一直用|回购|亲身体验|真的可以)/;
+  const INTENT_NOISE_RE = /(加微信|私信我|主页有|看我主页|点我头像|互关|回关|互赞|进主页|看简介|加我|群里|链接在主页|刷单|兼职|招人|招聘|代购)/;
+
+  function intentOf(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return 'none';
+    const plain = raw.replace(EMOJI_TAG_RE, '').replace(/[^\p{L}\p{N}]/gu, '');
+    if (!plain) return 'noise'; // 纯表情 / 只有符号
+    if (INTENT_NOISE_RE.test(raw)) return 'noise';
+    for (const k of INTENT_ORDER) {
+      if (k === 'noise') continue;
+      const re = k === 'aftersale' ? INTENT_AFTERSALE_RE : (k === 'buy' ? INTENT_BUY_RE : (k === 'ask' ? INTENT_ASK_RE : INTENT_SHARE_RE));
+      if (re.test(raw)) return k;
+    }
+    return 'none';
+  }
+
+  function intentStats(list) {
+    const s = { buy: 0, ask: 0, aftersale: 0, share: 0, noise: 0, none: 0 };
+    for (const c of list) {
+      const k = c.intent || 'none';
+      s[k] = (s[k] || 0) + 1;
+    }
+    return s;
+  }
 
   function sentimentStats(list) {
     const s = { pos: 0, neu: 0, neg: 0 };
@@ -1599,6 +1638,17 @@ function buildDigest(list) {
   const video = videoId && state.videos && state.videos.get ? state.videos.get(videoId) : null;
   const health = (() => { try { return healthOf(rows); } catch (e) { return null; } })();
   const st = sentimentStats(rows);
+  // v0.9.52：意图分布 + 购买意向样本（给 AI 解读和获客用）
+  const it = intentStats(rows);
+  const buyIntents = rows
+    .filter((c) => c.intent === 'buy')
+    .slice(0, 8)
+    .map((c) => ({
+      text: aiClip(c.textClean || c.text, 80),
+      sentiment: (c.sentiment && c.sentiment.label) || 'neu',
+      digg: c.digg || 0,
+      user: (c.user && (c.user.nickname || c.user.uid)) || '',
+    }));
   return {
     schema: 'cv-digest/1',
     generatedAt: new Date().toISOString(),
@@ -1612,6 +1662,8 @@ function buildDigest(list) {
     ratings: Object.fromEntries(ratingCount),
     placeholder: placeholder ? { count: placeholder, note: '平台系统默认评价（正文为占位文案），不代表买家真实表达' } : { count: 0 },
     sentiment: st,
+    intents: it,
+    buyIntents: buyIntents,
     health: health ? { score: health.score, grade: health.grade, risk: Math.round(health.risk * 100) } : null,
     keywords: buildWords(rows).slice(0, 30).map((w) => ({ w: w.word, n: w.count })),
     topics: (state.topics || []).slice(0, 6).map((t) => ({
@@ -1628,6 +1680,7 @@ function buildDigest(list) {
       if (!ratingCount.size) out.push('ratings 为空：抖音评论没有星级评分字段，属正常');
       if (!skuCount.size) out.push('skus 为空：抖音评论没有 SKU 字段，属正常');
       if (!(state.topics || []).length) out.push('topics 为空：本次样本未生成主题聚类，请用 keywords 与 negatives 分析');
+      out.push('intents：评论意图是本地规则（购买意向/售前咨询/售后/体验分享/广告无效）判出来的，只用于筛选与线索，不是平台字段；intents.buy 高的样本可作为获客线索');
       return out;
     })(),
     trend: Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-30),
@@ -1853,6 +1906,18 @@ function bindAiEvents() {
     if (!box) return;
     const total = list.length;
     const st = sentimentStats(list);
+    // v0.9.52：意图分布（只影响展示/筛选/导出，不改情感）
+    const it = intentStats(list);
+    const intentPct = (n) => (total ? Math.round((n / total) * 100) : 0);
+    const intentHtml = total
+      ? `<div class="sent-list intent-list">
+           <span><i class="sw-dot buy"></i>购买意向 ${fmtNum(it.buy)} · ${intentPct(it.buy)}%</span>
+           <span><i class="sw-dot ask"></i>售前咨询 ${fmtNum(it.ask)} · ${intentPct(it.ask)}%</span>
+           <span><i class="sw-dot aftersale"></i>售后问题 ${fmtNum(it.aftersale)} · ${intentPct(it.aftersale)}%</span>
+           <span><i class="sw-dot share"></i>体验分享 ${fmtNum(it.share)} · ${intentPct(it.share)}%</span>
+           <span><i class="sw-dot noise"></i>广告/无效 ${fmtNum(it.noise)} · ${intentPct(it.noise)}%</span>
+         </div>`
+      : '<p class="meta">暂无数据</p>';
     const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
     const seg = (cls, n) => (total && n ? `<i class="sent-seg ${cls}" style="width:${(n / total) * 100}%"></i>` : '');
     // v0.9.19：不再按「负向」筛（词典打分对高赞玩梗评论仍有误判），改成本次评论里按点赞最高的 Top3「评价」。
@@ -1891,6 +1956,7 @@ function bindAiEvents() {
       : '<p class="meta">评论太少（< 12 条带文字）或没有明显主题</p>';
 
     box.innerHTML = renderHealth(list) + dashboardCard('情感分布', `${fmtNum(total)} 条评论`, sentHtml)
+      + dashboardCard('评论意图', '按评论文字规则判断 · 点顶部筛选可只看购买意向', intentHtml, 'intent-card')
       + dashboardCard('评论趋势', '按天 · 最近 30 天', svgTrend(list))
       + dashboardCard('地域分布', 'Top 8 省份/地区', regHtml)
       + dashboardCard('主题聚类', `${topics.length} 个主题 · TF-IDF + k-means`, topicHtml, 'topic-card');
@@ -2497,6 +2563,14 @@ function bindAiEvents() {
     return '<span class="sbadge ' + l + '" title="词典打分 ' + ((c.sentiment && c.sentiment.score) || 0) + '">' + SENT_LABEL[l] + '</span>';
   }
 
+  // v0.9.52：意图标签（购买意向/售前咨询/售后/体验分享），空值不显示
+  function intentBadge(c) {
+    const k = c.intent || 'none';
+    const label = INTENT_LABEL[k] || '';
+    if (!label) return '<span class="muted">—</span>';
+    return '<span class="ibadge ' + k + '" title="按评论文字规则判断的意图（只影响展示/筛选，不改情感）">' + label + '</span>';
+  }
+
   function renderTable() {
     const list = sortList(filtered());
     const total = list.length;
@@ -2535,6 +2609,7 @@ function bindAiEvents() {
         <td class="muted small" data-label="时间">${esc(c.createTimeStr ? c.createTimeStr.slice(0, 16) : fmtTime(c.createTime))}</td>
         <td class="muted small" data-label="层级">${c.isReply ? '二级' : '一级'}</td>
         <td class="cell-sent" data-label="情感">${sentBadge(c)}</td>
+        <td class="cell-intent" data-label="意图">${intentBadge(c)}</td>
         <td class="cell-star" data-label="收藏">${starBtn}</td>
       </tr>`;
     }).join('');
@@ -2571,7 +2646,7 @@ function bindAiEvents() {
     ['user_nickname', '用户昵称'], ['user_unique_id', '抖音号'], ['user_sec_uid', 'sec_uid(主页链接用)'],
     ['digg_count', '点赞数'], ['reply_comment_total', '回复数'], ['ip_label', '属地'],
     ['create_time_str', '发布时间'], ['level', '层级(1一级/2二级)'],
-    ['sentiment', '情感(正向/中性/负向)'], ['topic', '主题'],
+    ['sentiment', '情感(正向/中性/负向)'], ['intent', '意图(购买意向/售前咨询/售后/体验分享)'], ['topic', '主题'],
   ];
 
   function topicLabelOf(c) {
@@ -2609,6 +2684,7 @@ function bindAiEvents() {
         csvCell(c.digg), csvCell(c.replies), csvCell(c.ip), csvCell(c.createTimeStr || fmtTime(c.createTime)),
         csvCell(c.isReply ? 2 : 1),
         csvCell(SENT_LABEL[(c.sentiment && c.sentiment.label) || 'neu']),
+        csvCell(INTENT_LABEL[c.intent || 'none'] || ''),
         csvCell(topicLabelOf(c)),
       ].join(','));
     }
@@ -2759,6 +2835,8 @@ function bindAiEvents() {
     });
     const sentSel = $('#sentFilter');
     if (sentSel) sentSel.addEventListener('change', (e) => { state.filters.sentiment = e.target.value; refreshAll(); });
+    const intentSel = $('#intentFilter');
+    if (intentSel) intentSel.addEventListener('change', (e) => { state.filters.intent = e.target.value; state.page = 1; refreshAll(); });
     const topicSel = $('#topicFilter');
     if (topicSel) topicSel.addEventListener('change', (e) => { state.filters.topic = e.target.value; state.page = 1; refreshAll(); });
     const insights = $('#insights');
@@ -3615,6 +3693,9 @@ let favRegion = '';
     syncInsightHeights,
     baseFiltered,
     SENT_LABEL,
+    INTENT_LABEL,
+    intentOf,
+    intentStats,
     exportFilteredCsv,
     exportFilteredJson,
     healthOf, renderHealth,
