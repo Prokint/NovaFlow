@@ -87,8 +87,10 @@
   const avatarImg = (user) => {
     const url = String((user && user.avatar) || '');
     if (!url) return '';
-    // referrerpolicy：douyinpic 对带 Referer 的请求偶发 403，头像直连更稳；失败时 onerror 移除 img，露出下面的首字
-    return `<img class="av-img" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`;
+    // v0.9.48：页面开了 COEP: require-corp，抖音 CDN 的跨域头像会被浏览器拦掉，
+    // 统一走同源代理 api/avatar（viewer.mjs 服务端抓取并缓存）；失败时 onerror 移除 img，露出下面的首字
+    const src = /^https?:/i.test(url) ? 'api/avatar?u=' + encodeURIComponent(url) : url;
+    return `<img class="av-img" src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`;
   };
   const avatarHtml = (user) => `<span class="avatar" style="${esc(avatarStyle(user))}">${avatarImg(user)}${esc(initials((user || {}).nickname))}</span>`;
 
@@ -942,6 +944,159 @@
       s[l] = (s[l] || 0) + 1;
     }
     return s;
+  }
+
+  /* ===================== v0.9.48：情感模型二次校正 =====================
+   * 规则（词典+表情）先给全部评论打分；随后用 weibo-BERT 中文情感模型（int8 ONNX，
+   * 在 Web Worker 里跑）只校正「规则判为中性」的评论：模型置信度 ≥ 0.45 时才采纳。
+   * 这是横评里三类/极性准确率最优的组合（95 条金标：规则 72.6/38.7 → 混合 77.9/80.6）。
+   * 模型与运行时是本地文件（viewer/sentiment + viewer/vendor/ort），不联网、不额外依赖。 */
+  const SENT_MODEL_THRESHOLD = 0.45;
+  const SENT_MODEL_MIN_COMMENTS = 15;
+  let sentModelWorker = null;
+  let sentModelReqId = 0;
+  let sentModelPending = null;
+  let sentModelTimer = null;
+  let sentModelDisabled = false;
+  const sentModelState = { loaded: false, loading: false, done: 0, total: 0, error: '', ms: 0 };
+  const sentModelCache = new Map();
+
+  function modelStatusText() {
+    if (sentModelDisabled) return '情感模型未启用（规则结果）';
+    if (sentModelState.error) return '情感模型不可用（规则结果仍可用）';
+    if (sentModelState.loading && sentModelState.total) return '情感模型校正中 ' + sentModelState.done + '/' + sentModelState.total;
+    if (sentModelState.loading) return '情感模型加载中…';
+    if (sentModelState.loaded) return '情感模型已校正（' + sentModelState.done + ' 条 · ' + Math.round(sentModelState.ms / 1000) + 's）';
+    return '';
+  }
+
+  function renderModelStatus() {
+    const el = $('#modelSub');
+    if (!el) return;
+    const text = modelStatusText();
+    el.textContent = text;
+    el.hidden = !text;
+  }
+
+  function ensureSentModelWorker() {
+    if (sentModelWorker || sentModelDisabled) return sentModelWorker;
+    try {
+      sentModelWorker = new Worker(new URL('sentiment/worker.js', location.href));
+    } catch (err) {
+      sentModelDisabled = true;
+      sentModelState.error = String((err && err.message) || err);
+      renderModelStatus();
+      return null;
+    }
+    sentModelWorker.onerror = (ev) => {
+      sentModelDisabled = true;
+      sentModelState.error = (ev && ev.message) || 'worker error';
+      sentModelState.loading = false;
+      renderModelStatus();
+    };
+    sentModelWorker.onmessage = (ev) => {
+      const msg = ev.data || {};
+      if (msg.type === 'init-progress') {
+        sentModelState.loading = true;
+        renderModelStatus();
+        return;
+      }
+      if (msg.type === 'ready') {
+        sentModelState.loaded = true;
+        renderModelStatus();
+        return;
+      }
+      if (msg.type === 'progress') {
+        sentModelState.loading = true;
+        sentModelState.done = msg.done || 0;
+        sentModelState.total = msg.total || 0;
+        renderModelStatus();
+        return;
+      }
+      if (msg.type === 'error') {
+        sentModelState.error = msg.error || 'model error';
+        sentModelState.loading = false;
+        sentModelDisabled = true;
+        renderModelStatus();
+        return;
+      }
+      if (msg.type === 'result') {
+        sentModelState.loading = false;
+        sentModelState.done = (msg.labels || []).length;
+        sentModelState.ms = msg.ms || 0;
+        applySentModelLabels(msg.reqId, msg.labels || []);
+        renderModelStatus();
+      }
+    };
+    return sentModelWorker;
+  }
+
+  function applySentModelLabels(reqId, labels) {
+    const pending = sentModelPending;
+    if (!pending || pending.reqId !== reqId) return;
+    sentModelPending = null;
+    let changed = 0;
+    for (let i = 0; i < pending.items.length; i++) {
+      const item = pending.items[i];
+      const c = item.comment;
+      const pred = labels[i];
+      if (!pred) continue;
+      sentModelCache.set(item.cid, pred);
+      const base = item.baseLabel;
+      let finalLabel = base;
+      if (base === 'neu' && pred.label !== 'neu' && pred.score >= SENT_MODEL_THRESHOLD) {
+        finalLabel = pred.label === 'neg' ? 'neg' : 'pos';
+      }
+      if (finalLabel !== base) {
+        c.sentiment = {
+          score: finalLabel === 'pos' ? Math.max(0.35, pred.score) : -Math.max(0.35, pred.score),
+          label: finalLabel,
+          hits: (c.sentiment && c.sentiment.hits) || 0,
+          model: 'weibo-bert-int8',
+          modelScore: pred.score,
+        };
+        changed++;
+      } else if (base === 'neu' && pred.label === 'neu' && pred.score >= 0.6) {
+        // 模型也判中性，把分数记下来（digest 里可用，不改 label）
+        if (c.sentiment) c.sentiment.modelNeutral = pred.score;
+      }
+    }
+    if (changed) {
+      toast('情感模型补充识别了 ' + changed + ' 条');
+      refreshAll();
+    }
+  }
+
+  function scheduleModelRefine() {
+    if (sentModelDisabled) return;
+    if (sentModelTimer) clearTimeout(sentModelTimer);
+    sentModelTimer = setTimeout(() => {
+      sentModelTimer = null;
+      const list = state.comments;
+      if (!list || !list.length) { renderModelStatus(); return; }
+      if (list.length < SENT_MODEL_MIN_COMMENTS) { renderModelStatus(); return; }
+      const todo = [];
+      for (const c of list) {
+        if (c.sentModelChecked) continue;
+        const text = (c.textClean || c.text || '').trim();
+        if (!text || c.textPlaceholder || c.sentiment && c.sentiment.fromRating) { c.sentModelChecked = true; continue; }
+        todo.push(c);
+      }
+      if (!todo.length) { renderModelStatus(); return; }
+      const worker = ensureSentModelWorker();
+      if (!worker) return;
+      sentModelState.loading = true;
+      sentModelState.total = todo.length;
+      sentModelState.done = 0;
+      renderModelStatus();
+      const reqId = ++sentModelReqId;
+      const items = todo.map((c) => {
+        c.sentModelChecked = true;
+        return { comment: c, cid: c.cid, baseLabel: (c.sentiment && c.sentiment.label) || 'neu', text: (c.textClean || c.text || '').slice(0, 300) };
+      });
+      sentModelPending = { reqId, items };
+      worker.postMessage({ type: 'run', reqId, texts: items.map((x) => x.text) });
+    }, 350);
   }
 
   /* ===================== 主题聚类（v3.0） =====================
@@ -2395,6 +2550,8 @@ function bindAiEvents() {
       : '';
     state.page = 1;
     renderTable();
+    renderModelStatus();
+    scheduleModelRefine();
   }
 
   /* ===================== 事件绑定 ===================== */

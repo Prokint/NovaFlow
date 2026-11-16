@@ -17,7 +17,7 @@
  *   - <当前工作目录>/douyin-comments（DSH 插件默认落盘目录）
  *   - last-out.json 记录的「采集工具最后一次落盘目录」（通常是会话工作区）
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,6 +195,10 @@ const MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".woff2": "font/woff2",
+  // v0.9.48：情感模型推理资源（onnxruntime-web 的 wasm + int8 ONNX 模型）
+  ".wasm": "application/wasm",
+  ".onnx": "application/octet-stream",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 /** 允许被读取的目录列表（绝对路径，去重、去不存在的） */
@@ -717,6 +721,61 @@ function handleExplain(ctx, req, res) {
   });
 }
 
+// v0.9.48：头像代理（页面开了 COEP: require-corp 后，抖音 CDN 的跨域图片会被浏览器拦掉，
+// 报 net::ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep；这里同源抓一次并缓存）
+const AVATAR_HOST_ALLOW = ["douyinpic.com", "byteimg.com", "douyincdn.com", "iesdouyin.com", "douyin.com"];
+const AVATAR_CACHE = new Map();
+const AVATAR_MAX_ENTRIES = 240;
+function avatarHostAllowed(host) {
+  const h = String(host || "").toLowerCase();
+  return AVATAR_HOST_ALLOW.some((d) => h === d || h.endsWith("." + d));
+}
+function serveAvatar(req, res, url) {
+  const target = url.searchParams.get("u") || "";
+  let parsed;
+  try { parsed = new URL(target); } catch { parsed = null; }
+  if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:") || !avatarHostAllowed(parsed.hostname)) {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("bad avatar url");
+    return;
+  }
+  const key = parsed.href;
+  const cached = AVATAR_CACHE.get(key);
+  const sendImg = (type, body) => {
+    res.writeHead(200, {
+      "Content-Type": type || "image/jpeg",
+      "Content-Length": body.length,
+      "Cache-Control": "public, max-age=86400",
+      "Cross-Origin-Resource-Policy": "same-origin",
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  };
+  if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return sendImg(cached.type, cached.body);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12_000);
+  fetch(key, { signal: ctrl.signal, redirect: "follow", headers: { "User-Agent": "Mozilla/5.0", Referer: "" } })
+    .then(async (r) => {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error("avatar http " + r.status);
+      const type = r.headers.get("content-type") || "image/jpeg";
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 3 * 1024 * 1024) throw new Error("avatar too large");
+      if (AVATAR_CACHE.size >= AVATAR_MAX_ENTRIES) {
+        const oldest = AVATAR_CACHE.keys().next().value;
+        if (oldest) AVATAR_CACHE.delete(oldest);
+      }
+      AVATAR_CACHE.set(key, { type, body: buf, at: Date.now() });
+      sendImg(type, buf);
+    })
+    .catch((err) => {
+      clearTimeout(timer);
+      if (!res.writableEnded) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(String((err && err.message) || err));
+      }
+    });
+}
+
 function serveStatic(req, res, pathname) {
   let rel = pathname.slice(PREFIX.length);
   if (rel === "" || rel === "/") rel = "/index.html";
@@ -732,13 +791,34 @@ function serveStatic(req, res, pathname) {
     return;
   }
   const type = MIME[path.extname(file).toLowerCase()] || "application/octet-stream";
+  const ext = path.extname(file).toLowerCase();
+  const size = statSync(file).size;
+  // v0.9.48：文档页给 COOP/COEP，允许 Worker 里用 SharedArrayBuffer 多线程跑 WASM 推理；
+  // 其余静态资源（worker.js / .wasm / .onnx 等）也必须带 CORP，否则 COEP: require-corp 下 Chromium
+  // 会把 Worker 脚本请求直接拦成 net::ERR_BLOCKED_BY_RESPONSE。
+  const docHeaders = {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  };
+  // v0.9.48：模型/运行时等大文件（>4MB）允许长缓存并流式发送，避免每次进页面重下 100MB+
+  if (size > 4 * 1024 * 1024) {
+    res.writeHead(200, Object.assign({
+      "Content-Type": type,
+      "Content-Length": size,
+      "Cache-Control": "public, max-age=31536000, immutable",
+    }, docHeaders || {}));
+    if (req.method === "HEAD") { res.end(); return; }
+    createReadStream(file).pipe(res);
+    return;
+  }
   const body = readFileSync(file);
-  res.writeHead(200, {
+  res.writeHead(200, Object.assign({
     "Content-Type": type,
     "Content-Length": body.length,
     // v0.5.47：静态资源也不缓存，避免升级后浏览器仍用旧 styles.css / app.js
-        "Cache-Control": "no-store, max-age=0",
-  });
+    "Cache-Control": "no-store, max-age=0",
+  }, docHeaders || {}));
   res.end(req.method === "HEAD" ? undefined : body);
 }
 
@@ -762,6 +842,8 @@ export function createViewerHandler(scopeCtx, rootCtx) {
         }
         const url = new URL(req.url, "http://localhost");
         const pathname = url.pathname;
+
+        if (pathname === `${PREFIX}/api/avatar`) return serveAvatar(req, res, url);
 
         if (pathname === PREFIX || pathname === `${PREFIX}/`) return serveStatic(req, res, pathname);
 

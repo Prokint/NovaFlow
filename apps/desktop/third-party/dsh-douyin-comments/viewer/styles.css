@@ -1129,3 +1129,10 @@ td .txt .hl { background: var(--accent-dim); color: var(--accent); }
 @media (max-width: 700px) {
   .region-dist { grid-template-columns: 1fr; }
 }
+
+
+/* v0.9.48：情感模型二次校正的状态文字（评论表标题旁） */
+.model-sub {
+  color: var(--muted, #6b7280);
+  font-weight: 500;
+}
