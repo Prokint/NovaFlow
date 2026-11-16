@@ -18,6 +18,7 @@
  *   - last-out.json 记录的「采集工具最后一次落盘目录」（通常是会话工作区）
  */
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -721,6 +722,217 @@ function handleExplain(ctx, req, res) {
   });
 }
 
+// v0.9.49：LLM 兜底情感分类 —— 只给「规则 + 本地小模型都判中性」的少数评论复核一次。
+// 目的：修本地模型对短句/反讽的漏洞，同时控制调用量（一份导出最多 40 条）并按文本哈希落盘缓存。
+const SENT_LLM_MAX_ITEMS = 40;
+const SENT_LLM_BATCH = 10;
+const SENT_LLM_MIN_CONF = 0.6;
+const SENT_LLM_CACHE = { loaded: false, map: new Map() };
+
+function sentLlmCacheFile() {
+  try {
+    return path.join(collectorHome(), "sentiment-llm-cache.json");
+  } catch {
+    return null;
+  }
+}
+
+function loadSentLlmCache() {
+  if (SENT_LLM_CACHE.loaded) return SENT_LLM_CACHE.map;
+  SENT_LLM_CACHE.loaded = true;
+  const file = sentLlmCacheFile();
+  if (!file) return SENT_LLM_CACHE.map;
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const entries = parsed && parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {};
+    for (const [key, value] of Object.entries(entries)) {
+      if (value && typeof value.label === "string" && ["pos", "neu", "neg"].includes(value.label)) {
+        SENT_LLM_CACHE.map.set(key, { label: value.label, conf: Number(value.conf) || 0.9 });
+      }
+    }
+  } catch {
+    /* 没有缓存文件或损坏：按空缓存处理 */
+  }
+  return SENT_LLM_CACHE.map;
+}
+
+function saveSentLlmCache() {
+  const file = sentLlmCacheFile();
+  if (!file) return;
+  try {
+    const entries = {};
+    for (const [key, value] of SENT_LLM_CACHE.map) entries[key] = { label: value.label, conf: value.conf };
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), entries }, null, 2), "utf8");
+  } catch {
+    /* 缓存写失败不影响结果 */
+  }
+}
+
+function sentLlmTextKey(text) {
+  return createHash("sha1").update(String(text)).digest("hex");
+}
+
+const SENT_LLM_SYSTEM_PROMPT = "你是一个中文抖音评论情感分类器。只输出 JSON，不要解释、不要 Markdown 代码块。";
+
+function sentLlmUserPrompt(items) {
+  const lines = items
+    .map((item, i) => `[${i}] ${String(item.text || "").slice(0, 300).replace(/\s+/g, " ").trim()}`)
+    .join("\n");
+  return [
+    "给每条评论标注情感标签：pos（正面：夸赞/喜欢/推荐/想买/期待）、neg（负面：不满/抱怨/贬低/避雷/质量问题/售后问题）、neu（中性：提问、互动、@人、纯表情、没有明确情绪、只有关键词）。",
+    "再给一个 0 到 1 的置信度；判断不准时给低置信。",
+    '只输出 JSON：{"labels":[{"i":0,"label":"pos","conf":0.9}]}。label 只能是 pos/neu/neg。',
+    "评论：",
+    lines,
+  ].join("\n");
+}
+
+function parseSentLlmLabels(rawText) {
+  const text = normalizeAiAnswer(String(rawText || ""));
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed) return [];
+  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.labels) ? parsed.labels : [];
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const i = Number(item.i ?? item.index);
+    const label = String(item.label || "").toLowerCase();
+    if (!Number.isInteger(i) || i < 0 || !["pos", "neu", "neg"].includes(label)) continue;
+    const conf = Math.max(0, Math.min(1, Number(item.conf) || 0.9));
+    out[i] = { label, conf };
+  }
+  return out;
+}
+
+async function classifyWithLlm(llm, selection, items) {
+  const options = {
+    provider: selection.provider,
+    model: selection.model,
+    system: SENT_LLM_SYSTEM_PROMPT,
+    messages: [await makeUserMessage(sentLlmUserPrompt(items))],
+    temperature: 0,
+    maxTokens: 700,
+  };
+  const info = typeof llm.resolveModelInfo === "function"
+    ? await llm.resolveModelInfo(selection.provider, selection.model).catch(() => null)
+    : null;
+  const efforts = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : [];
+  if (efforts.some((e) => String((e && e.id) || "") === "off")) options.reasoningEffort = "off";
+  const collect = async (opts) => {
+    let text = "";
+    for await (const chunk of llm.stream(opts)) {
+      if (chunk && chunk.type === "text-delta" && chunk.text) text += chunk.text;
+    }
+    return text;
+  };
+  let text = "";
+  try {
+    text = await collect(options);
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (options.reasoningEffort === undefined || !/reasoning effort/i.test(msg)) throw err;
+    delete options.reasoningEffort;
+    text = await collect(options);
+  }
+  // 若该模型不支持 off 档（会抛 UNSUPPORTED_REASONING_EFFORT），去掉参数重试一次。
+  if (!text && options.reasoningEffort !== undefined) {
+    try {
+      delete options.reasoningEffort;
+      text = await collect(options);
+    } catch {
+      text = "";
+    }
+  }
+  return parseSentLlmLabels(text);
+}
+
+function handleSentimentLlm(ctx, req, res) {
+  if (req.method !== "POST") {
+    res.writeHead(405, { Allow: "POST" });
+    res.end();
+    return;
+  }
+  const llm = optionalService(ctx, "llm");
+  const dm = optionalService(ctx, "agentDefaultModel");
+  if (!llm || typeof llm.stream !== "function") {
+    sendJson(res, 409, { ok: false, error: "LLM_UNAVAILABLE", hint: "当前 DSH 没有可用的模型服务" });
+    return;
+  }
+  const selection = (() => {
+    try {
+      return dm && typeof dm.currentSelection === "function" ? dm.currentSelection() : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!selection || !selection.provider || !selection.model) {
+    sendJson(res, 409, { ok: false, error: "NO_MODEL", hint: "先在 DSH 设置里选一个默认模型" });
+    return;
+  }
+  readJsonBody(req, 256 * 1024, async ({ body, error }) => {
+    if (error) {
+      sendJson(res, 400, { ok: false, error });
+      return;
+    }
+    try {
+      const raw = Array.isArray(body && body.items) ? body.items : [];
+      const items = [];
+      for (const it of raw.slice(0, SENT_LLM_MAX_ITEMS)) {
+        const text = String((it && it.text) || "").trim();
+        if (!text || text.length < 2) continue;
+        items.push({ cid: String((it && it.cid) || ""), text: text.slice(0, 300) });
+      }
+      if (!items.length) {
+        sendJson(res, 200, { ok: true, items: [], cached: 0, llmCalls: 0, skipped: raw.length });
+        return;
+      }
+      const cache = loadSentLlmCache();
+      const results = [];
+      const todo = [];
+      for (const item of items) {
+        const key = sentLlmTextKey(item.text);
+        const hit = cache.get(key);
+        if (hit) results.push({ cid: item.cid, label: hit.label, conf: hit.conf, cached: true });
+        else todo.push({ item, key });
+      }
+      let llmCalls = 0;
+      for (let start = 0; start < todo.length; start += SENT_LLM_BATCH) {
+        const batch = todo.slice(start, start + SENT_LLM_BATCH);
+        try {
+          const labels = await classifyWithLlm(llm, selection, batch.map((x) => x.item));
+          llmCalls++;
+          for (let i = 0; i < batch.length; i++) {
+            const pred = labels[i];
+            if (!pred) continue;
+            cache.set(batch[i].key, { label: pred.label, conf: pred.conf });
+            results.push({ cid: batch[i].item.cid, label: pred.label, conf: pred.conf, cached: false });
+          }
+        } catch (err) {
+          appendDebug({ event: "sentiment-llm-batch-error", message: String((err && err.message) || err) });
+        }
+      }
+      saveSentLlmCache();
+      sendJson(res, 200, {
+        ok: true,
+        model: selection.model,
+        items: results,
+        cached: results.filter((r) => r.cached).length,
+        llmCalls,
+        skipped: raw.length - items.length,
+        minConf: SENT_LLM_MIN_CONF,
+      });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String((err && err.message) || err) });
+    }
+  });
+}
+
 // v0.9.48：头像代理（页面开了 COEP: require-corp 后，抖音 CDN 的跨域图片会被浏览器拦掉，
 // 报 net::ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep；这里同源抓一次并缓存）
 const AVATAR_HOST_ALLOW = ["douyinpic.com", "byteimg.com", "douyincdn.com", "iesdouyin.com", "douyin.com"];
@@ -1053,6 +1265,12 @@ export function createViewerHandler(scopeCtx, rootCtx) {
 
         if (pathname === `${PREFIX}/api/explain`) {
           handleExplain(serviceCtx, req, res);
+          return;
+        }
+
+        if (pathname === `${PREFIX}/api/sentiment-llm`) {
+          // v0.9.49：本地规则/小模型都判中性时，用 DSH 默认模型兜底复核一小批评论。
+          handleSentimentLlm(serviceCtx, req, res);
           return;
         }
 

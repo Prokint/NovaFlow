@@ -962,12 +962,14 @@
   const sentModelCache = new Map();
 
   function modelStatusText() {
-    if (sentModelDisabled) return '情感模型未启用（规则结果）';
-    if (sentModelState.error) return '情感模型不可用（规则结果仍可用）';
-    if (sentModelState.loading && sentModelState.total) return '情感模型校正中 ' + sentModelState.done + '/' + sentModelState.total;
-    if (sentModelState.loading) return '情感模型加载中…';
-    if (sentModelState.loaded) return '情感模型已校正（' + sentModelState.done + ' 条 · ' + Math.round(sentModelState.ms / 1000) + 's）';
-    return '';
+    let base = '';
+    if (sentModelDisabled) base = '情感模型未启用（规则结果）';
+    else if (sentModelState.error) base = '情感模型不可用（规则结果仍可用）';
+    else if (sentModelState.loading && sentModelState.total) base = '情感模型校正中 ' + sentModelState.done + '/' + sentModelState.total;
+    else if (sentModelState.loading) base = '情感模型加载中…';
+    else if (sentModelState.loaded) base = '情感模型已校正（' + sentModelState.done + ' 条 · ' + Math.round(sentModelState.ms / 1000) + 's）';
+    const extra = typeof llmStatusText === 'function' ? llmStatusText() : '';
+    return extra ? (base ? base + ' · ' + extra : extra) : base;
   }
 
   function renderModelStatus() {
@@ -1065,6 +1067,112 @@
       toast('情感模型补充识别了 ' + changed + ' 条');
       refreshAll();
     }
+    // v0.9.49：本地模型判中性的评论，再交给 LLM 兜底复核一次（最多 40 条/份导出）。
+    scheduleLlmRefine();
+  }
+
+  /* v0.9.49：LLM 兜底情感分类。
+   * 规则和本地小模型都判为「中性」的评论里，仍有一批是反讽/短句导致的漏判；
+   * 这些交给 DSH 默认模型（AI 解读同一套 llm 服务）批量复核，置信 ≥ 0.6 才改判。
+   * 控制成本：每份导出最多 40 条、每 10 条一批、按文本 sha1 落盘缓存（重复导出不再花钱）。 */
+  const SENT_LLM_MAX_ITEMS = 40;
+  const SENT_LLM_MIN_CONF = 0.6;
+  let sentLlmRunning = false;
+  let sentLlmTimer = null;
+  let sentLlmDisabled = false;
+  const sentLlmState = { done: 0, changed: 0, error: '' };
+
+  function llmStatusText() {
+    if (sentLlmDisabled) return '';
+    if (sentLlmRunning) return 'LLM 复核中…';
+    if (sentLlmState.error) return 'LLM 复核不可用（已用本地结果）';
+    if (sentLlmState.done) return 'LLM 复核 ' + sentLlmState.done + ' 条 · 改判 ' + sentLlmState.changed + ' 条';
+    return '';
+  }
+
+  function applySentLlmLabels(byCid, items) {
+    let changed = 0;
+    for (const it of items || []) {
+      const rec = byCid.get(String((it && it.cid) || ''));
+      const c = rec && rec.comment;
+      if (!c) continue;
+      const label = it.label === 'neg' ? 'neg' : it.label === 'pos' ? 'pos' : 'neu';
+      const conf = Number(it.conf) || 0;
+      if (label === 'neu' || conf < SENT_LLM_MIN_CONF) continue;
+      c.sentiment = {
+        score: label === 'pos' ? Math.max(0.3, conf) : -Math.max(0.3, conf),
+        label,
+        hits: (c.sentiment && c.sentiment.hits) || 0,
+        model: 'llm',
+        modelScore: conf,
+        llmChecked: true,
+      };
+      changed++;
+    }
+    sentLlmState.changed += changed;
+    if (changed) {
+      toast('LLM 复核补充识别了 ' + changed + ' 条');
+      refreshAll();
+    }
+  }
+
+  function scheduleLlmRefine() {
+    if (sentLlmDisabled || sentLlmRunning) return;
+    if (sentModelPending || sentModelState.loading) return; // 先等本地模型跑完，避免重复改判
+    if (sentLlmTimer) clearTimeout(sentLlmTimer);
+    sentLlmTimer = setTimeout(() => {
+      sentLlmTimer = null;
+      const list = state.comments || [];
+      if (!list.length) return;
+      const todo = [];
+      for (const c of list) {
+        if (c.sentLlmChecked) continue;
+        const text = (c.textClean || c.text || '').trim();
+        if (!text || text.length < 2 || c.textPlaceholder || (c.sentiment && c.sentiment.fromRating)) {
+          c.sentLlmChecked = true;
+          continue;
+        }
+        const cur = (c.sentiment && c.sentiment.label) || 'neu';
+        if (cur !== 'neu') { c.sentLlmChecked = true; continue; }
+        todo.push(c);
+        if (todo.length >= SENT_LLM_MAX_ITEMS) break;
+      }
+      if (!todo.length) return;
+      const byCid = new Map();
+      const items = [];
+      for (const c of todo) {
+        c.sentLlmChecked = true;
+        const cid = String(c.cid || '');
+        byCid.set(cid, { comment: c });
+        items.push({ cid, text: (c.textClean || c.text || '').slice(0, 300) });
+      }
+      sentLlmRunning = true;
+      renderModelStatus();
+      fetch('api/sentiment-llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      })
+        .then((r) => r.json().catch(() => ({})))
+        .then((data) => {
+          sentLlmRunning = false;
+          if (!data || data.ok !== true) {
+            sentLlmState.error = String((data && (data.hint || data.error)) || 'LLM 复核失败');
+            sentLlmDisabled = /LLM_UNAVAILABLE|NO_MODEL/.test(sentLlmState.error);
+            renderModelStatus();
+            return;
+          }
+          sentLlmState.error = '';
+          sentLlmState.done += (data.items || []).length;
+          applySentLlmLabels(byCid, data.items || []);
+          renderModelStatus();
+        })
+        .catch((err) => {
+          sentLlmRunning = false;
+          sentLlmState.error = String((err && err.message) || err);
+          renderModelStatus();
+        });
+    }, 900);
   }
 
   function scheduleModelRefine() {

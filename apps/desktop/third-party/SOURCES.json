@@ -4,13 +4,13 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.48",
+      "version": "0.9.49",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "387db1def9468bc1386e39cc5f6a79e4e03e7938",
+      "commit": "84d0991cdea72b3a294101f64ea88ea0d0cffe97",
       "optional": true,
-      "tag": "v0.9.48"
+      "tag": "v0.9.49"
     },
     {
       "name": "dsh-comment-viewer",
