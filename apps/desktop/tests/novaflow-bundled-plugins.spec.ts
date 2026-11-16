@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, it, onTestFinished } from 'vitest'
 import { loadProfileDirectory } from '@deepseek-ai/dsh-app-boot'
 import { NOVAFLOW_OPTIONAL_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
@@ -176,6 +177,28 @@ it('keeps every shipped plugin list covered by the version enforcement', () => {
   writeFileSync(join(profile, 'package.json'), JSON.stringify({ name: 'profile', dsh: { profile: { bundles: [] } } }))
   migrateNovaFlowBundledPlugins(profile)
   for (const plugin of shipped) expect(existsSync(join(profile, 'node_modules', plugin.name))).toBe(false)
+})
+
+it('resolves the shipped runtime interpreter where the virtualenv puts it', async () => {
+  // The Pinduoduo bundle reads Excel through the runtime DSH already ships. Its
+  // discovery must handle a relocated data home (DSH_HOME) and the venv layout
+  // `dependencies/python/bin/python3`; a regression silently falls back to a
+  // system Python without openpyxl.
+  const root = fixture()
+  const dataHome = join(root, 'data-home')
+  const venv = join(dataHome, 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'python', 'bin')
+  mkdirSync(venv, { recursive: true })
+  writeFileSync(join(venv, 'python3'), '#!/bin/sh\n', { mode: 0o755 })
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = dataHome
+  try {
+    const paths = await import(pathToFileURL(join(import.meta.dirname, '..', 'third-party',
+      'dsh-plugin-pdd-ego', 'lib', 'paths.mjs')).href)
+    expect(paths.listDshPythons()).toContain(join(venv, 'python3'))
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+  }
 })
 
 it('leaves older runtimes unchanged and rejects an invalid shipped catalog or changed pinned source', () => {
