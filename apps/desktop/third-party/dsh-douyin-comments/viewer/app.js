@@ -1207,8 +1207,43 @@
 
 /* ---------- v0.5.56：AI 解读（只发摘要，模型不参与计算） ---------- */
 const AI_CONSENT_KEY = 'cw.ai.consent';
+const AI_EFFORT_KEY = 'cw.ai.effort';
 let aiText = '';
 let aiAbort = null;
+
+/* v0.9.44：思考档 —— 用户可选，后端按目标模型能力映射（选中不支持的档会自动就近换档）。
+   auto = 能关就关；off/low/medium/high/max = 希望想多深。 */
+function aiEffortValue() {
+  try {
+    return localStorage.getItem(AI_EFFORT_KEY) || 'auto';
+  } catch (e) {
+    return 'auto';
+  }
+}
+
+/* v0.9.44：剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON（与后端 normalizeAiAnswer 同一口径）。 */
+function stripAiInlineReasoning(input) {
+  let out = String(input || '');
+  [[/<think\b[^>]*>[\s\S]*?<\/think[^>]*>/gi, ''], [/<reasoning\b[^>]*>[\s\S]*?<\/reasoning[^>]*>/gi, ''],
+   [/<\|thinking\|>[\s\S]*?<\|\/thinking\|>/gi, ''], [/<\|reasoning\|>[\s\S]*?<\|\/reasoning\|>/gi, '']].forEach(function (pair) {
+    out = out.replace(pair[0], pair[1]);
+  });
+  return out.trim();
+}
+function sanitizeAiAnswer(rawText) {
+  let text = stripAiInlineReasoning(rawText);
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch (e) { /* 继续 */ }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.stringify(JSON.parse(text.slice(start, end + 1)));
+    } catch (e) { /* 放弃 */ }
+  }
+  return text;
+}
 
 function aiApiPath() {
   const p = String(location.pathname || '');
@@ -1376,7 +1411,7 @@ async function runAiExplain() {
     const res = await fetch(api, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ digest: digest }),
+      body: JSON.stringify({ digest: digest, effort: aiEffortValue() }),
       signal: aiAbort.signal,
     });
     if (!res.ok) {
@@ -1388,6 +1423,8 @@ async function runAiExplain() {
     let buf = '';
     let model = '';
     let usage = 0;
+    let reasonChars = 0;
+    let effortText = '';
     // v0.5.60：流式期间模型输出的是 JSON 原文（带 { } 和字段名），直接打字机展示很难看。
     // 这里只显示一个「正在生成」提示 + 实时字数，等流结束后再由 renderAiResult() 渲染成结构化卡片。
     const p = document.createElement('p');
@@ -1396,6 +1433,13 @@ async function runAiExplain() {
     body.innerHTML = '';
     body.classList.add('is-streaming');
     body.appendChild(p);
+    const noteEl = p.querySelector('.ai-streaming-text');
+    const refreshNote = () => {
+      if (!noteEl) return;
+      noteEl.textContent = '正在生成… ' + aiText.length + ' 字' +
+        (reasonChars ? '（思考 ' + reasonChars + ' 字，不显示）' : '') +
+        (effortText ? ' · ' + effortText : '');
+    };
     for (;;) {
       const step = await reader.read();
       if (step.done) break;
@@ -1410,21 +1454,41 @@ async function runAiExplain() {
         try { obj = JSON.parse(line.slice(6)); } catch (e) { obj = null; }
         if (!obj) continue;
         if (obj.model) model = obj.model;
+        if (obj.start) {
+          if (obj.effortHow === 'nearest' || obj.effortHow === 'name') {
+            effortText = '思考档已按该模型就近映射为 ' + String(obj.effort || '').toUpperCase();
+          } else if (obj.effortHow === 'unknown-request' || obj.effortHow === 'no-mappable') {
+            effortText = '该模型没有这个思考档，已交给默认设置';
+          } else if (obj.effortHow === 'no-probe' || obj.effortHow === 'probe-failed') {
+            effortText = '查不到该模型的思考能力，按默认设置';
+          }
+          refreshNote();
+        }
         if (obj.delta) {
           aiText += obj.delta;
-          const note = p.querySelector('.ai-streaming-text');
-          if (note) note.textContent = '正在生成… ' + aiText.length + ' 字';
+          refreshNote();
+        }
+        if (obj.reasoningChars) {
+          reasonChars = Number(obj.reasoningChars) || 0;
+          refreshNote();
         }
         if (obj.usage) {
           const u = obj.usage || {};
           usage = Number(u.inputTokens || u.promptTokens || 0) + Number(u.outputTokens || u.completionTokens || 0);
         }
+        if (obj.done) {
+          if (obj.reasonChars) reasonChars = Number(obj.reasonChars) || reasonChars;
+          if (Number(obj.reasoningChars)) reasonChars = Number(obj.reasoningChars);
+        }
         if (obj.error) throw new Error(obj.error);
       }
     }
     body.classList.remove('is-streaming');
+    // v0.9.44：兜底剥掉「漏进正文的思考标签」，能截出 JSON 就只留 JSON
+    aiText = sanitizeAiAnswer(aiText);
     const secs = ((Date.now() - t0) / 1000).toFixed(1) + 's';
-    const info = [model, usage ? usage + ' tokens' : '', secs].filter(Boolean).join(' · ');
+    const info = [model, usage ? usage + ' tokens' : '', secs, reasonChars ? '思考 ' + reasonChars + ' 字（不显示）' : '', effortText]
+      .filter(Boolean).join(' · ');
     renderAiResult(aiText, info);
     meta.textContent = info;
     $('#btnAiRetry').hidden = false;
@@ -1444,6 +1508,16 @@ async function runAiExplain() {
 function bindAiEvents() {
   const btn = $('#btnAi');
   if (btn) btn.addEventListener('click', function () { void runAiExplain(); });
+  // v0.9.44：思考档选择（本机记住，后端按模型能力映射）
+  const effortSel = $('#aiEffort');
+  if (effortSel) {
+    effortSel.value = aiEffortValue();
+    if (effortSel.value !== aiEffortValue()) effortSel.value = 'auto';
+    effortSel.addEventListener('change', function () {
+      try { localStorage.setItem(AI_EFFORT_KEY, effortSel.value || 'auto'); } catch (e) { /* 忽略 */ }
+      toast('思考档：' + effortSel.options[effortSel.selectedIndex].textContent.replace('思考：', ''));
+    });
+  }
   const retry = $('#btnAiRetry');
   if (retry) retry.addEventListener('click', function () { void runAiExplain(); });
   const copy = $('#btnAiCopy');
