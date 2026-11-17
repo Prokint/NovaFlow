@@ -37,7 +37,16 @@
       "branch": "local",
       "bundled": true,
       "note": "NovaFlow 内维护的插件：ego 版拼多多多店铺上架（技能 pdd-ego-listing + pdd_ego_* 工具）。无第三方上游仓库；Python（需 openpyxl）默认使用 DSH 自带运行时，用户无需另装。"
-    }
+    },
+  {
+   "name": "dsh-plugin-taobao-ego",
+   "version": "0.1.18",
+   "upstreamPath": "apps/desktop/third-party/dsh-plugin-taobao-ego",
+   "declaredLicense": "MIT",
+   "branch": "local",
+   "bundled": true,
+   "note": "NovaFlow 内维护的插件：ego 版淘宝/千牛商品上架（技能 taobao-ego-listing + tb_ego_* 工具）。只填空与自检、绝不提交；需要本机 ego 浏览器、带 openpyxl 的 Python（默认用 DSH 自带）与已登录的淘宝/千牛账号。"
+  }
   ],
   "localChanges": [
     "dsh-douyin-comments 0.9.50：AI 解读 / LLM 情感复核改为只在订阅激活后可用（后端 402 + 购买引导），词云与本地统计不受影响；本地情感小模型（weibo-BERT int8）与 LLM 复核分层、缓存按文本 sha1 存本地；规则先跑、模型只校正中性、阈值 0.45。",

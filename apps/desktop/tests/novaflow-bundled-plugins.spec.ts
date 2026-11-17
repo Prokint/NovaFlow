@@ -43,7 +43,8 @@ it('stages every reviewed bundle and compatibility package without running plugi
     'dsh-douyin-comments': 'file:./third-party/dsh-douyin-comments',
     'dsh-comment-viewer': 'file:./third-party/dsh-comment-viewer',
     'dsh-skill-explorer': 'file:./third-party/dsh-skill-explorer',
-    'dsh-plugin-pdd-ego': 'file:./third-party/dsh-plugin-pdd-ego' })
+    'dsh-plugin-pdd-ego': 'file:./third-party/dsh-plugin-pdd-ego',
+    'dsh-plugin-taobao-ego': 'file:./third-party/dsh-plugin-taobao-ego' })
   for (const plugin of [...NOVAFLOW_BUNDLED_PLUGINS, ...NOVAFLOW_OPTIONAL_PLUGINS, ...NOVAFLOW_COMPAT_PLUGINS]) {
     const staged = join(root, 'third-party', plugin.name)
     expect(JSON.parse(readFileSync(join(staged, 'package.json'), 'utf8'))).toMatchObject(plugin)
@@ -59,6 +60,12 @@ it('stages every reviewed bundle and compatibility package without running plugi
       // 执行层必须随包：缺 scripts/ 的包在运行时找不到上架脚本。
       expect(existsSync(join(staged, 'scripts', 'run_listing_ego.mjs'))).toBe(true)
       expect(existsSync(join(staged, 'scripts', 'tools', 'xlsx_to_product.py'))).toBe(true)
+    } else if (plugin.name === 'dsh-plugin-taobao-ego') {
+      expect(notice).toContain('dsh-plugin-taobao-ego')
+      expect(notice).toContain('MIT')
+      // 执行层必须随包：缺 scripts/ 的包在运行时找不到上架脚本。
+      expect(existsSync(join(staged, 'scripts', 'run_listing_tb.mjs'))).toBe(true)
+      expect(existsSync(join(staged, 'skill', 'SKILL.md'))).toBe(true)
     } else {
       expect(notice).toContain('monagisa/douyin-ai-collector')
     }
@@ -125,7 +132,7 @@ it('applies built-in defaults and drops the legacy standalone viewer when the me
   migrateNovaFlowBundledPlugins(profile)
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
     '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-douyin-comments', 'dsh-skill-explorer',
-    'dsh-plugin-pdd-ego',
+    'dsh-plugin-pdd-ego', 'dsh-plugin-taobao-ego',
   ])
   // A profile that only enabled the old viewer keeps it, and still receives the built-in bundle.
   writeFileSync(filename, JSON.stringify({
@@ -133,11 +140,11 @@ it('applies built-in defaults and drops the legacy standalone viewer when the me
   }))
   migrateNovaFlowBundledPlugins(profile)
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
-    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego',
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego', 'dsh-plugin-taobao-ego',
   ])
   // The optional Douyin bundle is not added by the migration.
   expect(JSON.parse(readFileSync(filename, 'utf8'))).toHaveProperty('dsh.profile.bundles', [
-    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego',
+    '@deepseek-ai/dsh-base', 'dsh-comment-viewer', 'dsh-skill-explorer', 'dsh-plugin-pdd-ego', 'dsh-plugin-taobao-ego',
   ])
 })
 

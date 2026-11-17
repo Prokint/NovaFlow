@@ -1,0 +1,5 @@
+# bundle patch for the NovaFlow Taobao/Qianniu listing plugin: inserts its plugin row
+# into the profile roster. Applied as a profile bundle layer (`dsh.bundle.patch`).
+- insert:
+    - id: taobao-ego-listing
+      name: 'dsh-plugin-taobao-ego'

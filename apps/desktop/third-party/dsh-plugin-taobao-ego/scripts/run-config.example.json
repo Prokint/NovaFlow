@@ -1,0 +1,66 @@
+{
+  "_说明": "复制为 run-config.json 再改值（用 node scripts/run_tb.mjs --config run-config.json）。所有键最终塞进 globalThis.__TB_CFG（ego 子进程不继承环境变量）。",
+
+  "_space": "★ 必填：ego space id（一店一个）。ego 重启后 id 会变 → 每次开跑先用 pdd_ego_spaces 核对",
+  "space": 6,
+
+  "_cat": "★ 必填：类目完整路径（级联树按路径逐级点）+ catId",
+  "catid": "201802801",
+  "cat": "家装主材 > 墙纸/墙布 > 自贴墙纸/自粘墙纸",
+
+  "_brand": "品牌；该店已申请的才可用（默认 无品牌）",
+  "brand": "无品牌",
+
+  "_product": "★ 二选一：product.json 绝对路径（数据已就绪时用这个）",
+  "product": "D:/你的素材目录/MZBW-01/product.json",
+
+  "_pack": "★ 二选一：素材包根目录（含 商品信息.xlsx 与 淘宝/<商品号>/），自动跑 tb_build.py + tb_prep_assets.js",
+  "pack": "",
+
+  "_skuTemplate": "官方 SKU 模板（留空 = product 同目录 sku_import_官方模板.xlsx；两者都没有会自动下载该类目模板）",
+  "skuTemplate": "",
+
+  "_python": "pack 模式要用的解释器（需能 import openpyxl）；留空 = 自动探测（优先 DSH 自带那份）",
+  "python": "",
+
+  "_mainLimit": "1:1 主图张数上限（平台硬上限 5；素材更少按实数）",
+  "mainLimit": 5,
+  "_detailBatch": "详情图每批张数（默认 20）",
+  "detailBatch": 20,
+
+  "_upload34": "3:4 主图：素材包有 img/3x4 才上传，没有就跳过（不自动裁）",
+  "upload34": true,
+  "_crop34": "3:4 缺图时是否按 1:1 中心裁（默认 false = 不裁）",
+  "crop34": false,
+  "_uploadWhite": "白底图：素材包有 img/white 才传（默认 true 但没图就跳过）",
+  "uploadWhite": true,
+  "_uploadVideo": "商品视频：img/video 里第一个视频，没有就跳过（也可用 videoFile 指定单个文件）",
+  "uploadVideo": true,
+  "videoFile": "",
+
+  "_uploadSettleMs": "图片空间「传完等下再点完成」的时长（默认 5000；<2000 时列表常常只显示第一张）",
+  "uploadSettleMs": 5000,
+
+  "_recheckAttrs": "3c 复核属性（默认 false；开了会把多选属性重复填，别开）",
+  "recheckAttrs": false,
+
+  "_saveDraft": "收尾是否保存草稿（默认 false；红线：绝不点「提交宝贝信息」）",
+  "saveDraft": false,
+
+  "_reloadFirst": "true = 先 reload 发布页，清掉上一轮残留表单/弹窗（建议 true）",
+  "reloadFirst": true,
+
+  "_dryRun": "true = 只打印计划，不动页面",
+  "dryRun": false,
+
+  "_forceEntry": "true = 强制重新走「搜索发品」入口（默认 false = 已在目标 catId 页就复用）",
+  "forceEntry": false,
+
+  "_listPrice": "一口价覆盖（0 = 用 product.json 的 list_price；注意：必须是某个有库存 SKU 的价格）",
+  "listPrice": 0,
+  "_sizeSort": "规格排序：source（照素材顺序）/ natural（自然序）",
+  "sizeSort": "source",
+
+  "_debug": "1/true = 打印调试细节",
+  "debug": false
+}

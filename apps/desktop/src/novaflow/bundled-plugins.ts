@@ -6,6 +6,7 @@ import { join } from 'node:path'
 export const NOVAFLOW_BUNDLED_PLUGINS = [
   { name: 'dsh-skill-explorer', version: '0.1.4' },
   { name: 'dsh-plugin-pdd-ego', version: '1.1.10' },
+  { name: 'dsh-plugin-taobao-ego', version: '0.1.18' },
 ] as const
 
 /** Shipped bundles installed with NovaFlow but switched off until the user enables them. */
