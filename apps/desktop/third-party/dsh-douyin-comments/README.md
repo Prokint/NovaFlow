@@ -1,8 +1,19 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.46；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.53；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.53 变更（2026-11-17）：情感 / 意图 / AI 解读逻辑上云（客户端只渲染）**
+
+- **背景**：词典、意图规则、int8 模型（103MB）、阈值与 AI 解读 prompt 属于机密实现，不能再随安装包下发；客户端只保留展示与交互。
+- **服务端**：`novaflow-collect` 新增 `POST /v1/analyze`（账号 Bearer 鉴权 + 订阅校验，未激活 402；单批 ≤200 条，文本截 300 字）→ `{ ok, version, mode, results:[{sentiment:{label,score,hits}, intent, intents}] }`；实现文件 `novaflow-collect/analyze.mjs`（`ANALYZE_VERSION=0.9.53`）。
+- **意图升级**：一句评论可多标签；主标签优先级 `buy > ask > warn > aftersale > share > noise`；新增 `warn`（负向口碑：避雷/劝退/别买/踩雷/智商税…）；「客服态度差。避雷。多少钱一台？」这类混合句主标签为「购买意向」而不再是售后。
+- **插件侧瘦身**：删除 `viewer/sentiment/`（含 103MB onnx）与 `viewer/vendor/ort/`（约 15MB）以及 `scripts/fetch-sentiment-model.mjs`，安装包不再携带模型（约 -118MB）。
+- **接口**：`viewer.mjs` 新增本地代理 `POST /viewer/api/analyze`（未开通 402 / 独立模式 409 / 限流 429）；客户端按 200 条分批调用并回填标签。
+- **AI 解读也上云**：服务端新增 `POST /v1/explain`（`novaflow-collect/explain.mjs`），prompt、上游 LLM key、模型与思考档**只存在服务端**；插件 `POST /viewer/api/explain` 改为代理，把前端算好的统计摘要转发上去、再原样流回 SSE；客户端已删除 `AI_SYSTEM_PROMPT` 与档位判断代码。服务端配置项：`LLM_BASE` / `LLM_KEY` / `LLM_MODEL`（默认 `deepseek-chat`）/ `LLM_MAX_TOKENS` / `LLM_REASONING_EFFORT`；未配置时返回 503 `LLM_NOT_CONFIGURED`。
+- **失败降级**：云端不可用时标签先按中性占位并提示「云端分析不可用：…」，看评论 / 筛选 / 导出不受影响；未订阅提示「订阅未开通或已到期」。
+- **头像代理**：保留 `/viewer/api/avatar`（COEP 下抖音 CDN 头像同源抓取），COOP/COEP/CORP 与大文件流式保留。
+- **自检**：`verify-tool` 云端断言组（`cloud-analyze-route` / `cloud-entitlement` / `cloud-no-local-logic` / `cloud-analyze-client` / `cloud-intent-labels` / `cloud-intent-ui` / `cloud-no-model-assets` / `cloud-avatar-proxy` / `cloud-pay-gate` / `cloud-readme`）。
 **0.9.52 变更**（2026-11-16）：评论意图识别（购买意向 / 售前咨询 / 售后问题 / 体验分享 / 广告无效）。
 
 `viewer/app.js` 新增本地规则 `intentOf()`：优先识别售后关键词 → 购买信号（多少钱/链接/下单/现货/批发/蹲一个…）→ 售前咨询（能用吗/适合/多久…）→ 体验分享（我用过/亲测/回购…）→ 广告或无效（加微信/互关/纯表情/无文字）。

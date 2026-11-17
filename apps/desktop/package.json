@@ -19,7 +19,7 @@
     "prepare:primary-runtime": "node --import tsx/esm scripts/prepare-primary-runtime.ts",
     "sign:primary-runtime": "tsx scripts/sign-primary-runtime.ts",
     "cache:windows-signatures": "node scripts/manage-windows-signature-cache.mjs",
-    "prepare:packages": "node --import tsx/esm scripts/prepare-package-set.ts && node third-party/dsh-douyin-comments/scripts/fetch-sentiment-model.mjs",
+    "prepare:packages": "node --import tsx/esm scripts/prepare-package-set.ts",
     "prepare:dsh": "node --import tsx/esm scripts/prepare-dsh.ts",
     "prepare:package": "node --import tsx/esm scripts/package-target.ts --prepare-only",
     "verify:mac-signature": "node scripts/verify-macos-signature.mjs",

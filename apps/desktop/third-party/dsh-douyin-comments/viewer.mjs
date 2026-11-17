@@ -23,7 +23,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectorHome, lastOutDir } from "./console.mjs";
-import { EntitlementError, activate, entitlementEnabled, machineId, removeDevice, status as entitlementStatus, textOf } from "./entitlement.mjs";
+import { EntitlementError, activate, analyze, entitlementEnabled, explainFetch, machineId, removeDevice, status as entitlementStatus, textOf } from "./entitlement.mjs";
 
 // v0.6.0：合并后不再作为独立 cordis 插件导出（没有 name/inject/apply），
 // 只有 index.js 会调用 registerViewer / createViewerHandler。
@@ -83,14 +83,7 @@ function optionalService(ctx, name) {
   }
 }
 
-const AI_SYSTEM_PROMPT = [
-  "你是电商/短视频评价分析师。只依据用户给出的 JSON 摘要下结论，不得编造任何数字或原文。",
-  "如果 summary.placeholder.count > 0，必须明确指出这部分是平台系统默认评价、不代表买家真实表达，并在结论里说明它如何影响打分。",
-  "引用买家原话时用「」，并在括号里标注评价类型（如 好评/差评）与 SKU（若有）。",
-  "语气克制、可执行，不写空话；不评价你无法从数据里看到的维度。",
-  "只输出 JSON，不要 markdown 代码块，不要多余解释，结构必须为：",
-  '{"headline":"一句话结论","reading":"2-3 句整体解读","issues":[{"title":"问题","evidence":"数据或原文证据","severity":"high|medium|low"}],"actions":[{"title":"建议","why":"为什么有用"}],"quotes":[{"text":"买家原话","rating":"好评|中评|差评","sku":"可选"}]}',
-].join("\n");
+// v0.9.53：AI 解读的 prompt 已迁到服务端（novaflow-collect/explain.mjs），客户端不再持有。
 
 const AI_MAX_DIGEST_CHARS = 12000;
 // v0.9.43：1600 是「我们给这次输出设的上限」，不是供应商的硬限制。
@@ -512,38 +505,82 @@ function replyNotActivated(res, feature) {
   });
 }
 
+// v0.9.53：云端评论分析代理 —— 情感 / 意图的词典、模型与阈值全在服务端（/v1/analyze）。
+// 这里只做三件事：校验入参、带订阅身份转发、把结果原样回给页面。
+async function handleAnalyze(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { ok: false, error: "只支持 POST" });
+    return;
+  }
+  if (!entitlementEnabled()) {
+    sendJson(res, 409, {
+      ok: false,
+      code: "NOT_CONFIGURED",
+      error: "独立运行模式不启用云端评论分析（需要 NovaFlow 订阅）",
+    });
+    return;
+  }
+  readJsonBody(req, 512 * 1024, async ({ body, error }) => {
+    if (error) {
+      sendJson(res, 400, { ok: false, error: "请求体不是合法 JSON" });
+      return;
+    }
+    const texts = Array.isArray(body && body.texts) ? body.texts : [];
+    if (!texts.length) {
+      sendJson(res, 400, { ok: false, error: "texts 不能为空" });
+      return;
+    }
+    if (texts.length > 200) {
+      sendJson(res, 400, { ok: false, error: "单次最多 200 条文本" });
+      return;
+    }
+    const mode = String((body && body.mode) || "sentiment+intent");
+    try {
+      const result = await analyze({ texts, mode });
+      sendJson(res, 200, {
+        ok: true,
+        version: result.version || "",
+        mode: result.mode || mode,
+        results: Array.isArray(result.results) ? result.results : [],
+      });
+    } catch (err) {
+      const code = String((err && (err.code || err.name)) || "");
+      const status = code === "NOT_ACTIVATED" || code === "EXPIRED" ? 402
+        : code === "RATE_LIMITED" ? 429
+          : 502;
+      sendJson(res, status, {
+        ok: false,
+        code: code || "ANALYZE_FAILED",
+        error: textOf(code) || String((err && err.message) || err),
+      });
+    }
+  });
+}
+
+
 /**
  * v0.2.10：把前端算好的 digest 交给 DSH 已配置的模型，SSE 流式返回文字。
  * 模型只做「解读」，不参与任何统计计算。
+ */
+/**
+ * v0.9.53：AI 解读改为「云端代理」。
+ * prompt / LLM key / 模型选择全在服务端（novaflow-collect /v1/explain），
+ * 插件只把前端算好的统计摘要转发上去，再把 SSE 原样流回浏览器。
+ * 订阅闸门由服务端要求激活（402）；独立模式（无 entitlement）直接说明不可用。
  */
 async function handleExplain(ctx, req, res) {
   if (req.method !== "POST") {
     sendJson(res, 405, { ok: false, error: "只支持 POST" });
     return;
   }
-  const gate = await entitlementGateState().catch(() => ({ on: false, activated: true }));
-  if (gate.on && !gate.activated) {
-    replyNotActivated(res, "ai-explain");
+  if (!entitlementEnabled()) {
+    sendJson(res, 409, {
+      ok: false,
+      code: "NOT_CONFIGURED",
+      error: "独立运行模式不启用云端 AI 解读（需要 NovaFlow 订阅）",
+    });
     return;
   }
-  const llm = optionalService(ctx, "llm");
-  const dm = optionalService(ctx, "agentDefaultModel");
-  if (!llm || typeof llm.stream !== "function") {
-    sendJson(res, 409, { ok: false, error: "LLM_UNAVAILABLE", hint: "当前 DSH 没有可用的模型服务" });
-    return;
-  }
-  const selection = (() => {
-    try {
-      return dm && typeof dm.currentSelection === "function" ? dm.currentSelection() : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
-  if (!selection || !selection.provider || !selection.model) {
-    sendJson(res, 409, { ok: false, error: "NO_MODEL", hint: "先在 DSH 设置里选一个默认模型" });
-    return;
-  }
-
   readJsonBody(req, 256 * 1024, async ({ body, error }) => {
     if (error) {
       sendJson(res, 400, { ok: false, error });
@@ -554,433 +591,83 @@ async function handleExplain(ctx, req, res) {
       sendJson(res, 400, { ok: false, error: "digest 缺失或 schema 不匹配（需要 cv-digest/1）" });
       return;
     }
-    let digestJson = "";
-    try {
-      digestJson = JSON.stringify(digest);
-    } catch {
+    let digestLen = 0;
+    try { digestLen = JSON.stringify(digest).length; } catch { digestLen = 0; }
+    if (!digestLen) {
       sendJson(res, 400, { ok: false, error: "digest 无法序列化" });
       return;
     }
-    if (digestJson.length > AI_MAX_DIGEST_CHARS) {
-      sendJson(res, 413, { ok: false, error: "digest 过大", hint: `上限 ${AI_MAX_DIGEST_CHARS} 字符` });
+    // 与云端 MAX_DIGEST_CHARS = 12000 对齐
+    if (digestLen > 12000) {
+      sendJson(res, 413, { ok: false, error: "digest 过大", hint: "上限 12000 字符" });
       return;
     }
-
+    const controller = new AbortController();
+    if (typeof res.on === "function") {
+      res.on("close", () => {
+        if (!res.writableEnded) controller.abort();
+      });
+    }
+    let upstream;
+    try {
+      upstream = await explainFetch({ digest, signal: controller.signal });
+    } catch (e) {
+      sendJson(res, 502, { ok: false, error: "AI 解读云端不可用：" + String((e && e.message) || e) });
+      return;
+    }
+    if (!upstream.ok || !upstream.body) {
+      let detail = null;
+      try { detail = await upstream.json(); } catch { /* ignore */ }
+      const status = upstream.status || 502;
+      sendJson(res, status, {
+        ok: false,
+        code: (detail && detail.code) || "UPSTREAM_UNAVAILABLE",
+        error: (detail && (detail.message || detail.error)) || textOf("UPSTREAM_UNAVAILABLE") || "AI 解读服务不可用",
+        paywall: status === 402,
+        purchaseUrl: "https://collect.lanjiaotrade.com/buy",
+      });
+      return;
+    }
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-store, max-age=0",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-    const controller = new AbortController();
-    // v0.5.58：Node 18+ 里 `req` 的 'close' 在请求体读完就会触发（不是断连），
-    // 用它 abort 会把模型请求立刻掐断（表现为「aborted：…request aborted」）。
-    // 正确做法：监听响应的 'close'，且只在响应还没正常结束时才视为客户端断开。
-    if (typeof res.on === "function") {
-      res.on("close", () => {
-        if (!res.writableEnded) controller.abort();
-      });
-    }
-
-    let text = "";
-    let reasonChars = 0;
-    let lastReasonSent = 0;
-    let finish = null;
-    let usage = null;
+    const write = (obj) => res.write("data: " + JSON.stringify(obj) + "\n\n");
+    write({ start: true, provider: "novaflow-collect", model: "cloud" });
     try {
-      const userMessage = await makeUserMessage("数据摘要：\n" + digestJson);
-      // v0.9.44：思考档支持「用户指定（body.effort）」+「跨模型映射」。
-      // 前端可传 auto/off/low/medium/high/max；后端按目标模型实际支持的档
-      // 精确匹配 → 名称匹配 → 深度等级就近映射（见 pickEffortForModel）。
-      // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试用）。
-      // v0.9.45：不再让用户在页面上调思考档 —— 固定按「高」思考（分析更准）。
-      // 目标模型如果没有 high，就由 pickEffortForModel 就近映射到它支持的档
-      // （如 medium/low/max；能自动关思考的模型也优先按 high 想，除非被拒绝）。
-      // DYC_AI_REASONING_EFFORT 仍可强制覆盖（调试/特殊模型用）。
-      const requestedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim().toLowerCase() || "high";
-      const forcedEffort = String(process.env.DYC_AI_REASONING_EFFORT || "").trim();
-      let effort;
-      let effortHow = "";
-      let supportedEfforts = [];
-      if (forcedEffort && forcedEffort !== "auto") {
-        effort = forcedEffort;
-        effortHow = "forced";
-      } else {
-        let supported = null;
-        if (typeof llm.resolveModelInfo === "function") {
-          try {
-            const info = await llm.resolveModelInfo(selection.provider, selection.model, controller.signal);
-            supported = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : [];
-          } catch {
-            supported = null;
-            effortHow = "probe-failed";
+      const reader = upstream.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const step = await reader.read();
+        if (step.done) break;
+        buf += dec.decode(step.value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          let obj = null;
+          try { obj = JSON.parse(payload); } catch { continue; }
+          if (obj && obj.start) continue;
+          if (obj && obj.error) { write({ error: obj.error }); continue; }
+          if (obj && obj.done) {
+            write({ delta: "", chars: obj.chars, reasoningChars: obj.reasoningChars || 0, done: true });
+            continue;
           }
-        }
-        if (supported === null) {
-          // 查不到模型能力：显式请求「非 off」的档时也不瞎传（DSH 会直接拒绝）；
-          // off / auto 沿用旧的 "off" 行为，真被拒时靠下面的自动重试兜底。
-          effort = requestedEffort && requestedEffort !== "off" ? undefined : "off";
-          effortHow = effortHow || "no-probe";
-        } else {
-          supportedEfforts = supported.map((e) => String((e && e.id) || "")).filter(Boolean);
-          const picked = pickEffortForModel(supported, requestedEffort);
-          effort = picked.effort;
-          effortHow = picked.how;
+          if (obj && typeof obj.reasoningChars === "number") { write({ delta: "", reasoningChars: obj.reasoningChars }); continue; }
+          if (obj && obj.delta) write({ delta: obj.delta });
+          if (obj && obj.usage) write({ usage: obj.usage });
         }
       }
-      send({
-        start: true,
-        provider: selection.provider,
-        model: selection.model,
-        requestedEffort: requestedEffort || "auto",
-        effort: effort === undefined ? "(omit)" : effort,
-        effortHow,
-        supportedEfforts,
-      });
-      appendDebug({
-        event: "effort",
-        provider: selection.provider,
-        model: selection.model,
-        effort: effort === undefined ? "(omit)" : effort,
-        effortHow,
-        requested: requestedEffort || "auto",
-        supportedEfforts,
-        forced: forcedEffort || undefined,
-      });
-
-      const runOnce = async (maxTokens, useEffort) => {
-        const options = {
-          provider: selection.provider,
-          model: selection.model,
-          system: AI_SYSTEM_PROMPT,
-          messages: [userMessage],
-          temperature: 0.3,
-          maxTokens,
-          signal: controller.signal,
-        };
-        if (useEffort !== undefined) options.reasoningEffort = useEffort;
-        const stream = llm.stream(options);
-        for await (const chunk of stream) {
-          if (!chunk) continue;
-          if (chunk.type === "text-delta" && chunk.text) {
-            text += chunk.text;
-            send({ delta: chunk.text });
-          } else if (chunk.type === "reasoning-delta") {
-            // 只统计字数、不把思考内容发给前端（结果里只应有 JSON 正文）。
-            // v0.9.44：把思考进度也推给前端（前端只显示字数，不显示内容），
-            // 便于用户确认「模型在认真想」以及预算是否被思考吃掉。每 200 字推一次。
-            reasonChars += String(chunk.text || "").length;
-            if (reasonChars - lastReasonSent >= 200) {
-              lastReasonSent = reasonChars;
-              send({ reasoningChars: reasonChars });
-            }
-          } else if (chunk.type === "usage") {
-            usage = chunk.usage;
-            send({ usage: chunk.usage });
-          } else if (chunk.type === "finish") {
-            finish = chunk.reason;
-          }
-        }
-        const kind = finish && (finish.kind || finish);
-        const failureCode = finish && finish.kind === "error" && finish.failure ? String(finish.failure.code || "") : "";
-        return { kind, failureCode };
-      };
-      const resetAttempt = () => {
-        text = "";
-        reasonChars = 0;
-        lastReasonSent = 0;
-        finish = null;
-      };
-      // v0.9.43：思考关不掉时（effort 为 undefined），思考 token 和正文共用
-      // 同一个输出预算，所以基础预算自动放大；能关掉思考时仍用 1600 这个小上限。
-      const budgetNow = () => (effort === "off" ? AI_MAX_TOKENS : AI_MAX_TOKENS_THINKING);
-      let attempt;
-      try {
-        attempt = await runOnce(budgetNow(), effort);
-      } catch (err) {
-        const msg = String((err && err.message) || err);
-        if (effort !== undefined && /reasoning effort/i.test(msg)) {
-          appendDebug({ event: "retry", reason: "unsupported-reasoning-effort-throw", message: msg });
-          resetAttempt();
-          effort = undefined;
-          attempt = await runOnce(budgetNow(), undefined);
-        } else {
-          throw err;
-        }
-      }
-      if (!text && attempt.kind === "error" && attempt.failureCode === "UNSUPPORTED_REASONING_EFFORT") {
-        appendDebug({ event: "retry", reason: "unsupported-reasoning-effort", tried: effort === undefined ? "(omit)" : effort });
-        resetAttempt();
-        effort = undefined;
-        attempt = await runOnce(budgetNow(), undefined);
-      }
-      let kind = attempt.kind;
-      if (!text && kind === "max-tokens" && !controller.signal.aborted) {
-        appendDebug({ event: "retry", reason: "max-tokens-no-text", firstMaxTokens: budgetNow() });
-        resetAttempt();
-        const second = await runOnce(budgetNow() * 2, effort);
-        kind = second.kind;
-      }
-      // v0.9.44：兜底剥掉「漏进正文的思考标签」；能截出 JSON 就只保留 JSON。
-      if (text) text = normalizeAiAnswer(text);
-      appendDebug({
-        event: "finish",
-        provider: selection.provider,
-        model: selection.model,
-        kind,
-        chars: text.length,
-        reasonChars,
-        effort: effort === undefined ? "(omit)" : effort,
-        effortHow,
-        maxTokens: budgetNow(),
-        digestChars: digestJson.length,
-      });
-      if (finish && kind !== "stop" && kind !== "max-tokens") {
-        send({ error: "模型返回失败：" + describeFinish(finish) });
-      } else if (!text && kind === "max-tokens" && reasonChars > 0) {
-        send({
-          error:
-            "模型把 token 预算都用在思考上了（思考 " + reasonChars + " 字、正文 0 字）。" +
-            (effort === undefined
-              ? "这个模型/供应商关闭不了思考（或不支持思考档参数），DSH 只按模型能力传参；可以换一个不需要长思考的模型，或把摘要复制给任意 AI。"
-              : "已在请求里关闭推理；如仍出现请把这份摘要复制给任意 AI。"),
-        });
-      } else if (!text) {
-        send({ error: "模型没有返回内容（可点「重新生成」再试一次）" });
-      } else {
-        send({
-          done: true,
-          chars: text.length,
-          reasoningChars: reasonChars,
-          effort: effort === undefined ? "(omit)" : effort,
-          effortHow,
-          requestedEffort: requestedEffort || "auto",
-          supportedEfforts,
-        });
-      }
-    } catch (err) {
-      appendDebug({ event: "throw", message: String((err && err.message) || err) });
-      send({ error: String((err && err.message) || err) });
-    } finally {
-      res.end();
+    } catch (e) {
+      try { write({ error: String((e && e.message) || e) }); } catch { /* ignore */ }
     }
-  });
-}
-
-// v0.9.49：LLM 兜底情感分类 —— 只给「规则 + 本地小模型都判中性」的少数评论复核一次。
-// 目的：修本地模型对短句/反讽的漏洞，同时控制调用量（一份导出最多 40 条）并按文本哈希落盘缓存。
-const SENT_LLM_MAX_ITEMS = 40;
-const SENT_LLM_BATCH = 10;
-const SENT_LLM_MIN_CONF = 0.6;
-const SENT_LLM_CACHE = { loaded: false, map: new Map() };
-
-function sentLlmCacheFile() {
-  try {
-    return path.join(collectorHome(), "sentiment-llm-cache.json");
-  } catch {
-    return null;
-  }
-}
-
-function loadSentLlmCache() {
-  if (SENT_LLM_CACHE.loaded) return SENT_LLM_CACHE.map;
-  SENT_LLM_CACHE.loaded = true;
-  const file = sentLlmCacheFile();
-  if (!file) return SENT_LLM_CACHE.map;
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-    const entries = parsed && parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {};
-    for (const [key, value] of Object.entries(entries)) {
-      if (value && typeof value.label === "string" && ["pos", "neu", "neg"].includes(value.label)) {
-        SENT_LLM_CACHE.map.set(key, { label: value.label, conf: Number(value.conf) || 0.9 });
-      }
-    }
-  } catch {
-    /* 没有缓存文件或损坏：按空缓存处理 */
-  }
-  return SENT_LLM_CACHE.map;
-}
-
-function saveSentLlmCache() {
-  const file = sentLlmCacheFile();
-  if (!file) return;
-  try {
-    const entries = {};
-    for (const [key, value] of SENT_LLM_CACHE.map) entries[key] = { label: value.label, conf: value.conf };
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), entries }, null, 2), "utf8");
-  } catch {
-    /* 缓存写失败不影响结果 */
-  }
-}
-
-function sentLlmTextKey(text) {
-  return createHash("sha1").update(String(text)).digest("hex");
-}
-
-const SENT_LLM_SYSTEM_PROMPT = "你是一个中文抖音评论情感分类器。只输出 JSON，不要解释、不要 Markdown 代码块。";
-
-function sentLlmUserPrompt(items) {
-  const lines = items
-    .map((item, i) => `[${i}] ${String(item.text || "").slice(0, 300).replace(/\s+/g, " ").trim()}`)
-    .join("\n");
-  return [
-    "给每条评论标注情感标签：pos（正面：夸赞/喜欢/推荐/想买/期待）、neg（负面：不满/抱怨/贬低/避雷/质量问题/售后问题）、neu（中性：提问、互动、@人、纯表情、没有明确情绪、只有关键词）。",
-    "再给一个 0 到 1 的置信度；判断不准时给低置信。",
-    '只输出 JSON：{"labels":[{"i":0,"label":"pos","conf":0.9}]}。label 只能是 pos/neu/neg。',
-    "评论：",
-    lines,
-  ].join("\n");
-}
-
-function parseSentLlmLabels(rawText) {
-  const text = normalizeAiAnswer(String(rawText || ""));
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    parsed = null;
-  }
-  if (!parsed) return [];
-  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.labels) ? parsed.labels : [];
-  const out = [];
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-    const i = Number(item.i ?? item.index);
-    const label = String(item.label || "").toLowerCase();
-    if (!Number.isInteger(i) || i < 0 || !["pos", "neu", "neg"].includes(label)) continue;
-    const conf = Math.max(0, Math.min(1, Number(item.conf) || 0.9));
-    out[i] = { label, conf };
-  }
-  return out;
-}
-
-async function classifyWithLlm(llm, selection, items) {
-  const options = {
-    provider: selection.provider,
-    model: selection.model,
-    system: SENT_LLM_SYSTEM_PROMPT,
-    messages: [await makeUserMessage(sentLlmUserPrompt(items))],
-    temperature: 0,
-    maxTokens: 700,
-  };
-  const info = typeof llm.resolveModelInfo === "function"
-    ? await llm.resolveModelInfo(selection.provider, selection.model).catch(() => null)
-    : null;
-  const efforts = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : [];
-  if (efforts.some((e) => String((e && e.id) || "") === "off")) options.reasoningEffort = "off";
-  const collect = async (opts) => {
-    let text = "";
-    for await (const chunk of llm.stream(opts)) {
-      if (chunk && chunk.type === "text-delta" && chunk.text) text += chunk.text;
-    }
-    return text;
-  };
-  let text = "";
-  try {
-    text = await collect(options);
-  } catch (err) {
-    const msg = String((err && err.message) || err);
-    if (options.reasoningEffort === undefined || !/reasoning effort/i.test(msg)) throw err;
-    delete options.reasoningEffort;
-    text = await collect(options);
-  }
-  // 若该模型不支持 off 档（会抛 UNSUPPORTED_REASONING_EFFORT），去掉参数重试一次。
-  if (!text && options.reasoningEffort !== undefined) {
-    try {
-      delete options.reasoningEffort;
-      text = await collect(options);
-    } catch {
-      text = "";
-    }
-  }
-  return parseSentLlmLabels(text);
-}
-
-async function handleSentimentLlm(ctx, req, res) {
-  if (req.method !== "POST") {
-    res.writeHead(405, { Allow: "POST" });
     res.end();
-    return;
-  }
-  const gate = await entitlementGateState().catch(() => ({ on: false, activated: true }));
-  if (gate.on && !gate.activated) {
-    replyNotActivated(res, "sentiment-llm");
-    return;
-  }
-  const llm = optionalService(ctx, "llm");
-  const dm = optionalService(ctx, "agentDefaultModel");
-  if (!llm || typeof llm.stream !== "function") {
-    sendJson(res, 409, { ok: false, error: "LLM_UNAVAILABLE", hint: "当前 DSH 没有可用的模型服务" });
-    return;
-  }
-  const selection = (() => {
-    try {
-      return dm && typeof dm.currentSelection === "function" ? dm.currentSelection() : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
-  if (!selection || !selection.provider || !selection.model) {
-    sendJson(res, 409, { ok: false, error: "NO_MODEL", hint: "先在 DSH 设置里选一个默认模型" });
-    return;
-  }
-  readJsonBody(req, 256 * 1024, async ({ body, error }) => {
-    if (error) {
-      sendJson(res, 400, { ok: false, error });
-      return;
-    }
-    try {
-      const raw = Array.isArray(body && body.items) ? body.items : [];
-      const items = [];
-      for (const it of raw.slice(0, SENT_LLM_MAX_ITEMS)) {
-        const text = String((it && it.text) || "").trim();
-        if (!text || text.length < 2) continue;
-        items.push({ cid: String((it && it.cid) || ""), text: text.slice(0, 300) });
-      }
-      if (!items.length) {
-        sendJson(res, 200, { ok: true, items: [], cached: 0, llmCalls: 0, skipped: raw.length });
-        return;
-      }
-      const cache = loadSentLlmCache();
-      const results = [];
-      const todo = [];
-      for (const item of items) {
-        const key = sentLlmTextKey(item.text);
-        const hit = cache.get(key);
-        if (hit) results.push({ cid: item.cid, label: hit.label, conf: hit.conf, cached: true });
-        else todo.push({ item, key });
-      }
-      let llmCalls = 0;
-      for (let start = 0; start < todo.length; start += SENT_LLM_BATCH) {
-        const batch = todo.slice(start, start + SENT_LLM_BATCH);
-        try {
-          const labels = await classifyWithLlm(llm, selection, batch.map((x) => x.item));
-          llmCalls++;
-          for (let i = 0; i < batch.length; i++) {
-            const pred = labels[i];
-            if (!pred) continue;
-            cache.set(batch[i].key, { label: pred.label, conf: pred.conf });
-            results.push({ cid: batch[i].item.cid, label: pred.label, conf: pred.conf, cached: false });
-          }
-        } catch (err) {
-          appendDebug({ event: "sentiment-llm-batch-error", message: String((err && err.message) || err) });
-        }
-      }
-      saveSentLlmCache();
-      sendJson(res, 200, {
-        ok: true,
-        model: selection.model,
-        items: results,
-        cached: results.filter((r) => r.cached).length,
-        llmCalls,
-        skipped: raw.length - items.length,
-        minConf: SENT_LLM_MIN_CONF,
-      });
-    } catch (err) {
-      sendJson(res, 500, { ok: false, error: String((err && err.message) || err) });
-    }
   });
 }
 
@@ -1319,9 +1006,9 @@ export function createViewerHandler(scopeCtx, rootCtx) {
           return;
         }
 
-        if (pathname === `${PREFIX}/api/sentiment-llm`) {
-          // v0.9.49：本地规则/小模型都判中性时，用 DSH 默认模型兜底复核一小批评论。
-          handleSentimentLlm(serviceCtx, req, res);
+        if (pathname === `${PREFIX}/api/analyze`) {
+          // v0.9.53：情感 + 意图判定改由云端执行（词典/模型/prompt 不随安装包下发）。
+          handleAnalyze(req, res);
           return;
         }
 

@@ -58,6 +58,9 @@ async function call(method, pathSuffix, body) {
   const headers = { accept: 'application/json' };
   const cap = capability();
   if (cap) headers['x-novaflow-capability'] = cap;
+  // 开发/联调：直连 collect 服务时（没有 relay 帮忙注入账号令牌），用这个环境变量手动带令牌
+  const devToken = directBase() ? String(process.env.NOVAFLOW_DEV_TOKEN || '').trim() : '';
+  if (devToken) headers.authorization = 'Bearer ' + devToken;
   if (body) headers['content-type'] = 'application/json';
   let res;
   try {
@@ -134,4 +137,38 @@ export async function issueKey({ version = PLUGIN_VERSION, force = false } = {})
 export function flushKeyCache() { cachedMaterial = null; }
 export function peekKeyCache() { return cachedMaterial; }
 
-export const PLUGIN_VERSION = '0.9.52';
+/**
+ * v0.9.53：评论分析（情感 + 多标签意图）。
+ * 逻辑与词典/模型全部在服务端（collect.lanjiaotrade.com /v1/analyze），
+ * 客户端只把评论文本送上去、拿回标签；服务端要求订阅有效。
+ */
+export async function analyze({ texts, mode = 'sentiment+intent' } = {}) {
+  const list = Array.isArray(texts) ? texts : [];
+  if (!list.length) return { ok: true, mode, results: [] };
+  return call('POST', '/v1/analyze', { texts: list, mode });
+}
+
+/**
+ * v0.9.53：AI 解读（返回原始 fetch Response，SSE 流）。
+ * prompt、LLM key、模型与思考档全部在服务端；客户端只上传统计摘要。
+ */
+export async function explainFetch({ digest, signal } = {}) {
+  const headers = { accept: 'text/event-stream' };
+  const cap = capability();
+  if (cap) headers['x-novaflow-capability'] = cap;
+  const devToken = directBase() ? String(process.env.NOVAFLOW_DEV_TOKEN || '').trim() : '';
+  if (devToken) headers.authorization = 'Bearer ' + devToken;
+  headers['content-type'] = 'application/json';
+  try {
+    return await fetch(url('/v1/explain'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ digest }),
+      signal,
+    });
+  } catch (e) {
+    throw new EntitlementError('SERVICE_UNAVAILABLE', 'AI 解读服务不可用，请稍后重试');
+  }
+}
+
+export const PLUGIN_VERSION = '0.9.53';

@@ -800,190 +800,40 @@
     return out.sort((a, b) => b.weight - a.weight || b.count - a.count || a.word.localeCompare(b.word));
   }
 
-  /* ===================== 情感分析（v3.0） =====================
-   * 纯本地词典法：正向/负向词表（分级权重）+ 程度副词提升 + 否定词翻转 + 抖音表情标签。
-   * 不联网、不调模型，结果可解释；输出挂在评论上：c.sentiment = { score, label, hits }。
+
+  /* ===================== v0.9.53：情感 / 意图改为云端分析 =====================
+   * 词典、正则、模型、阈值与 prompt 全部在服务端（collect.lanjiaotrade.com /v1/analyze），
+   * 本机不再持有任何判定逻辑（安装包因此瘦身约 118MB）。
+   * 客户端只负责：把评论文本分批送上去 → 标回结果 → 渲染状态。
+   * 未开通订阅 / 离线：先按中性占位并给明确提示，看评论与导出不受影响。
    */
-  const SENT_POS_STRONG = new Set(('太棒 牛逼 绝了 神作 惊艳 完美 精彩 厉害 高能 真香 给力 宝藏 神器 顶 爱了 圈粉 封神 天花板 牛逼克拉斯 大佬 佩服 五体投地 神评 笑死'.split(/\s+/)));
-  const SENT_POS = new Set(('好 赞 棒 强 牛 喜欢 爱 支持 感谢 感动 治愈 暖心 温柔 靠谱 良心 专业 优秀 燃 爽 香 甜 不错 挺好 蛮好 中肯 客观 理性 真实 实在 清楚 明白 简洁 干净 顺畅 稳定 实用 有用 值得 推荐 安利 好用 期待 开心 快乐 高兴 兴奋 满意 舒服 舒适 好看 好听 好玩 可爱 漂亮 帅 美 有趣 搞笑 好笑 感人 贴心 用心 细致 耐心 认真 高手 内行 尊敬 涨知识 学到 受教 好评 有质感 有诚意 有干货 硬核'.split(/\s+/)));
-  const SENT_NEG_STRONG = new Set(('垃圾 恶心 恶心人 烂 骗子 欺骗 智障 弱智 傻逼 恶臭 反感 讨厌 恨 愤怒 崩溃 心碎 失望 无语 离谱 逆天 破防 麻了 服了 难受 痛苦 吐了 呕吐 鄙视 白眼 嘲讽 喷 骂 举报 差评 水军 掉粉 取关 别买 不值 退钱 翻车 侮辱 冒犯 恶俗 低俗 割韭菜 智商税 阴阳怪气 洗白 洗地 拉胯 恰饭 硬广'.split(/\s+/)));
-  const SENT_NEG = new Set(('不行 不好 难看 难听 难受 麻烦 复杂 混乱 卡 卡顿 慢 贵 亏 可惜 遗憾 一般 普通 平庸 老套 套路 水 敷衍 凑数 多余 尬 冷场 叹气 皱眉 害怕 恐怖 吓人 阴影 不适 争议 质疑 反驳 抬杠 双标 强行 尴尬 无聊 拖沓 生气 发怒 差 弱 划水 广告 坑 糊弄 玄学 劝退'.split(/\s+/)));
-  const SENT_NEGATORS = new Set(('不 没 无 未 别 莫 非 勿 没有 不是 不算 不会 不能 不要 不用 不必 不够 不太 不怎么 没那么'.split(/\s+/)));
-  const SENT_DEGREE = new Set(('太 很 非常 特别 超 巨 极 真 更 最 十分 相当 格外 尤其 愈发 更加 简直 实在 真是 巨他妈 有点 有点儿 稍微 稍 挺'.split(/\s+/)));
-  const EMOJI_POS = new Set(('大笑 比心 鼓掌 加油 玫瑰 爱心 飞吻 抱拳 胜利 强 点赞 赞 牛 666 撒花 庆祝 耶 亲亲 害羞 愉快 干杯 握手'.split(/\s+/)));
-  // v0.9.51：憨笑/微笑/笑哭/呲牙/偷笑/得意/调皮/色/吃瓜 这类「反应型」表情很少表示真正夸赞，
-  // 单独出现时只给很小的正分，纯表情文本不因此判正向（修掉 gold=中性 被 [色][憨笑] 判成正向的误判）。
-  const EMOJI_MILD_POS = new Set(('憨笑 微笑 笑哭 呲牙 偷笑 得意 调皮 色 吃瓜 酷'.split(/\s+/)));
-  const EMOJI_NEG = new Set(('大哭 崩溃 发怒 生气 鄙视 白眼 呕吐 敲打 菜刀 心碎 失望 无语 裂开 皱眉 骷髅 害怕 惊恐 再见 弱 尬 抠鼻 黑线 抓狂 咒骂 闭嘴 怒'.split(/\s+/)));
-  // v0.9.47：抖音里 [流泪]/[叹气]/[委屈]/[可怜]/[汗]/[擦汗]/[困] 常被当语气符号用（感动、无奈、自嘲），
-  // 单独出现不算负面；只在有明确负向词句时才按很小的权重参与。
-  const EMOJI_SOFT_NEG = new Set(('流泪 叹气 委屈 可怜 汗 擦汗 困 哼'.split(/\s+/)));
-  // v0.9.47：明确的强负面表情，单个种类重复出现也应按负面处理（如 [发怒][发怒]）。
-  const EMOJI_STRONG_NEG = new Set(('大哭 崩溃 发怒 生气 呕吐 敲打 菜刀 心碎 失望 无语 裂开 骷髅 害怕 惊恐 咒骂 抓狂 怒'.split(/\s+/)));
-
-  const EMOJI_TAG_RE = /\[[^\[\]]{1,12}\]/g;
-  // v0.9.13：求推荐 / 求链接这类「提问型」文案不算夸奖；「推荐」当需求词时不计入情感
-  const SENT_REQUEST_RE = /求推荐|求链接|求教程|求分享|求攻略|求方案|求个推荐|有没有推荐|推荐一下|怎么买|哪里买|求问/;
-  // v0.9.13：单字弱负向词只有落在「程度词/否定词旁边」或「X了 / X啊」里才算负向，
-  // 否则「谢贵师传喜讯」「差评里拆出的『差』」这类分词碎片会造出假负评。
-  const SENT_WEAK_SINGLE = new Set('贵 差 弱 水 坑 卡 慢 尬 亏 怪 丑 假 烦 吵 臭 脏 苦'.split(/\s+/));
-  const SENT_SINGLE_SUFFIX = new Set(['了', '啊', '死', '得', '多', '些']);
-  // v0.9.13：分词器会把「差评/不好/太贵」拆散，先按整词短语扫一遍再删掉，避免碎片重复计分
-  const SENT_PHRASE_NEG = [['不好用', -1.5], ['不好看', -1.5], ['不好听', -1.5], ['不推荐', -1.5], ['有点贵', -1.2], ['一般般', -1], ['很一般', -1], ['差评', -1.5], ['差劲', -1.5], ['不好', -1], ['不行', -1], ['不值', -1.5], ['好贵', -1.2], ['太贵', -1.2], ['贵了', -1.2], ['踩雷', -2], ['退货', -1.5], ['退款', -1.5], ['骗人', -2], ['别买', -2], ['踩坑', -1.5], ['难用', -1.5]];
-
-  // v0.9.47：正向短语白名单，修掉「没人可以质疑X的眼光」「前辈说得对」「太强了」这类被单字词典判成负面。
-  const SENT_PHRASE_POS = [['没人可以质疑', 2], ['说得对', 1.2], ['的眼光', 1], ['眼光', 0.8], ['太强了', 1.5], ['太棒了', 1.5], ['太绝了', 2], ['爱了', 1.5], ['强啊', 1], ['好强', 1],
-    // v0.9.51：补一批真实评论里的短夸句式（金标里被漏判的）
-    ['我关注你了', 1.5], ['带劲', 1.2], ['太狠了', 1.5], ['别有一番风味', 1.5], ['祝福你', 1], ['好听', 1]];
-
-  function sentimentOf(text) {
-    const raw = String(text || '');
-    const tags = raw.match(EMOJI_TAG_RE) || [];
-    // v0.9.51：同类表情按出现次数计分（同类最多算 2 次；温和型按 3 次上限），
-    // 「[色]」单个算中性、「[色][色][色]」这类连发仍算正向 —— 修正 gold 里两种标注并存的情况。
-    const emoCounts = new Map();
-    for (const t of tags) {
-      const nm = t.slice(1, -1);
-      emoCounts.set(nm, (emoCounts.get(nm) || 0) + 1);
-    }
-    let emoScore = 0;
-    let emoHits = 0;
-    let emoStrongNeg = false;
-    for (const [name, cnt] of emoCounts) {
-      if (EMOJI_POS.has(name)) { emoScore += 0.6 * Math.min(2, cnt); emoHits++; }
-      else if (EMOJI_MILD_POS.has(name)) { emoScore += 0.2 * Math.min(4, cnt); emoHits++; }
-      else if (EMOJI_NEG.has(name)) { emoScore -= 0.6 * Math.min(2, cnt); emoHits++; }
-      else if (EMOJI_SOFT_NEG.has(name)) { emoScore -= 0.15 * Math.min(3, cnt); emoHits++; }
-      if (EMOJI_STRONG_NEG.has(name)) emoStrongNeg = true;
-    }
-    emoScore = Math.max(-1.8, Math.min(1.8, emoScore));
-    const s = raw.replace(EMOJI_TAG_RE, ' ').replace(/@[^\s@]+|#[^\s#]+/g, ' ');
-    if (!s.trim()) {
-      const norm0 = Math.tanh(emoScore / 2);
-      // v0.9.47：纯表情文本——单个明确的正面表情仍算正向；负面要「明确强负面表情」或两种以上负面表情，
-      // 单个 [流泪]/[叹气] 先归中性（抖音里常被当语气符号用）。
-      const label = emoScore >= 0.6 ? 'pos' : ((emoStrongNeg && emoScore <= -0.6) || emoScore <= -1 ? 'neg' : 'neu');
-      return { score: Math.round(norm0 * 100) / 100, label, hits: emoHits };
-    }
-    const request = SENT_REQUEST_RE.test(s);
-    // v0.9.47：有文字时表情权重砍半，避免一个 [流泪] 就把整句夸赞压成负向。
-    let score = emoScore * 0.5;
-    let hits = emoHits;
-    // v0.9.13：按标点/空白切子句，否定词只在子句内生效（「不要制冰 求推荐」不会把「推荐」翻成负向）
-    const clauses = s.split(/[。！？!?，,；;、\n\r]+|\s+/).filter((x) => x && x.trim());
-    let wordHits = 0;
-    for (const clause of clauses) {
-      let clauseText = clause;
-      // v0.9.47：正向短语优先（比单词更可靠），命中后从句子里删掉避免重复计分
-      for (const [phrase, weight] of SENT_PHRASE_POS) {
-        if (clauseText.indexOf(phrase) >= 0) {
-          score += weight;
-          hits++;
-          wordHits++;
-          clauseText = clauseText.split(phrase).join(' ');
-        }
-      }
-      // v0.9.13：整词短语优先（并把命中的词从待分词文本里删掉，避免「差评」又按「差」「评」重复算分）
-      for (const [phrase, weight] of SENT_PHRASE_NEG) {
-        if (clauseText.indexOf(phrase) >= 0) {
-          score += weight;
-          hits++;
-          wordHits++;
-          clauseText = clauseText.split(phrase).join(' ');
-        }
-      }
-      const toks = [];
-      if (segmenter) for (const seg of segmenter.segment(clauseText)) if (seg.isWordLike) toks.push(seg.segment);
-      else for (const p of clauseText.match(/[A-Za-z][A-Za-z0-9']*|[\u4e00-\u9fff]{1,4}/g) || []) toks.push(p);
-      for (let i = 0; i < toks.length; i++) {
-        const t = toks[i];
-        if (request && (t === '推荐' || t === '安利')) continue;
-        if (t.length === 1 && SENT_WEAK_SINGLE.has(t)) {
-          const prev = toks[i - 1] || '';
-          const prev2 = toks[i - 2] || '';
-          const next = toks[i + 1] || '';
-          const ctx = SENT_DEGREE.has(prev) || SENT_NEGATORS.has(prev) || SENT_DEGREE.has(prev2) || (next ? SENT_SINGLE_SUFFIX.has(next.slice(0, 1)) : false);
-          if (!ctx) continue;
-        }
-        let base = 0;
-        if (SENT_POS_STRONG.has(t)) base = 2;
-        else if (SENT_POS.has(t)) base = 1;
-        else if (SENT_NEG_STRONG.has(t)) base = -2;
-        else if (SENT_NEG.has(t)) base = -1;
-        if (!base) continue;
-        let mult = 1;
-        for (let j = Math.max(0, i - 2); j < i; j++) {
-          if (SENT_DEGREE.has(toks[j])) mult *= 1.5;
-          if (SENT_NEGATORS.has(toks[j])) mult *= -0.8;
-        }
-        score += base * mult;
-        hits++;
-        wordHits++;
-      }
-    }
-    const norm = Math.tanh(score / 2);
-    // v0.9.47：短问句（「还是吗」「是吗」「真的吗」）没命中任何情感词时归中性，不要被表情带成负向。
-    if (wordHits === 0 && /\S{0,10}[吗呢吧]$/.test(s.trim())) {
-      return { score: Math.round(norm * 100) / 100, label: 'neu', hits };
-    }
-    return {
-      score: Math.round(norm * 100) / 100,
-      label: norm > 0.15 ? 'pos' : (norm < -0.15 ? 'neg' : 'neu'),
-      hits,
-    };
-  }
-
-  function annotateSentiment(list) {
-    for (const c of list) {
-      if (c.sentiment) continue;
-      if (c.textPlaceholder && c.rating) {
-        // v0.5.56：正文是平台默认文案时，用评价类型给一个保守标签（好评→正向 / 差评→负向 / 其余中性）
-        const r = String(c.rating);
-        const label = /好评|推荐|5星|五星/.test(r) ? 'pos' : (/差评|1星|2星/.test(r) ? 'neg' : 'neu');
-        c.sentiment = { score: label === 'pos' ? 0.6 : (label === 'neg' ? -0.6 : 0), label, hits: 0, fromRating: true };
-        c.intent = 'none';
-        continue;
-      }
-      c.sentiment = sentimentOf(c.text);
-      c.intent = intentOf(c.text);
-    }
-  }
-
   const SENT_LABEL = { pos: '正向', neu: '中性', neg: '负向' };
+  const INTENT_LABEL = {
+    buy: '购买意向', ask: '售前咨询', warn: '负向口碑',
+    aftersale: '售后问题', share: '体验分享', noise: '广告/无效', none: '',
+  };
+  const INTENT_ORDER = ['buy', 'ask', 'warn', 'aftersale', 'share', 'noise'];
 
-  /* ===================== v0.9.52：评论意图识别 =====================
-   * 规则法给每条评论打一个「意图」标签，用于表格展示 / 筛选 / 导出，以及给获客挑「购买意向」线索。
-   * 标签：buy 购买意向 / ask 售前咨询 / aftersale 售后问题 / share 体验分享 / noise 广告或无效 / none 常规情绪。
-   * 意图独立于情感：只影响展示与筛选，不改 sentiment。 */
-  const INTENT_LABEL = { buy: '购买意向', ask: '售前咨询', aftersale: '售后问题', share: '体验分享', noise: '广告/无效', none: '' };
-  const INTENT_ORDER = ['aftersale', 'buy', 'ask', 'share', 'noise'];
-  const INTENT_BUY_RE = /(多少钱|几多钱|什么价|价格|价位|报价|询价|问价|优惠|活动价|折扣|便宜点|包邮|现货|有货|库存|发货|下单|拍了|已拍|入手|想买|要买|想要|想入手|求购|求同款|求链接|求个链接|来个链接|要链接|链接呢|链接有吗|有链接吗|给个链接|有没有链接|哪里买|哪买|在哪买|哪里卖|怎么买|怎么卖|怎么下单|能不能买|能买吗|可以买|批发|拿货|进货|代理|加盟|合作|团购|上车|冲了|蹲|蹲一个|蹲链接|尺码|码数|型号|规格|\d+(?:\.\d+)?\s*元|块钱)/;
-  const INTENT_ASK_RE = /(能用吗|可以用吗|能不能用|适合|支持|兼容|怎么用|如何使用|好用吗|安全吗|耐用吗|多久|多长时间|几个|多少条|有没有|是什么|有什么区别|参数|材质|功率|尺寸|安装|使用方法|注意事项|防水吗|保修吗|好清洗吗|好洗吗|能洗吗|洗吗|干净吗|好闻吗)/;
-  const INTENT_AFTERSALE_RE = /(退货|退款|换货|售后|客服|维修|保修|坏了|坏的|坏掉|漏了|漏电|裂了|破了|碎了|故障|没收到|没发货|物流|快递|发错|少发|缺件|补发|投诉|赔付|退钱)/;
-  const INTENT_SHARE_RE = /(我用过|我买过|买了|买回来|亲测|实测|用了|收到货|到货了|同感|我也是|分享|推荐给|一直用|回购|亲身体验|真的可以)/;
-  const INTENT_NOISE_RE = /(加微信|私信我|主页有|看我主页|点我头像|互关|回关|互赞|进主页|看简介|加我|群里|链接在主页|刷单|兼职|招人|招聘|代购)/;
+  const ANALYZE_BATCH = 200;
+  const cloudAnalyze = { loading: false, done: 0, total: 0, error: '', version: '', generation: 0 };
+  let cloudAnalyzeTimer = null;
 
-  function intentOf(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return 'none';
-    const plain = raw.replace(EMOJI_TAG_RE, '').replace(/[^\p{L}\p{N}]/gu, '');
-    if (!plain) return 'noise'; // 纯表情 / 只有符号
-    if (INTENT_NOISE_RE.test(raw)) return 'noise';
-    for (const k of INTENT_ORDER) {
-      if (k === 'noise') continue;
-      const re = k === 'aftersale' ? INTENT_AFTERSALE_RE : (k === 'buy' ? INTENT_BUY_RE : (k === 'ask' ? INTENT_ASK_RE : INTENT_SHARE_RE));
-      if (re.test(raw)) return k;
-    }
-    return 'none';
+  function cloudStatusText() {
+    if (cloudAnalyze.error) return '云端分析不可用：' + cloudAnalyze.error;
+    if (cloudAnalyze.loading && cloudAnalyze.total) return '云端分析中 ' + cloudAnalyze.done + '/' + cloudAnalyze.total;
+    if (cloudAnalyze.loading) return '云端分析中…';
+    if (cloudAnalyze.done) return '云端分析完成（' + cloudAnalyze.done + ' 条 · v' + (cloudAnalyze.version || '-') + '）';
+    return '';
   }
 
-  function intentStats(list) {
-    const s = { buy: 0, ask: 0, aftersale: 0, share: 0, noise: 0, none: 0 };
-    for (const c of list) {
-      const k = c.intent || 'none';
-      s[k] = (s[k] || 0) + 1;
-    }
-    return s;
+  function modelStatusText() { return cloudStatusText(); }
+
+  function renderModelStatus() {
+    const el = $('#modelSub');
+    if (!el) return;
+    const text = cloudStatusText();
+    el.textContent = text;
+    el.hidden = !text;
   }
 
   function sentimentStats(list) {
@@ -995,275 +845,93 @@
     return s;
   }
 
-  /* ===================== v0.9.48 / v0.9.51：情感模型二次校正 =====================
-   * 规则（词典+表情）先给全部评论打分；随后用 weibo-BERT 中文情感模型（int8 ONNX，
-   * 在 Web Worker 里跑）只校正其中的负面漏判：模型判 negative 且置信度 ≥ 0.55 时采纳。
-   * v0.9.51 实测（95 条金标）：纯规则 72.6/38.7 → 规则整修后 81.05/51.61 → 只用模型补负面 82.11/74.19。
-   * 模型判 positive 不再改判——横评显示正向改判会带来更多「中性被强行判正向」的误判。
-   * 模型与运行时是本地文件（viewer/sentiment + viewer/vendor/ort），不联网、不额外依赖。 */
-  const SENT_MODEL_THRESHOLD = 0.55;
-  const SENT_MODEL_MIN_COMMENTS = 15;
-  let sentModelWorker = null;
-  let sentModelReqId = 0;
-  let sentModelPending = null;
-  let sentModelTimer = null;
-  let sentModelDisabled = false;
-  const sentModelState = { loaded: false, loading: false, done: 0, total: 0, error: '', ms: 0 };
-  const sentModelCache = new Map();
-
-  function modelStatusText() {
-    let base = '';
-    if (sentModelDisabled) base = '情感模型未启用（规则结果）';
-    else if (sentModelState.error) base = '情感模型不可用（规则结果仍可用）';
-    else if (sentModelState.loading && sentModelState.total) base = '情感模型校正中 ' + sentModelState.done + '/' + sentModelState.total;
-    else if (sentModelState.loading) base = '情感模型加载中…';
-    else if (sentModelState.loaded) base = '情感模型已校正（' + sentModelState.done + ' 条 · ' + Math.round(sentModelState.ms / 1000) + 's）';
-    const extra = typeof llmStatusText === 'function' ? llmStatusText() : '';
-    return extra ? (base ? base + ' · ' + extra : extra) : base;
-  }
-
-  function renderModelStatus() {
-    const el = $('#modelSub');
-    if (!el) return;
-    const text = modelStatusText();
-    el.textContent = text;
-    el.hidden = !text;
-  }
-
-  function ensureSentModelWorker() {
-    if (sentModelWorker || sentModelDisabled) return sentModelWorker;
-    try {
-      sentModelWorker = new Worker(new URL('sentiment/worker.js', location.href));
-    } catch (err) {
-      sentModelDisabled = true;
-      sentModelState.error = String((err && err.message) || err);
-      renderModelStatus();
-      return null;
+  function intentStats(list) {
+    const s = { buy: 0, ask: 0, warn: 0, aftersale: 0, share: 0, noise: 0, none: 0 };
+    for (const c of list) {
+      const k = c.intent || 'none';
+      s[k] = (s[k] || 0) + 1;
     }
-    sentModelWorker.onerror = (ev) => {
-      sentModelDisabled = true;
-      sentModelState.error = (ev && ev.message) || 'worker error';
-      sentModelState.loading = false;
-      renderModelStatus();
-    };
-    sentModelWorker.onmessage = (ev) => {
-      const msg = ev.data || {};
-      if (msg.type === 'init-progress') {
-        sentModelState.loading = true;
-        renderModelStatus();
-        return;
-      }
-      if (msg.type === 'ready') {
-        sentModelState.loaded = true;
-        renderModelStatus();
-        return;
-      }
-      if (msg.type === 'progress') {
-        sentModelState.loading = true;
-        sentModelState.done = msg.done || 0;
-        sentModelState.total = msg.total || 0;
-        renderModelStatus();
-        return;
-      }
-      if (msg.type === 'error') {
-        sentModelState.error = msg.error || 'model error';
-        sentModelState.loading = false;
-        sentModelDisabled = true;
-        renderModelStatus();
-        return;
-      }
-      if (msg.type === 'result') {
-        sentModelState.loading = false;
-        sentModelState.done = (msg.labels || []).length;
-        sentModelState.ms = msg.ms || 0;
-        applySentModelLabels(msg.reqId, msg.labels || []);
-        renderModelStatus();
-      }
-    };
-    return sentModelWorker;
+    return s;
   }
 
-  function applySentModelLabels(reqId, labels) {
-    const pending = sentModelPending;
-    if (!pending || pending.reqId !== reqId) return;
-    sentModelPending = null;
+  function annotateSentiment(list) {
+    for (const c of list) {
+      if (!c.sentiment) {
+        c.sentiment = c.textPlaceholder && c.rating
+          ? { label: c.rating >= 4 ? 'pos' : (c.rating <= 2 ? 'neg' : 'neu'), score: 0, hits: 0, source: 'rating' }
+          : (String(c.text || '').trim()
+            ? { label: 'neu', score: 0, hits: 0, source: 'cloud', pending: true }
+            : { label: 'neu', score: 0, hits: 0, source: 'empty' });
+      }
+      if (!c.intents || !Array.isArray(c.intents)) c.intents = [];
+      if (!c.intent) c.intent = 'none';
+    }
+  }
+
+  function applyCloudAnalysis(items, results) {
     let changed = 0;
-    for (let i = 0; i < pending.items.length; i++) {
-      const item = pending.items[i];
-      const c = item.comment;
-      const pred = labels[i];
-      if (!pred) continue;
-      sentModelCache.set(item.cid, pred);
-      const base = item.baseLabel;
-      let finalLabel = base;
-      // v0.9.51：只采纳模型的「负面」高置信结论；正向不覆盖规则（避免中性被强行判正）。
-      if (base !== 'neg' && pred.label === 'neg' && pred.score >= SENT_MODEL_THRESHOLD) {
-        finalLabel = 'neg';
+    for (let i = 0; i < items.length && i < results.length; i++) {
+      const c = items[i];
+      const r = results[i] || {};
+      const st = r.sentiment || {};
+      if (st.label) {
+        c.sentiment = { label: st.label, score: Number(st.score) || 0, hits: Number(st.hits) || 0, source: 'cloud' };
       }
-      if (finalLabel !== base) {
-        c.sentiment = {
-          score: finalLabel === 'pos' ? Math.max(0.35, pred.score) : -Math.max(0.35, pred.score),
-          label: finalLabel,
-          hits: (c.sentiment && c.sentiment.hits) || 0,
-          model: 'weibo-bert-int8',
-          modelScore: pred.score,
-        };
-        changed++;
-      } else if (base === 'neu' && pred.label === 'neu' && pred.score >= 0.6) {
-        // 模型也判中性，把分数记下来（digest 里可用，不改 label）
-        if (c.sentiment) c.sentiment.modelNeutral = pred.score;
-      }
-    }
-    if (changed) {
-      toast('情感模型补充识别了 ' + changed + ' 条');
-      refreshAll();
-    }
-    // v0.9.49：本地模型判中性的评论，再交给 LLM 兜底复核一次（最多 40 条/份导出）。
-    scheduleLlmRefine();
-  }
-
-  /* v0.9.49：LLM 兜底情感分类。
-   * 规则和本地小模型都判为「中性」的评论里，仍有一批是反讽/短句导致的漏判；
-   * 这些交给 DSH 默认模型（AI 解读同一套 llm 服务）批量复核，置信 ≥ 0.6 才改判。
-   * 控制成本：每份导出最多 40 条、每 10 条一批、按文本 sha1 落盘缓存（重复导出不再花钱）。 */
-  const SENT_LLM_MAX_ITEMS = 40;
-  const SENT_LLM_MIN_CONF = 0.6;
-  let sentLlmRunning = false;
-  let sentLlmTimer = null;
-  let sentLlmDisabled = false;
-  let sentLlmPaywall = false;
-  const sentLlmState = { done: 0, changed: 0, error: '' };
-
-  function llmStatusText() {
-    if (sentLlmDisabled) return sentLlmPaywall ? 'LLM 复核需开通订阅' : '';
-    if (sentLlmRunning) return 'LLM 复核中…';
-    if (sentLlmState.error) return 'LLM 复核不可用（已用本地结果）';
-    if (sentLlmState.done) return 'LLM 复核 ' + sentLlmState.done + ' 条 · 改判 ' + sentLlmState.changed + ' 条';
-    return '';
-  }
-
-  function applySentLlmLabels(byCid, items) {
-    let changed = 0;
-    for (const it of items || []) {
-      const rec = byCid.get(String((it && it.cid) || ''));
-      const c = rec && rec.comment;
-      if (!c) continue;
-      const label = it.label === 'neg' ? 'neg' : it.label === 'pos' ? 'pos' : 'neu';
-      const conf = Number(it.conf) || 0;
-      if (label === 'neu' || conf < SENT_LLM_MIN_CONF) continue;
-      c.sentiment = {
-        score: label === 'pos' ? Math.max(0.3, conf) : -Math.max(0.3, conf),
-        label,
-        hits: (c.sentiment && c.sentiment.hits) || 0,
-        model: 'llm',
-        modelScore: conf,
-        llmChecked: true,
-      };
+      const labels = Array.isArray(r.intents) ? r.intents.slice() : (r.intent && r.intent !== 'none' ? [r.intent] : []);
+      c.intents = labels;
+      c.intent = r.intent && r.intent !== 'none' ? r.intent : (labels[0] || 'none');
       changed++;
     }
-    sentLlmState.changed += changed;
-    if (changed) {
-      toast('LLM 复核补充识别了 ' + changed + ' 条');
-      refreshAll();
-    }
+    return changed;
   }
 
-  function scheduleLlmRefine() {
-    if (sentLlmDisabled || sentLlmRunning) return;
-    if (sentModelPending || sentModelState.loading) return; // 先等本地模型跑完，避免重复改判
-    if (sentLlmTimer) clearTimeout(sentLlmTimer);
-    sentLlmTimer = setTimeout(() => {
-      sentLlmTimer = null;
-      const list = state.comments || [];
-      if (!list.length) return;
-      const todo = [];
-      for (const c of list) {
-        if (c.sentLlmChecked) continue;
-        const text = (c.textClean || c.text || '').trim();
-        if (!text || text.length < 2 || c.textPlaceholder || (c.sentiment && c.sentiment.fromRating)) {
-          c.sentLlmChecked = true;
-          continue;
-        }
-        const cur = (c.sentiment && c.sentiment.label) || 'neu';
-        if (cur !== 'neu') { c.sentLlmChecked = true; continue; }
-        todo.push(c);
-        if (todo.length >= SENT_LLM_MAX_ITEMS) break;
-      }
-      if (!todo.length) return;
-      const byCid = new Map();
-      const items = [];
-      for (const c of todo) {
-        c.sentLlmChecked = true;
-        const cid = String(c.cid || '');
-        byCid.set(cid, { comment: c });
-        items.push({ cid, text: (c.textClean || c.text || '').slice(0, 300) });
-      }
-      sentLlmRunning = true;
-      renderModelStatus();
-      fetch('api/sentiment-llm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
-      })
-        .then((r) => r.json().catch(() => ({})))
-        .then((data) => {
-          sentLlmRunning = false;
-          if (!data || data.ok !== true) {
-            if (data && data.code === 'NOT_ACTIVATED') {
-              // v0.9.50：付费功能闸门（后端 402），不当作故障，只是没开通。
-              sentLlmPaywall = true;
-              sentLlmDisabled = true;
-              renderModelStatus();
-              return;
-            }
-            sentLlmState.error = String((data && (data.hint || data.error)) || 'LLM 复核失败');
-            sentLlmDisabled = /LLM_UNAVAILABLE|NO_MODEL/.test(sentLlmState.error);
-            renderModelStatus();
-            return;
-          }
-          sentLlmState.error = '';
-          sentLlmState.done += (data.items || []).length;
-          applySentLlmLabels(byCid, data.items || []);
-          renderModelStatus();
-        })
-        .catch((err) => {
-          sentLlmRunning = false;
-          sentLlmState.error = String((err && err.message) || err);
-          renderModelStatus();
+  async function runCloudAnalyze() {
+    cloudAnalyzeTimer = null;
+    const pending = state.comments.filter((c) => c.sentiment && c.sentiment.pending && String(c.text || '').trim());
+    if (!pending.length) { renderModelStatus(); return; }
+    const gen = ++cloudAnalyze.generation;
+    cloudAnalyze.loading = true;
+    cloudAnalyze.done = 0;
+    cloudAnalyze.total = pending.length;
+    cloudAnalyze.error = '';
+    renderModelStatus();
+    try {
+      for (let i = 0; i < pending.length; i += ANALYZE_BATCH) {
+        if (gen !== cloudAnalyze.generation) return;
+        const chunk = pending.slice(i, i + ANALYZE_BATCH);
+        const res = await fetch('api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ texts: chunk.map((c) => String(c.text || '').slice(0, 300)), mode: 'sentiment+intent' }),
         });
-    }, 900);
+        let data = {};
+        try { data = await res.json(); } catch (e) { data = {}; }
+        if (!res.ok || !data || data.ok === false) {
+          const err = new Error((data && (data.message || data.code)) || ('HTTP ' + res.status));
+          err.code = (data && data.code) || '';
+          throw err;
+        }
+        if (data.version) cloudAnalyze.version = data.version;
+        const results = Array.isArray(data.results) ? data.results : [];
+        if (results.length !== chunk.length) throw new Error('云端返回条数不一致');
+        cloudAnalyze.done += applyCloudAnalysis(chunk, results);
+        renderModelStatus();
+      }
+      cloudAnalyze.loading = false;
+    } catch (err) {
+      cloudAnalyze.loading = false;
+      const code = err && err.code ? err.code : '';
+      cloudAnalyze.error = (code === 'NOT_ACTIVATED' || code === 'EXPIRED') ? '订阅未开通或已到期'
+        : code === 'NOT_CONFIGURED' ? '独立模式不启用云端分析'
+          : String((err && err.message) || err).slice(0, 80);
+    }
+    renderModelStatus();
+    refreshAll();
   }
 
-  function scheduleModelRefine() {
-    if (sentModelDisabled) return;
-    if (sentModelTimer) clearTimeout(sentModelTimer);
-    sentModelTimer = setTimeout(() => {
-      sentModelTimer = null;
-      const list = state.comments;
-      if (!list || !list.length) { renderModelStatus(); return; }
-      if (list.length < SENT_MODEL_MIN_COMMENTS) { renderModelStatus(); return; }
-      const todo = [];
-      for (const c of list) {
-        if (c.sentModelChecked) continue;
-        const text = (c.textClean || c.text || '').trim();
-        if (!text || c.textPlaceholder || c.sentiment && c.sentiment.fromRating) { c.sentModelChecked = true; continue; }
-        todo.push(c);
-      }
-      if (!todo.length) { renderModelStatus(); return; }
-      const worker = ensureSentModelWorker();
-      if (!worker) return;
-      sentModelState.loading = true;
-      sentModelState.total = todo.length;
-      sentModelState.done = 0;
-      renderModelStatus();
-      const reqId = ++sentModelReqId;
-      const items = todo.map((c) => {
-        c.sentModelChecked = true;
-        return { comment: c, cid: c.cid, baseLabel: (c.sentiment && c.sentiment.label) || 'neu', text: (c.textClean || c.text || '').slice(0, 300) };
-      });
-      sentModelPending = { reqId, items };
-      worker.postMessage({ type: 'run', reqId, texts: items.map((x) => x.text) });
-    }, 350);
+  function scheduleCloudAnalyze() {
+    if (cloudAnalyzeTimer) clearTimeout(cloudAnalyzeTimer);
+    cloudAnalyzeTimer = setTimeout(() => { runCloudAnalyze().catch(() => {}); }, 300);
   }
 
   /* ===================== 主题聚类（v3.0） =====================
@@ -2770,7 +2438,7 @@ function bindAiEvents() {
     state.page = 1;
     renderTable();
     renderModelStatus();
-    scheduleModelRefine();
+    scheduleCloudAnalyze();
   }
 
   /* ===================== 事件绑定 ===================== */
@@ -3685,7 +3353,6 @@ let favRegion = '';
     EXPORT_COLS,
     exportRows,
     topicLabelOf,
-    sentimentOf,
     annotateSentiment,
     sentimentStats,
     buildTopics,
@@ -3694,7 +3361,6 @@ let favRegion = '';
     baseFiltered,
     SENT_LABEL,
     INTENT_LABEL,
-    intentOf,
     intentStats,
     exportFilteredCsv,
     exportFilteredJson,

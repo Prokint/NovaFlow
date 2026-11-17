@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.2.24
+
+- **dsh-douyin-comments 0.9.53：情感 / 意图 / AI 解读逻辑上云，客户端只渲染**
+  - 新增服务端 `POST /v1/analyze`（情感 + 多标签意图）与 `POST /v1/explain`（AI 解读，prompt 与 LLM key 只在服务端）
+  - 插件侧删除本地 103MB 情感模型（weibo-BERT int8）与 ONNX Runtime WASM（约 -118MB），改为调用云端并渲染结果
+  - 意图升级为多标签（新增「负向口碑 warn」），主标签优先级 buy > ask > warn > aftersale > share > noise
+  - 打包脚本不再下载情感模型（`prepare:packages` 去掉 fetch-sentiment-model）
+
 ## 0.2.23
 
 - dsh-douyin-comments 升级到 0.9.52：评论意图识别（购买意向 / 售前咨询 / 售后问题 / 体验分享 / 广告无效），表格新增「意图」列与筛选，洞察页新增意图分布卡，AI 解读 digest 增加购买意向线索，CSV 导出新增 intent 列。

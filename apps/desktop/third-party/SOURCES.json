@@ -4,14 +4,14 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.52",
+      "version": "0.9.53",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "ff2a785cbfe168a979fcdc49f3774875ce4aca17",
+      "commit": "98b26dd8af390a56b6b37c7d40b8755c1cb6500d",
       "optional": true,
-      "tag": "v0.9.52",
-      "localChanges": "账号资质识别、获客话术库与受控私信、本地情感小模型、LLM 复核、AI 解读付费闸门（0.9.51 规则校准，0.9.52 评论意图识别：购买意向/售前咨询/售后/体验分享）"
+      "tag": "v0.9.53",
+      "localChanges": "账号资质识别、获客话术库与受控私信、AI 解读付费闸门；0.9.52 评论意图识别（购买意向/售前咨询/售后/体验分享）；0.9.53 情感/意图/AI 解读逻辑上云，客户端只渲染（安装包 -118MB，移除本地模型）"
     },
     {
       "name": "dsh-comment-viewer",
