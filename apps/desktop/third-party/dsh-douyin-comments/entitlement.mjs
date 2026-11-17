@@ -138,7 +138,7 @@ export function flushKeyCache() { cachedMaterial = null; }
 export function peekKeyCache() { return cachedMaterial; }
 
 /**
- * v0.9.53：评论分析（情感 + 多标签意图）。
+ * v0.9.54：评论分析（情感 + 多标签意图）。
  * 逻辑与词典/模型全部在服务端（collect.lanjiaotrade.com /v1/analyze），
  * 客户端只把评论文本送上去、拿回标签；服务端要求订阅有效。
  */
@@ -149,7 +149,7 @@ export async function analyze({ texts, mode = 'sentiment+intent' } = {}) {
 }
 
 /**
- * v0.9.53：AI 解读（返回原始 fetch Response，SSE 流）。
+ * v0.9.54：AI 解读（返回原始 fetch Response，SSE 流）。
  * prompt、LLM key、模型与思考档全部在服务端；客户端只上传统计摘要。
  */
 export async function explainFetch({ digest, signal } = {}) {
@@ -171,4 +171,4 @@ export async function explainFetch({ digest, signal } = {}) {
   }
 }
 
-export const PLUGIN_VERSION = '0.9.53';
+export const PLUGIN_VERSION = '0.9.54';
