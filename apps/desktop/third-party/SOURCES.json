@@ -4,14 +4,14 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.55",
+      "version": "0.9.56",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "cb02db487ac68c596c11b934ec89b382cd0d3d2b",
+      "commit": "f2e46802a0c5600d21ee8989a7ec6ebeada94c84",
       "optional": true,
-      "tag": "v0.9.55",
-      "localChanges": "0.9.55：云端方面级情感（ABSA-lite）——8 类方面（客服/物流/价格/质量/内容/效果/外观/安全）+ 7 类隐式线索，按子句打分后汇总 aspects；插件端新增方面列/方面筛选/方面洞察卡/CSV aspects 列/AI 解读 digest aspects"
+      "tag": "v0.9.56",
+      "localChanges": "0.9.56：按 9 篇论文的 8 项改动——16 键词典特征向量（features）/ 规则·模型·LLM 三路融合 fusion.mjs / 内部 emotion 字段 / 反问阴阳话语规则包 / 方面 12 类 + overall 兜底 / 400 条分层留出评估协议（去 spam·去重·neg 过采样）/ 负类提权 / README；服务端 analyze.mjs + fusion.mjs 同步 0.9.56；规则-only 留出集 acc 0.68 / macroF1 0.59"
     },
     {
       "name": "dsh-comment-viewer",

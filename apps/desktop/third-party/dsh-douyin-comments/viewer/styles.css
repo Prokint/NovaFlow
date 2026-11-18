@@ -1180,4 +1180,9 @@ td .txt .hl { background: var(--accent-dim); color: var(--accent); }
 .aspect-list .sw-dot.aspect-effect { background: #d8876f; }
 .aspect-list .sw-dot.aspect-look { background: #d8a0b8; }
 .aspect-list .sw-dot.aspect-safety { background: #cf4f4f; }
+.aspect-list .sw-dot.aspect-story { background: #e8894a; }
+.aspect-list .sw-dot.aspect-visual { background: #4a9fe8; }
+.aspect-list .sw-dot.aspect-music { background: #a97fe0; }
+.aspect-list .sw-dot.aspect-food { background: #d9b74a; }
+.aspect-list .sw-dot.aspect-overall { background: #94a3b8; }
 @media (max-width: 620px) { .cell-aspect { min-width: 0; display: inline-flex; gap: 5px; flex-wrap: wrap; } }

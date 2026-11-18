@@ -1,7 +1,15 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.55；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.56；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.56 变更（2026-11-18）：按 9 篇论文做 8 项改动（评估规范化优先）**
+
+- 服务端 `novaflow-collect/analyze.mjs` 升到 `ANALYZE_VERSION = '0.9.56'`，新增 `features`（16 键词典特征向量，bert_lexicon 的「词典特征早融合」思路）、`emotion`（内部情绪字段，anger/disgust 可作负向 hint，不对外作品类）、discourse 反问/阴阳规则包（`SENT_DISCOURSE_NEG_RE` 5 组 + 白名单）、方面 12 类（新增剧情/画面/音乐/口味）+ `overall` 兜底（覆盖 100%）、`A不A` 疑问子句强制中性。
+- 新增 `novaflow-collect/fusion.mjs`（`fuseSentiment`）：规则 / 模型 / LLM 三路融合，默认 conservative 模式，保留「模型仅在规则判中性且置信≥阈值才采纳」；阈值均可用 env 调（`SENT_MODEL_T` / `SENT_LLM_T` / `SENT_NEG_THRESHOLD` / `SENT_NEG_PROB_MIN` / `SENT_RULE_STRONG` / `SENT_EMOTION_NEG` / `SENT_FUSION_WEIGHTS` / `SENT_FUSION_MODE`）。当前未接模型/LLM，`source` 恒为 `rule`。
+- 评估协议（`_probe/sentiment_bench/`）：`metrics.mjs`（混淆矩阵 / 每类 P·R·F1 / macro-F1 / 极性准确率 / Krippendorff α / 5 折）、`sample_400.mjs`（去 spam/纯表情/完全重复/3-gram Jaccard≥0.9 近似重复后 7146→1110 条唯一，分层抽 400 条并 neg 过采样）、`eval_0956.mjs`、`eval_holdout_400.mjs`、`coverage_0956.mjs`。
+- **实测（400 条留出、单标注人）**：v0.9.55 acc 0.68 / macroF1 0.59 / 极性 0.53 → v0.9.56 acc 0.68 / macroF1 0.59 / 极性 0.54；旧 95 条 in-sample 0.92/0.90/0.94 属小样本调参乐观值，不作为对外指标。方面具体覆盖率 4%（原始）/9%（去重），整体兜底 96%/91%。
+- 客户端：方面筛选与标签扩到 13 项（含「整体」），样式补 story/visual/music/food/overall 五色；`novaflow-collect/test/analyze.mjs` 断言版本 0.9.56 并新增 features/emotion/方面/source 检查（16 passed）。
 
 **0.9.55 变更（2026-11-18）：评论「方面级」情感（ABSA-lite）**
 

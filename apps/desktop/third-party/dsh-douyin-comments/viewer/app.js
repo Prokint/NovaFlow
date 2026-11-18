@@ -818,8 +818,8 @@
   const ANALYZE_BATCH = 200;
 
   // v0.9.55：方面级情感（云端 analyze 返回 aspects，插件只做展示/筛选/导出）
-  const ASPECT_LABEL = { service: '客服', logistics: '物流', price: '价格', quality: '质量', content: '内容', effect: '效果', look: '外观', safety: '安全' };
-  const ASPECT_ORDER = ['service', 'logistics', 'price', 'quality', 'content', 'effect', 'look', 'safety'];
+  const ASPECT_LABEL = { service: '客服', logistics: '物流', price: '价格', quality: '质量', content: '内容', story: '剧情', visual: '画面', music: '音乐', effect: '效果', look: '外观', safety: '安全', food: '口味', overall: '整体' };
+  const ASPECT_ORDER = ['service', 'logistics', 'price', 'quality', 'content', 'story', 'visual', 'music', 'effect', 'look', 'safety', 'food', 'overall'];
 
   function aspectTextOf(c) {
     const list = Array.isArray(c.aspects) ? c.aspects : [];

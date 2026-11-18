@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.2.27
+
+- 升级内置插件 dsh-douyin-comments 到 0.9.56：8 项论文驱动的改动——16 键词典特征向量、规则/模型/LLM 三路融合 `fusion.mjs`、内部 `emotion`、反问/阴阳话语规则、方面级 12 类 + `overall`、400 条留出评估协议、负类提权。
+- 服务端 `novaflow-collect` 同步 0.9.56（`analyze.mjs` + `fusion.mjs`，测试 16/16）；规则-only 留出集 acc 0.68 / macroF1 0.59（极性 0.53→0.54），95 条 in-sample 0.92 标注为乐观值不作对外指标。
+
 ## 0.2.26
 
 - **dsh-douyin-comments 0.9.55：评论「方面级」情感（ABSA-lite，云端）**
