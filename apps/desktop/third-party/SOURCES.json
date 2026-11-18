@@ -4,14 +4,14 @@
   "packages": [
     {
       "name": "dsh-douyin-comments",
-      "version": "0.9.54",
+      "version": "0.9.55",
       "upstreamPath": "dsh-douyin-comments",
       "declaredLicense": null,
       "branch": "feat/entitlement-v31",
-      "commit": "acc6050bee55fc817717fce75e828d128acd4f0a",
+      "commit": "cb02db487ac68c596c11b934ec89b382cd0d3d2b",
       "optional": true,
-      "tag": "v0.9.54",
-      "localChanges": "0.9.54：服务端情感规则 v2（表情按名称子串归类、负面短语扩充、反问/连续结构线索），95 条金标 accuracy 81.05%→92.63%、macro-F1 0.573→0.913、负面召回 0/12→12/12、极性 51.6%→93.5%；客户端无改动"
+      "tag": "v0.9.55",
+      "localChanges": "0.9.55：云端方面级情感（ABSA-lite）——8 类方面（客服/物流/价格/质量/内容/效果/外观/安全）+ 7 类隐式线索，按子句打分后汇总 aspects；插件端新增方面列/方面筛选/方面洞察卡/CSV aspects 列/AI 解读 digest aspects"
     },
     {
       "name": "dsh-comment-viewer",

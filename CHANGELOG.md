@@ -1,5 +1,14 @@
 # 更新日志
 
+## 0.2.26
+
+- **dsh-douyin-comments 0.9.55：评论「方面级」情感（ABSA-lite，云端）**
+  - 服务端 `novaflow-collect/analyze.mjs` 新增 `aspectsOf(text)`：8 类方面（客服售后 / 物流发货 / 价格优惠 / 质量做工 / 内容剧情 / 效果功能 / 外观颜值 / 安全风险）+ 7 类隐式线索
+  - 每句按子句识别方面并复用情感规则打分，返回 `aspects: [{category,label,polarity,score,evidence}]`，随 `POST /v1/analyze` 下发
+  - 插件端（客户端只渲染）：评论表「方面」列、「方面」筛选、「评论方面」洞察卡、CSV `aspects` 列、AI 解读 digest 带 aspects / negativeAspects
+  - 现有 7146 条导出命中方面 3.6%（娱乐视频评论很少提具体方面，电商/售后场景更高）；有价值的负向：质量 15、安全 12、内容 12、客服 5
+  - 依据 2022 IEEE TKDE ABSA 综述（方面类别 + 极性分开评估）
+
 ## 0.2.25
 
 - **dsh-douyin-comments 0.9.54：云端情感规则 v2（论文校准）**

@@ -1165,3 +1165,19 @@ td .txt .hl { background: var(--accent-dim); color: var(--accent); }
 @media (max-width: 620px) {
   .cell-intent { display: inline-flex; align-items: baseline; gap: 5px; }
 }
+
+/* v0.9.55：方面级情感标签 */
+.abadge { display: inline-block; padding: 1px 6px; margin: 1px 3px 1px 0; border-radius: 4px; font-size: 11.5px; line-height: 1.5; border: 1px solid rgba(0,0,0,.08); }
+.abadge.pos { color: var(--pos); background: rgba(64,160,110,.10); }
+.abadge.neg { color: var(--neg); background: rgba(207,79,79,.10); }
+.abadge.neu { color: var(--muted); background: rgba(0,0,0,.04); }
+.cell-aspect { min-width: 140px; }
+.aspect-list .sw-dot.aspect-service { background: #6f9fd8; }
+.aspect-list .sw-dot.aspect-logistics { background: #7fb3a0; }
+.aspect-list .sw-dot.aspect-price { background: #e0a94a; }
+.aspect-list .sw-dot.aspect-quality { background: #b07fd8; }
+.aspect-list .sw-dot.aspect-content { background: #8aa0b8; }
+.aspect-list .sw-dot.aspect-effect { background: #d8876f; }
+.aspect-list .sw-dot.aspect-look { background: #d8a0b8; }
+.aspect-list .sw-dot.aspect-safety { background: #cf4f4f; }
+@media (max-width: 620px) { .cell-aspect { min-width: 0; display: inline-flex; gap: 5px; flex-wrap: wrap; } }

@@ -1,7 +1,16 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.53；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.55；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+
+**0.9.55 变更（2026-11-18）：评论「方面级」情感（ABSA-lite）**
+
+- 依据 2022 IEEE TKDE《A Survey on Aspect-Based Sentiment Analysis》：一条评论常同时包含多个方面，整句只给一个极性会丢信息（例如「客服态度差 + 多少钱一台」）。
+- 云端 `novaflow-collect/analyze.mjs` 新增 `aspectsOf(text)`：按标点拆子句 → 识别 8 类方面（客服售后 / 物流发货 / 价格优惠 / 质量做工 / 内容剧情 / 效果功能 / 外观颜值 / 安全风险）→ 7 类隐式线索（不理人 / 迟迟不 / 一毛钱 / 刚用就 …）→ 每方面复用同一套情感规则打分 → 汇总 `aspects: [{category,label,polarity,score,clauses,implicit,evidence}]`，随 `POST /v1/analyze` 返回。
+- 子句级也会命中「态度差 / 避雷 / 翻车」等强负向短语；方面词 + 泛化形容词（物流太慢、价格很划算）有正负兜底。
+- 插件端只做渲染：评论表新增「方面」列、洞察面板新增「评论方面」卡、顶部新增「方面」筛选、CSV 导出新增 `aspects` 列；AI 解读 digest 新增 `aspects` 与 `negativeAspects`。
+- 现有导出 7146 条（娱乐+产品混合）命中方面 3.6%：娱乐视频评论很少提具体方面，电商/售后场景会高；其中有价值的负向：质量 15、安全 12、内容 12、客服 5。
+- 自检新增 `cloud-aspects-core` / `cloud-aspects-ui` / `cloud-aspects-readme`。
 
 **0.9.54 变更（2026-11-18）：服务端情感规则 v2（按论文启示校准）**
 

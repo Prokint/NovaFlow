@@ -171,4 +171,4 @@ export async function explainFetch({ digest, signal } = {}) {
   }
 }
 
-export const PLUGIN_VERSION = '0.9.54';
+export const PLUGIN_VERSION = '0.9.55';

@@ -121,7 +121,7 @@
     comments: [],              // 全部评论（已归一化、已去重）
     videos: new Map(),         // videoId -> { id, title, url, collectedAt }
     sources: [],               // 已载入文件名
-    filters: { videoId: '', search: '', onlyHasProfile: false, onlyTopLevel: false, onlyNonEmpty: false, onlyContent: true, sentiment: '', intent: '', topic: '', region: '', favoritesOnly: false },
+    filters: { videoId: '', search: '', onlyHasProfile: false, onlyTopLevel: false, onlyNonEmpty: false, onlyContent: true, sentiment: '', intent: '', aspect: '', topic: '', region: '', favoritesOnly: false },
     favorites: new Map(),      // v0.7.0：已收藏目标客户 uid -> { uid, nickname, region, savedAt, … }
     favReady: false,
     topics: [],                // v3.0：主题聚类结果（TF-IDF + k-means）
@@ -649,6 +649,7 @@
       if (f.sentiment && ((c.sentiment && c.sentiment.label) || 'neu') !== f.sentiment) return false;
       // v0.9.52：意图筛选（购买意向 / 售前咨询 / 售后 / 体验分享）
       if (f.intent && (c.intent || 'none') !== f.intent) return false;
+      if (f.aspect && !(Array.isArray(c.aspects) && c.aspects.some((a) => a && a.category === f.aspect))) return false;
       if (f.topic !== '' && f.topic != null && String(c.topic == null ? -1 : c.topic) !== String(f.topic)) return false;
       // v0.7.0：属地筛选 + 只看已收藏客户
       if (f.region) { const r = c.ip || '未知属地'; if (r !== f.region) return false; }
@@ -815,6 +816,52 @@
   const INTENT_ORDER = ['buy', 'ask', 'warn', 'aftersale', 'share', 'noise'];
 
   const ANALYZE_BATCH = 200;
+
+  // v0.9.55：方面级情感（云端 analyze 返回 aspects，插件只做展示/筛选/导出）
+  const ASPECT_LABEL = { service: '客服', logistics: '物流', price: '价格', quality: '质量', content: '内容', effect: '效果', look: '外观', safety: '安全' };
+  const ASPECT_ORDER = ['service', 'logistics', 'price', 'quality', 'content', 'effect', 'look', 'safety'];
+
+  function aspectTextOf(c) {
+    const list = Array.isArray(c.aspects) ? c.aspects : [];
+    if (!list.length) return '';
+    const POL = { pos: '正', neg: '负', neu: '中' };
+    return list.map((a) => (ASPECT_LABEL[a.category] || a.category) + ':' + (POL[a.polarity] || '中')).join(' / ');
+  }
+
+  function aspectBadges(c) {
+    const list = Array.isArray(c.aspects) ? c.aspects : [];
+    if (!list.length) return '<span class="muted">—</span>';
+    return list.slice(0, 3).map((a) => {
+      const cat = ASPECT_LABEL[a.category] || a.category;
+      const pol = a.polarity || 'neu';
+      const tip = (a.evidence && a.evidence.length ? a.evidence.join('；') : cat) + '（云端方面级判断）';
+      return '<span class="abadge ' + (a.polarity || 'neu') + '" title="' + esc(tip) + '">' + esc(cat) + '·' + ({ pos: '正', neg: '负', neu: '中' }[pol] || '中') + '</span>';
+    }).join(' ');
+  }
+
+  function aspectStats(list) {
+    const out = { service: { pos: 0, neu: 0, neg: 0 }, logistics: { pos: 0, neu: 0, neg: 0 }, price: { pos: 0, neu: 0, neg: 0 }, quality: { pos: 0, neu: 0, neg: 0 }, content: { pos: 0, neu: 0, neg: 0 }, effect: { pos: 0, neu: 0, neg: 0 }, look: { pos: 0, neu: 0, neg: 0 }, safety: { pos: 0, neu: 0, neg: 0 } };
+    let hits = 0;
+    for (const c of list) {
+      for (const a of (Array.isArray(c.aspects) ? c.aspects : [])) {
+        if (!a || !a.category || !out[a.category]) continue;
+        out[a.category][a.polarity || 'neu'] = (out[a.category][a.polarity || 'neu'] || 0) + 1;
+        hits++;
+      }
+    }
+    return { byCategory: out, hits, total: list.length };
+  }
+
+  function aspectNegativeSamples(list, limit) {
+    const rows = [];
+    for (const c of list) {
+      const negs = (Array.isArray(c.aspects) ? c.aspects : []).filter((a) => a && a.polarity === 'neg');
+      if (!negs.length) continue;
+      rows.push({ text: aiClip(c.text || '', 80), aspects: negs.map((a) => ASPECT_LABEL[a.category] || a.category).slice(0, 3) });
+    }
+    return rows.slice(0, limit || 6);
+  }
+
   const cloudAnalyze = { loading: false, done: 0, total: 0, error: '', version: '', generation: 0 };
   let cloudAnalyzeTimer = null;
 
@@ -865,6 +912,7 @@
       }
       if (!c.intents || !Array.isArray(c.intents)) c.intents = [];
       if (!c.intent) c.intent = 'none';
+      if (!c.aspects || !Array.isArray(c.aspects)) c.aspects = [];
     }
   }
 
@@ -880,6 +928,7 @@
       const labels = Array.isArray(r.intents) ? r.intents.slice() : (r.intent && r.intent !== 'none' ? [r.intent] : []);
       c.intents = labels;
       c.intent = r.intent && r.intent !== 'none' ? r.intent : (labels[0] || 'none');
+      c.aspects = Array.isArray(r.aspects) ? r.aspects : [];
       changed++;
     }
     return changed;
@@ -1271,7 +1320,13 @@ function aiClip(s, n) {
   return t.length > n ? t.slice(0, n) + '…' : t;
 }
 
-function buildDigest(list) {
+  function aspStatsSnapshot(list) {
+    const s = aspectStats(list);
+    return ASPECT_ORDER.filter((k) => s.byCategory[k].pos + s.byCategory[k].neu + s.byCategory[k].neg > 0)
+      .map((k) => ({ aspect: ASPECT_LABEL[k], pos: s.byCategory[k].pos, neu: s.byCategory[k].neu, neg: s.byCategory[k].neg }));
+  }
+
+  function buildDigest(list) {
   const rows = Array.isArray(list) ? list : filtered();
   const byDay = new Map();
   const skuCount = new Map();
@@ -1332,6 +1387,8 @@ function buildDigest(list) {
     sentiment: st,
     intents: it,
     buyIntents: buyIntents,
+    aspects: aspStatsSnapshot(rows),
+    negativeAspects: aspectNegativeSamples(rows, 6),
     health: health ? { score: health.score, grade: health.grade, risk: Math.round(health.risk * 100) } : null,
     keywords: buildWords(rows).slice(0, 30).map((w) => ({ w: w.word, n: w.count })),
     topics: (state.topics || []).slice(0, 6).map((t) => ({
@@ -1349,6 +1406,7 @@ function buildDigest(list) {
       if (!skuCount.size) out.push('skus 为空：抖音评论没有 SKU 字段，属正常');
       if (!(state.topics || []).length) out.push('topics 为空：本次样本未生成主题聚类，请用 keywords 与 negatives 分析');
       out.push('intents：评论意图是本地规则（购买意向/售前咨询/售后/体验分享/广告无效）判出来的，只用于筛选与线索，不是平台字段；intents.buy 高的样本可作为获客线索');
+      out.push('aspects：方面级情感是云端规则按「客服/物流/价格/质量/内容/效果/外观/安全」分别判的（同一条评论可挂多个方面），negativeAspects 是带负向方面的样本');
       return out;
     })(),
     trend: Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-30),
@@ -1576,6 +1634,7 @@ function bindAiEvents() {
     const st = sentimentStats(list);
     // v0.9.52：意图分布（只影响展示/筛选/导出，不改情感）
     const it = intentStats(list);
+    const asp = aspectStats(list);
     const intentPct = (n) => (total ? Math.round((n / total) * 100) : 0);
     const intentHtml = total
       ? `<div class="sent-list intent-list">
@@ -1586,6 +1645,12 @@ function bindAiEvents() {
            <span><i class="sw-dot noise"></i>广告/无效 ${fmtNum(it.noise)} · ${intentPct(it.noise)}%</span>
          </div>`
       : '<p class="meta">暂无数据</p>';
+    const aspRows = ASPECT_ORDER.map((k) => ({ k, c: asp.byCategory[k] || { pos: 0, neu: 0, neg: 0 } }))
+      .filter((r) => r.c.pos + r.c.neu + r.c.neg > 0)
+      .sort((a, b) => (b.c.pos + b.c.neu + b.c.neg) - (a.c.pos + a.c.neu + a.c.neg));
+    const aspHtml = aspRows.length
+      ? '<div class="sent-list aspect-list">' + aspRows.map((r) => '<span><i class="sw-dot aspect-' + r.k + '"></i>' + ASPECT_LABEL[r.k] + ' ' + fmtNum(r.c.pos + r.c.neu + r.c.neg) + ' 条（正 ' + r.c.pos + ' / 中 ' + r.c.neu + ' / 负 ' + r.c.neg + '）</span>').join('') + '</div>'
+      : '<p class="meta">暂无方面数据（云端分析完成后显示）</p>';
     const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
     const seg = (cls, n) => (total && n ? `<i class="sent-seg ${cls}" style="width:${(n / total) * 100}%"></i>` : '');
     // v0.9.19：不再按「负向」筛（词典打分对高赞玩梗评论仍有误判），改成本次评论里按点赞最高的 Top3「评价」。
@@ -1625,6 +1690,7 @@ function bindAiEvents() {
 
     box.innerHTML = renderHealth(list) + dashboardCard('情感分布', `${fmtNum(total)} 条评论`, sentHtml)
       + dashboardCard('评论意图', '按评论文字规则判断 · 点顶部筛选可只看购买意向', intentHtml, 'intent-card')
+      + dashboardCard('评论方面', '云端方面级判断（每条评论可挂多个方面）', aspHtml, 'aspect-card')
       + dashboardCard('评论趋势', '按天 · 最近 30 天', svgTrend(list))
       + dashboardCard('地域分布', 'Top 8 省份/地区', regHtml)
       + dashboardCard('主题聚类', `${topics.length} 个主题 · TF-IDF + k-means`, topicHtml, 'topic-card');
@@ -2278,6 +2344,7 @@ function bindAiEvents() {
         <td class="muted small" data-label="层级">${c.isReply ? '二级' : '一级'}</td>
         <td class="cell-sent" data-label="情感">${sentBadge(c)}</td>
         <td class="cell-intent" data-label="意图">${intentBadge(c)}</td>
+        <td class="cell-aspect" data-label="方面">${aspectBadges(c)}</td>
         <td class="cell-star" data-label="收藏">${starBtn}</td>
       </tr>`;
     }).join('');
@@ -2314,7 +2381,7 @@ function bindAiEvents() {
     ['user_nickname', '用户昵称'], ['user_unique_id', '抖音号'], ['user_sec_uid', 'sec_uid(主页链接用)'],
     ['digg_count', '点赞数'], ['reply_comment_total', '回复数'], ['ip_label', '属地'],
     ['create_time_str', '发布时间'], ['level', '层级(1一级/2二级)'],
-    ['sentiment', '情感(正向/中性/负向)'], ['intent', '意图(购买意向/售前咨询/售后/体验分享)'], ['topic', '主题'],
+    ['sentiment', '情感(正向/中性/负向)'], ['intent', '意图(购买意向/售前咨询/售后/体验分享)'], ['aspects', '方面(客服/物流/价格/质量/内容/效果/外观/安全:正负中)'], ['topic', '主题'],
   ];
 
   function topicLabelOf(c) {
@@ -2353,6 +2420,7 @@ function bindAiEvents() {
         csvCell(c.isReply ? 2 : 1),
         csvCell(SENT_LABEL[(c.sentiment && c.sentiment.label) || 'neu']),
         csvCell(INTENT_LABEL[c.intent || 'none'] || ''),
+        csvCell(aspectTextOf(c)),
         csvCell(topicLabelOf(c)),
       ].join(','));
     }
@@ -2503,7 +2571,9 @@ function bindAiEvents() {
     });
     const sentSel = $('#sentFilter');
     if (sentSel) sentSel.addEventListener('change', (e) => { state.filters.sentiment = e.target.value; refreshAll(); });
-    const intentSel = $('#intentFilter');
+    const aspectSel = $('#aspectFilter');
+  if (aspectSel) aspectSel.addEventListener('change', (e) => { state.filters.aspect = e.target.value; state.page = 1; refreshAll(); });
+  const intentSel = $('#intentFilter');
     if (intentSel) intentSel.addEventListener('change', (e) => { state.filters.intent = e.target.value; state.page = 1; refreshAll(); });
     const topicSel = $('#topicFilter');
     if (topicSel) topicSel.addEventListener('change', (e) => { state.filters.topic = e.target.value; state.page = 1; refreshAll(); });
@@ -3361,6 +3431,9 @@ let favRegion = '';
     baseFiltered,
     SENT_LABEL,
     INTENT_LABEL,
+    ASPECT_LABEL,
+    aspectTextOf,
+    aspectStats,
     intentStats,
     exportFilteredCsv,
     exportFilteredJson,

@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>评论分析台 · 词云 + 评论表 + 地域客户</title>
-<link rel="stylesheet" href="styles.css?v=0.9.54">
+<link rel="stylesheet" href="styles.css?v=0.9.55">
 </head>
 <body class="is-empty">
 <header class="topbar">
@@ -96,6 +96,20 @@
           <option value="pos">只看正向</option>
           <option value="neu">只看中性</option>
           <option value="neg">只看负向</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>方面</span>
+        <select id="aspectFilter" class="select">
+          <option value="">全部方面</option>
+          <option value="service">客服/售后</option>
+          <option value="logistics">物流/发货</option>
+          <option value="price">价格/优惠</option>
+          <option value="quality">质量/做工</option>
+          <option value="content">内容/剧情</option>
+          <option value="effect">效果/功能</option>
+          <option value="look">外观/颜值</option>
+          <option value="safety">安全/风险</option>
         </select>
       </label>
       <label class="field">
@@ -200,6 +214,7 @@
           <th class="col-level">层级</th>
           <th class="col-sent">情感</th>
           <th class="col-intent">意图</th>
+          <th class="col-aspect">方面</th>
           <th class="col-star">收藏</th>
         </tr>
       </thead>
@@ -253,6 +268,6 @@
   </div>
 </div>
 
-<script src="app.js?v=0.9.54"></script>
+<script src="app.js?v=0.9.55"></script>
 </body>
 </html>
