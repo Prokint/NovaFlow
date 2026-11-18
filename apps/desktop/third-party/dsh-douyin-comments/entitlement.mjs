@@ -138,14 +138,18 @@ export function flushKeyCache() { cachedMaterial = null; }
 export function peekKeyCache() { return cachedMaterial; }
 
 /**
- * v0.9.54：评论分析（情感 + 多标签意图）。
- * 逻辑与词典/模型全部在服务端（collect.lanjiaotrade.com /v1/analyze），
- * 客户端只把评论文本送上去、拿回标签；服务端要求订阅有效。
+ * v0.9.57：评论分析（情感 + 多标签意图 + 可选语境/LLM 复核）。
+ * 逻辑与词典/模型/提示词全部在服务端（collect.lanjiaotrade.com /v1/analyze），
+ * 客户端只把评论文本（和视频标题/话题）送上去、拿回标签；服务端要求订阅有效。
+ * contexts: 与 texts 一一对应的 {title, hashtags} 语境；review: 让服务端对低置信中性条目做 LLM 复核。
  */
-export async function analyze({ texts, mode = 'sentiment+intent' } = {}) {
+export async function analyze({ texts, mode = 'sentiment+intent', contexts, review = false } = {}) {
   const list = Array.isArray(texts) ? texts : [];
   if (!list.length) return { ok: true, mode, results: [] };
-  return call('POST', '/v1/analyze', { texts: list, mode });
+  const body = { texts: list, mode };
+  if (Array.isArray(contexts) && contexts.length) body.contexts = contexts;
+  if (review === true) body.review = true;
+  return call('POST', '/v1/analyze', body);
 }
 
 /**
@@ -171,4 +175,4 @@ export async function explainFetch({ digest, signal } = {}) {
   }
 }
 
-export const PLUGIN_VERSION = '0.9.56';
+export const PLUGIN_VERSION = '0.9.57';

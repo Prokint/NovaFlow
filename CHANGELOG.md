@@ -1,5 +1,9 @@
 # 更新日志
 
+## 0.2.28
+
+- 升级内置插件 dsh-douyin-comments 到 0.9.57：接入视频语境与 LLM 复核。评论分析请求可带 `contexts`（视频标题 / hashtag），服务端回传 `genre`（9 类题材）并把命中题材词的 hashtag 补成「中性方面」；低置信中性条目（规则判中性且 |score|<0.35、或带反问/表情/极短）可交服务端 LLM 复核（上限 60 条/批），模型标签以 `source=llm` 合并。
+- 服务端 `novaflow-collect` 新增 `llm-review.mjs` 与 `test/llm-review.mjs`（13 项通过），`test/analyze.mjs` 20 项通过；未配置 `LLM_BASE/LLM_KEY` 时复核静默跳过。规则-only 在 400 条留出集仍是 acc 0.68 / macroF1 0.59（语境不改变规则标签），真实增益需配置 LLM 后用同批数据复测。
 ## 0.2.27
 
 - 升级内置插件 dsh-douyin-comments 到 0.9.56：8 项论文驱动的改动——16 键词典特征向量、规则/模型/LLM 三路融合 `fusion.mjs`、内部 `emotion`、反问/阴阳话语规则、方面级 12 类 + `overall`、400 条留出评估协议、负类提权。

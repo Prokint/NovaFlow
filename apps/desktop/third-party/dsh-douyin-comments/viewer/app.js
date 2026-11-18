@@ -951,7 +951,15 @@
         const res = await fetch('api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ texts: chunk.map((c) => String(c.text || '').slice(0, 300)), mode: 'sentiment+intent' }),
+          body: JSON.stringify({
+            texts: chunk.map((c) => String(c.text || '').slice(0, 300)),
+            contexts: chunk.map((c) => {
+              const v = state.videos.get(c.videoId) || {};
+              return { title: String(c.videoTitle || v.title || '').slice(0, 80), hashtags: Array.isArray(c.hashtags) ? c.hashtags.slice(0, 6) : [] };
+            }),
+            mode: 'sentiment+intent',
+            review: true,
+          }),
         });
         let data = {};
         try { data = await res.json(); } catch (e) { data = {}; }

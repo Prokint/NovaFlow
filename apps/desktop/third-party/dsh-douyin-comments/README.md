@@ -1,8 +1,15 @@
 # dsh-douyin-comments
 
 DeepSeek Harness（Cordis）工具插件：**采集抖音视频的公开评论**，注册一个工具 `douyin_comments`；并内置**评论词云分析台**（交互词云 + 评论表 + AI 解读，原 `dsh-comment-viewer` 插件已合并进来），采集完成后在**同一个面板**里自动切到词云。
-（插件版本 0.9.56；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
+（插件版本 0.9.57；**v0.5.15 起插件 / 内置扩展「抖音评论采集器」/ MCP `douyin-collector-mcp` 三件套统一编号**，同为 `0.5.65`。）
 
+**0.9.57 变更（2026-11-18）：接入视频语境与 LLM 复核（准确率包第一批）**
+
+- **视频语境**：`/v1/analyze` 新增可选 `contexts`（与 `texts` 一一对应，含视频标题与 hashtag）。服务端 `analyze.mjs` 新增 `genreOf()`（9 类题材：娱乐整活/音乐舞蹈/美食/美妆穿搭/数码科技/知识科普/带货电商/萌宠/游戏）与 `contextOf()`，结果里回传 `context.genre/hashtags`；hashtag 命中题材词时补一个 `source='context'` 的中性方面（只补维度，不参与情感投票）。
+- **LLM 复核**：新增 `llm-review.mjs`。只对「规则判中性且 |score|<0.35、或带反问/表情/极短」的可疑条目调用模型（单次上限 60 条、20 条一组），模型输出 `label/score` 合并进结果并把 `sentiment.source` 记为 `llm`。未配置 `LLM_BASE/LLM_KEY` 时静默跳过，不影响主流程。
+- **接口**：`POST /v1/analyze` 支持 `contexts`、`review: true`；返回新增可选 `review{version,reviewed,chunks,failed}`。插件侧 `entitlement.analyze()`、`viewer.mjs /api/analyze` 一并透传；评论页按视频标题自动带上语境并请求复核。
+- **说明**：规则-only 在 400 条留出集上仍是 68%/0.59（语境不改变规则标签）；语境与 LLM 的真实增益要在服务端配置 LLM 后，用同一批 400 条复测才能确认，测算脚本见 `_probe/sentiment_bench/eval_holdout_400.mjs`。
+- **自检**：`test/llm-review.mjs`（13 项：复核生效/未配置跳过/needsLlm 判定）、`test/analyze.mjs` 新增语境与 needsLlm 断言（19 项）。
 **0.9.56 变更（2026-11-18）：按 9 篇论文做 8 项改动（评估规范化优先）**
 
 - 服务端 `novaflow-collect/analyze.mjs` 升到 `ANALYZE_VERSION = '0.9.56'`，新增 `features`（16 键词典特征向量，bert_lexicon 的「词典特征早融合」思路）、`emotion`（内部情绪字段，anger/disgust 可作负向 hint，不对外作品类）、discourse 反问/阴阳规则包（`SENT_DISCOURSE_NEG_RE` 5 组 + 白名单）、方面 12 类（新增剧情/画面/音乐/口味）+ `overall` 兜底（覆盖 100%）、`A不A` 疑问子句强制中性。

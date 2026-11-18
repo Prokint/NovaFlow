@@ -535,13 +535,17 @@ async function handleAnalyze(req, res) {
       return;
     }
     const mode = String((body && body.mode) || "sentiment+intent");
+    const contexts = Array.isArray(body && body.contexts) ? body.contexts : [];
+    const review = (body && body.review) === true;
     try {
-      const result = await analyze({ texts, mode });
+      // v0.9.57：语境（视频标题/话题）+ 可选 LLM 复核 → 服务端
+      const result = await analyze({ texts, mode, contexts, review });
       sendJson(res, 200, {
         ok: true,
         version: result.version || "",
         mode: result.mode || mode,
         results: Array.isArray(result.results) ? result.results : [],
+        ...(result.review ? { review: result.review } : {}),
       });
     } catch (err) {
       const code = String((err && (err.code || err.name)) || "");
